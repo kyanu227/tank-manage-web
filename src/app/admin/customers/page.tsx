@@ -104,7 +104,7 @@ export default function CustomerManagementPage() {
         <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
           <div className="flex items-center gap-3">
             <button 
-              onClick={() => router.push('/admin-portal-x8f2q')}
+              onClick={() => router.push('/admin')}
               className="w-10 h-10 flex items-center justify-center text-slate-500 hover:bg-slate-100 rounded-full transition-colors shrink-0"
             >
               <ArrowLeft size={20} />

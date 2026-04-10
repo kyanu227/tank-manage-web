@@ -3,11 +3,11 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Users, Building2, Package, Plus, Save, RefreshCw, Trash2,
-  ToggleLeft, ToggleRight, Eye, EyeOff, ChevronDown,
+  ToggleLeft, ToggleRight, Eye, EyeOff, ChevronDown, Clock,
 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import {
-  collection, getDocs, doc, setDoc, deleteDoc,
+  collection, getDocs, doc, setDoc, getDoc, deleteDoc,
   serverTimestamp, writeBatch,
 } from "firebase/firestore";
 
@@ -41,12 +41,25 @@ interface OrderItem {
   price: number;
 }
 
-type TabId = "staff" | "dest" | "order";
+interface Customer {
+  id: string; // matches auth UID
+  email: string;
+  passcode: string;
+  role: string;
+  setupCompleted: boolean;
+  companyName?: string;
+  lineName?: string;
+  linkedLocation?: string; // Links to a destination ID
+}
+
+type TabId = "staff" | "dest" | "customer" | "order" | "portal";
 
 const TABS: { id: TabId; label: string; icon: any }[] = [
-  { id: "staff", label: "担当者", icon: Users },
-  { id: "dest", label: "貸出先", icon: Building2 },
-  { id: "order", label: "発注品目", icon: Package },
+  { id: "staff",   label: "担当者",       icon: Users },
+  { id: "dest",    label: "貸出先",       icon: Building2 },
+  { id: "customer",label: "ポータル利用者", icon: Users },
+  { id: "order",   label: "発注品目",     icon: Package },
+  { id: "portal",  label: "ポータル設定", icon: Clock },
 ];
 
 const ROLES = ["一般", "準管理者", "管理者"] as const;
@@ -94,8 +107,16 @@ export default function SettingsPage() {
   // Destinations
   const [destList, setDestList] = useState<Destination[]>([]);
 
+  // Customers (Portal Users)
+  const [customerList, setCustomerList] = useState<Customer[]>([]);
+
   // Order Master
   const [orderList, setOrderList] = useState<OrderItem[]>([]);
+
+  // Portal settings
+  const [autoReturnHour, setAutoReturnHour] = useState<number>(17);
+  const [autoReturnMinute, setAutoReturnMinute] = useState<number>(0);
+  const [portalSaving, setPortalSaving] = useState(false);
 
   /* ─── Fetch All ─── */
   const fetchAll = useCallback(async () => {
@@ -108,16 +129,30 @@ export default function SettingsPage() {
       setStaffList(staff.length > 0 ? staff : []);
 
       // Destinations
-      const destSnap = await getDocs(collection(db, "customers"));
+      const destSnap = await getDocs(collection(db, "destinations"));
       const dests: Destination[] = [];
       destSnap.forEach((d) => dests.push({ id: d.id, ...d.data() } as Destination));
       setDestList(dests.length > 0 ? dests : []);
+
+      // Customers
+      const custSnap = await getDocs(collection(db, "customers"));
+      const custs: Customer[] = [];
+      custSnap.forEach((c) => custs.push({ id: c.id, ...c.data() } as Customer));
+      setCustomerList(custs.length > 0 ? custs : []);
 
       // Orders
       const orderSnap = await getDocs(collection(db, "orderMaster"));
       const orders: OrderItem[] = [];
       orderSnap.forEach((d) => orders.push({ id: d.id, ...d.data() } as OrderItem));
       setOrderList(orders.length > 0 ? orders : []);
+
+      // Portal settings
+      const portalSnap = await getDoc(doc(db, "settings", "portal"));
+      if (portalSnap.exists()) {
+        const p = portalSnap.data();
+        if (p.autoReturnHour != null) setAutoReturnHour(p.autoReturnHour);
+        if (p.autoReturnMinute != null) setAutoReturnMinute(p.autoReturnMinute);
+      }
     } catch (e) {
       console.error("Fetch error:", e);
     } finally {
@@ -204,12 +239,12 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       const batch = writeBatch(db);
-      const oldSnap = await getDocs(collection(db, "customers"));
+      const oldSnap = await getDocs(collection(db, "destinations"));
       oldSnap.forEach((d) => batch.delete(d.ref));
 
       destList.forEach((d) => {
-        const docId = d.id.startsWith("new_") ? `cust_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` : d.id;
-        const ref = doc(db, "customers", docId);
+        const docId = d.id.startsWith("new_") ? `dest_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` : d.id;
+        const ref = doc(db, "destinations", docId);
         batch.set(ref, {
           name: d.name, formalName: d.formalName,
           price10: Number(d.price10), price12: Number(d.price12),
@@ -263,6 +298,34 @@ export default function SettingsPage() {
       await batch.commit();
       await fetchAll();
       alert("発注品目マスタを保存しました。");
+    } catch (e: any) {
+      alert("保存エラー: " + e.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ─── Customer CRUD ─── */
+  const updateCustomer = (id: string, field: keyof Customer, value: any) => {
+    setCustomerList((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
+  };
+
+  const saveCustomer = async () => {
+    if (!confirm("ポータル利用者リストを保存しますか？")) return;
+    setSaving(true);
+    try {
+      const batch = writeBatch(db);
+      
+      customerList.forEach((c) => {
+        const ref = doc(db, "customers", c.id);
+        batch.update(ref, {
+          linkedLocation: c.linkedLocation || "",
+          updatedAt: serverTimestamp(),
+        });
+      });
+      await batch.commit();
+      await fetchAll();
+      alert("ポータル利用者リストを保存しました。");
     } catch (e: any) {
       alert("保存エラー: " + e.message);
     } finally {
@@ -597,6 +660,101 @@ export default function SettingsPage() {
               </div>
             )}
 
+            {/* ─── Tab: Customers (Portal Users) ─── */}
+            {activeTab === "customer" && (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                  <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
+                    ※ 顧客アカウントと「貸出先」を紐付けることでデータが連動します。
+                  </p>
+                </div>
+
+                <div style={{ overflowX: "auto" }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+                    <thead>
+                      <tr style={{ borderBottom: "2px solid #e8eaed" }}>
+                        {["登録日", "会社名/名前", "Email", "パスコード", "紐付け先 (貸出先)"].map((h) => (
+                          <th key={h} style={{ padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textAlign: "left", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                            {h}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {customerList.length === 0 ? (
+                        <tr>
+                          <td colSpan={5} style={{ padding: 40, textAlign: "center", color: "#cbd5e1", fontSize: 14 }}>
+                            登録されているポータル利用者がいません。
+                          </td>
+                        </tr>
+                      ) : (
+                        customerList.map((c) => (
+                          <tr key={c.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                            <td style={{ padding: "10px 12px", fontSize: 12, color: "#64748b" }}>
+                              {c.setupCompleted ? "設定済" : "未設定"}
+                            </td>
+                            <td style={{ padding: "10px 12px" }}>
+                              <div style={{ fontWeight: 700, color: "#1e293b", fontSize: 13 }}>
+                                {c.companyName || "未入力"}
+                              </div>
+                              <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                                {c.lineName && `LINE: ${c.lineName}`}
+                              </div>
+                            </td>
+                            <td style={{ padding: "10px 12px", fontSize: 12, fontFamily: "monospace", color: c.email ? "#1e293b" : "#94a3b8" }}>
+                              {c.email || "メール未登録"}
+                            </td>
+                            <td style={{ padding: "10px 12px" }}>
+                              <div style={{ display: "flex", gap: 4 }}>
+                                <input
+                                  type={showPasscodes.has(c.id) ? "text" : "password"}
+                                  style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12, width: 80 }}
+                                  value={c.passcode || ""}
+                                  disabled
+                                />
+                                <button
+                                  onClick={() => togglePasscode(c.id)}
+                                  style={{
+                                    border: "1px solid #e2e8f0", borderRadius: 8,
+                                    background: "#fff", padding: "0 8px",
+                                    cursor: "pointer", color: "#94a3b8",
+                                    display: "flex", alignItems: "center",
+                                  }}
+                                >
+                                  {showPasscodes.has(c.id) ? <EyeOff size={14} /> : <Eye size={14} />}
+                                </button>
+                              </div>
+                            </td>
+                            <td style={{ padding: "10px 12px" }}>
+                              <select
+                                style={{ ...selectStyle, paddingRight: 32 }}
+                                value={c.linkedLocation || ""}
+                                onChange={(e) => updateCustomer(c.id, "linkedLocation", e.target.value)}
+                              >
+                                <option value="">-- 未設定 --</option>
+                                {destList.filter(d => d.isActive).map((d) => (
+                                  <option key={d.id} value={d.id}>
+                                    {d.name}
+                                  </option>
+                                ))}
+                              </select>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div style={{ marginTop: 20 }}>
+                  <button onClick={saveCustomer} disabled={saving} style={btnPrimary}>
+                    <Save size={16} />
+                    {saving ? "保存中…" : "ポータル利用者リストを保存"}
+                  </button>
+                </div>
+              </div>
+            )}
+
             {/* ─── Tab: Order Master ─── */}
             {activeTab === "order" && (
               <div>
@@ -719,6 +877,78 @@ export default function SettingsPage() {
                 <button onClick={saveOrder} disabled={saving} style={btnPrimary}>
                   <Save size={16} />
                   {saving ? "保存中…" : "発注品目マスタを保存"}
+                </button>
+              </div>
+            )}
+
+            {/* ── Portal Settings Tab ── */}
+            {activeTab === "portal" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                <div>
+                  <h2 style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>ポータル設定</h2>
+                  <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>顧客ポータルの自動返却時刻などを管理します。</p>
+                </div>
+
+                {/* Auto return time */}
+                <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                    <Clock size={16} color="#6366f1" />
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", margin: 0 }}>自動返却実行時刻</h3>
+                  </div>
+                  <p style={{ fontSize: 12, color: "#64748b", marginBottom: 20 }}>
+                    毎日この時刻以降に顧客がポータルの返却画面を開くと、自動的に返却申請が送信されます。
+                  </p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em" }}>時</label>
+                      <input
+                        type="number"
+                        min={0} max={23}
+                        value={autoReturnHour}
+                        onChange={(e) => setAutoReturnHour(Math.min(23, Math.max(0, Number(e.target.value))))}
+                        style={{ ...inputStyle, width: 80, textAlign: "center", fontSize: 24, fontWeight: 800, fontFamily: "monospace", padding: "10px 8px" }}
+                      />
+                    </div>
+                    <span style={{ fontSize: 28, fontWeight: 900, color: "#334155", paddingTop: 20 }}>:</span>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      <label style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.06em" }}>分</label>
+                      <input
+                        type="number"
+                        min={0} max={59} step={5}
+                        value={autoReturnMinute}
+                        onChange={(e) => setAutoReturnMinute(Math.min(59, Math.max(0, Number(e.target.value))))}
+                        style={{ ...inputStyle, width: 80, textAlign: "center", fontSize: 24, fontWeight: 800, fontFamily: "monospace", padding: "10px 8px" }}
+                      />
+                    </div>
+                    <div style={{ paddingTop: 22, color: "#64748b", fontSize: 14, fontWeight: 600 }}>
+                      現在: {String(autoReturnHour).padStart(2, "0")}:{String(autoReturnMinute).padStart(2, "0")}
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  disabled={portalSaving}
+                  onClick={async () => {
+                    if (!confirm(`自動返却時刻を ${String(autoReturnHour).padStart(2,"0")}:${String(autoReturnMinute).padStart(2,"0")} に設定しますか？`)) return;
+                    setPortalSaving(true);
+                    try {
+                      await setDoc(doc(db, "settings", "portal"), {
+                        autoReturnHour,
+                        autoReturnMinute,
+                        updatedAt: serverTimestamp(),
+                      }, { merge: true });
+                      alert("保存しました");
+                    } catch (e) {
+                      console.error(e);
+                      alert("保存に失敗しました");
+                    } finally {
+                      setPortalSaving(false);
+                    }
+                  }}
+                  style={btnPrimary}
+                >
+                  <Save size={16} />
+                  {portalSaving ? "保存中…" : "ポータル設定を保存"}
                 </button>
               </div>
             )}

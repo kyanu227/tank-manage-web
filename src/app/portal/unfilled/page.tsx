@@ -154,7 +154,7 @@ export default function UnfilledReportPage() {
           ご報告ありがとうございます。内容を受け付けました。
         </p>
         <button
-          onClick={() => router.push("/")}
+          onClick={() => router.push("/portal")}
           style={{
             width: "100%",
             padding: "16px 0",
@@ -193,7 +193,7 @@ export default function UnfilledReportPage() {
         }}
       >
         <button
-          onClick={() => router.push("/")}
+          onClick={() => router.push("/portal")}
           style={{
             width: 40,
             height: 40,

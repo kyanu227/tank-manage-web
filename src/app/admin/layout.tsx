@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -14,10 +14,16 @@ import {
   Menu,
   X,
   ChevronLeft,
+  Shield,
+  LogOut,
+  HardHat,
+  Building2,
+  ExternalLink,
 } from "lucide-react";
-import StaffAuthGuard from "@/components/StaffAuthGuard";
+import AdminAuthGuard from "@/components/AdminAuthGuard";
+import { auth } from "@/lib/firebase/config";
 
-const NAV_ITEMS = [
+const ALL_NAV_ITEMS = [
   { href: "/admin", label: "ダッシュボード", icon: LayoutDashboard },
   { href: "/admin/settings", label: "設定変更", icon: Settings },
   { href: "/admin/notifications", label: "通知設定", icon: Bell },
@@ -25,6 +31,7 @@ const NAV_ITEMS = [
   { href: "/admin/staff-analytics", label: "スタッフ実績", icon: Users },
   { href: "/admin/money", label: "金銭・ランク", icon: Wallet },
   { href: "/admin/billing", label: "請求書発行", icon: FileText },
+  { href: "/admin/permissions", label: "ページ権限", icon: Shield, adminOnly: true },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -32,20 +39,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
   const [staffName, setStaffName] = useState("管理者");
+  const [staffRole, setStaffRole] = useState("");
+  const [allowedPaths, setAllowedPaths] = useState<string[]>([]);
 
-  useEffect(() => {
-    const loadUser = () => {
-      const session = localStorage.getItem("staffSession");
-      if (session) {
-        try {
-          const user = JSON.parse(session);
-          setStaffName(user.name);
-        } catch (e) {}
-      }
-    };
-    loadUser();
-    window.addEventListener("staffLogin", loadUser);
-    return () => window.removeEventListener("staffLogin", loadUser);
+  const handleStaffLoaded = useCallback((staff: { name: string; role: string }) => {
+    setStaffName(staff.name);
+    setStaffRole(staff.role);
+  }, []);
+
+  const handlePermissionsLoaded = useCallback((paths: string[]) => {
+    setAllowedPaths(paths);
   }, []);
 
   const isActive = (href: string) => {
@@ -53,8 +56,32 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return pathname.startsWith(href);
   };
 
+  // Filter nav items based on permissions
+  const visibleNavItems = ALL_NAV_ITEMS.filter((item) => {
+    // adminOnly items only visible to 管理者
+    if ((item as any).adminOnly && staffRole !== "管理者") return false;
+    // 管理者 sees everything
+    if (staffRole === "管理者") return true;
+    // 準管理者 sees only allowed paths
+    return allowedPaths.includes(item.href);
+  });
+
+  const handleLogout = async () => {
+    if (!confirm("ログアウトしますか？")) return;
+    try {
+      await auth.signOut();
+      localStorage.removeItem("staffSession");
+      window.location.href = "/admin";
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   return (
-    <StaffAuthGuard allowedRoles={["管理者", "準管理者"]}>
+    <AdminAuthGuard
+      onStaffLoaded={handleStaffLoaded}
+      onPermissionsLoaded={handlePermissionsLoaded}
+    >
       <div style={{ display: "flex", minHeight: "100dvh", background: "#f8f9fb" }}>
         {/* Sidebar - Desktop */}
       <aside
@@ -94,8 +121,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 letterSpacing: "-0.02em",
               }}
             >
-              タンク管理
-              <span style={{ color: "#6366f1", marginLeft: 4 }}>Admin</span>
+              管理画面
             </span>
           )}
           <button
@@ -128,7 +154,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         {/* Nav */}
         <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {NAV_ITEMS.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const active = isActive(item.href);
               return (
@@ -157,6 +183,59 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             })}
           </div>
         </nav>
+
+        {/* External links */}
+        <div
+          style={{
+            padding: "12px 8px",
+            borderTop: "1px solid #e8eaed",
+            display: "flex",
+            flexDirection: "column",
+            gap: 2,
+          }}
+        >
+          {!collapsed && (
+            <div style={{ padding: "4px 16px 6px", fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              他画面
+            </div>
+          )}
+          <Link
+            href="/staff"
+            target="_blank"
+            style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: collapsed ? "10px 0" : "10px 16px",
+              justifyContent: collapsed ? "center" : "flex-start",
+              borderRadius: 10, textDecoration: "none",
+              fontSize: 14, fontWeight: 500, color: "#64748b",
+              transition: "all 0.15s",
+            }}
+          >
+            <HardHat size={18} style={{ flexShrink: 0 }} />
+            {!collapsed && (
+              <span style={{ flex: 1 }}>現場用</span>
+            )}
+            {!collapsed && <ExternalLink size={12} style={{ color: "#cbd5e1" }} />}
+          </Link>
+          <Link
+            href="/portal"
+            target="_blank"
+            style={{
+              display: "flex", alignItems: "center", gap: 12,
+              padding: collapsed ? "10px 0" : "10px 16px",
+              justifyContent: collapsed ? "center" : "flex-start",
+              borderRadius: 10, textDecoration: "none",
+              fontSize: 14, fontWeight: 500, color: "#64748b",
+              transition: "all 0.15s",
+            }}
+          >
+            <Building2 size={18} style={{ flexShrink: 0 }} />
+            {!collapsed && (
+              <span style={{ flex: 1 }}>顧客ポータル</span>
+            )}
+            {!collapsed && <ExternalLink size={12} style={{ color: "#cbd5e1" }} />}
+          </Link>
+        </div>
 
         {/* Footer */}
         {!collapsed && (
@@ -216,7 +295,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           }}
         >
           <span style={{ fontSize: 15, fontWeight: 800, color: "#1a1a2e" }}>
-            タンク管理<span style={{ color: "#6366f1", marginLeft: 4 }}>Admin</span>
+            管理画面
           </span>
           <button
             onClick={() => setSidebarOpen(false)}
@@ -231,7 +310,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
         <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {NAV_ITEMS.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               const active = isActive(item.href);
               return (
@@ -252,6 +331,39 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </Link>
               );
             })}
+          </div>
+          <div style={{ marginTop: 12, borderTop: "1px solid #e8eaed", paddingTop: 12 }}>
+            <div style={{ padding: "4px 16px 6px", fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              他画面
+            </div>
+            <Link
+              href="/staff"
+              target="_blank"
+              onClick={() => setSidebarOpen(false)}
+              style={{
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "10px 16px", borderRadius: 10, textDecoration: "none",
+                fontSize: 14, fontWeight: 500, color: "#64748b",
+              }}
+            >
+              <HardHat size={18} />
+              <span style={{ flex: 1 }}>現場用</span>
+              <ExternalLink size={12} style={{ color: "#cbd5e1" }} />
+            </Link>
+            <Link
+              href="/portal"
+              target="_blank"
+              onClick={() => setSidebarOpen(false)}
+              style={{
+                display: "flex", alignItems: "center", gap: 12,
+                padding: "10px 16px", borderRadius: 10, textDecoration: "none",
+                fontSize: 14, fontWeight: 500, color: "#64748b",
+              }}
+            >
+              <Building2 size={18} />
+              <span style={{ flex: 1 }}>顧客ポータル</span>
+              <ExternalLink size={12} style={{ color: "#cbd5e1" }} />
+            </Link>
           </div>
         </nav>
       </div>
@@ -297,25 +409,39 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             <Menu size={18} />
           </button>
           <div style={{ flex: 1 }} />
-          <div
-            style={{
-              display: "flex", alignItems: "center", gap: 8,
-              background: "#f1f5f9", borderRadius: 10, padding: "6px 14px",
-            }}
-          >
+          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
             <div
               style={{
-                width: 28, height: 28, borderRadius: "50%",
-                background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                display: "flex", alignItems: "center", justifyContent: "center",
-                color: "#fff", fontSize: 12, fontWeight: 700,
+                display: "flex", alignItems: "center", gap: 8,
+                background: "#f1f5f9", borderRadius: 10, padding: "6px 14px",
               }}
             >
-              {staffName.charAt(0)}
+              <div
+                style={{
+                  width: 28, height: 28, borderRadius: "50%",
+                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "#fff", fontSize: 12, fontWeight: 700,
+                }}
+              >
+                {staffName.charAt(0)}
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>
+                {staffName}
+              </span>
             </div>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>
-              {staffName}
-            </span>
+            <button
+              onClick={handleLogout}
+              style={{
+                width: 36, height: 36, borderRadius: 8, border: "1px solid #e2e8f0",
+                background: "#fff", display: "flex", alignItems: "center",
+                justifyContent: "center", cursor: "pointer", color: "#94a3b8",
+                transition: "all 0.15s",
+              }}
+              title="ログアウト"
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </header>
 
@@ -338,6 +464,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         }
       `}</style>
       </div>
-    </StaffAuthGuard>
+    </AdminAuthGuard>
   );
 }

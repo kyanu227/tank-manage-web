@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Lock, CheckCircle2, AlertCircle } from "lucide-react";
-import { db } from "@/lib/firebase/config";
+import { useState, useEffect, useCallback } from "react";
+import { Lock, CheckCircle2, AlertCircle, Mail, KeyRound, LogIn } from "lucide-react";
+import { auth, db } from "@/lib/firebase/config";
+import {
+  onAuthStateChanged,
+  signInWithPopup,
+  signInWithEmailAndPassword,
+  GoogleAuthProvider,
+  User,
+} from "firebase/auth";
 import { collection, getDocs, query, where } from "firebase/firestore";
 
 interface StaffAuthGuardProps {
@@ -20,18 +27,70 @@ interface StaffUser {
 export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuardProps) {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [passcode, setPasscode] = useState("");
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
 
+  // Login form state
+  const [loginMethod, setLoginMethod] = useState<"passcode" | "email">("passcode");
+  const [passcode, setPasscode] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  // Firebase Auth state
+  const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
+  const [firebaseAuthChecked, setFirebaseAuthChecked] = useState(false);
+
+  // Helper: look up staff by email, set session, authenticate
+  const authenticateByEmail = useCallback(async (userEmail: string) => {
+    try {
+      const q = query(
+        collection(db, "staff"),
+        where("email", "==", userEmail),
+        where("isActive", "==", true)
+      );
+      const snap = await getDocs(q);
+
+      if (snap.empty) {
+        setError("このメールアドレスはスタッフとして登録されていません。");
+        return false;
+      }
+
+      const d = snap.docs[0];
+      const data = d.data();
+
+      if (allowedRoles && !allowedRoles.includes(data.role as any)) {
+        setError("このページにアクセスする権限がありません");
+        return false;
+      }
+
+      const userSession: StaffUser = {
+        id: d.id,
+        name: data.name,
+        role: data.role,
+        rank: data.rank || "レギュラー",
+      };
+
+      localStorage.setItem("staffSession", JSON.stringify(userSession));
+      window.dispatchEvent(new Event("staffLogin"));
+      setIsAuthenticated(true);
+      return true;
+    } catch (e) {
+      console.error("Email staff lookup failed:", e);
+      setError("認証エラーが発生しました");
+      return false;
+    }
+  }, [allowedRoles]);
+
+  // 1. Check localStorage session first
   useEffect(() => {
-    // Check localStorage first
     const session = localStorage.getItem("staffSession");
     if (session) {
       try {
         const user = JSON.parse(session) as StaffUser;
         if (!allowedRoles || allowedRoles.includes(user.role as any)) {
           setIsAuthenticated(true);
+          setLoading(false);
+          return;
         } else {
           setError("アクセス権限がありません");
           localStorage.removeItem("staffSession");
@@ -40,10 +99,40 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         localStorage.removeItem("staffSession");
       }
     }
-    setLoading(false);
+    // Don't set loading=false yet — wait for Firebase Auth check too
   }, [allowedRoles]);
 
-  const handleLogin = async (e: React.FormEvent) => {
+  // 2. Check Firebase Auth (Google / Email already logged in)
+  useEffect(() => {
+    const unsub = onAuthStateChanged(auth, (user) => {
+      setFirebaseUser(user);
+      setFirebaseAuthChecked(true);
+    });
+    return () => unsub();
+  }, []);
+
+  // 3. When Firebase Auth resolves, try to auto-login if session not already set
+  useEffect(() => {
+    if (!firebaseAuthChecked) return;
+
+    // Already authenticated via localStorage
+    if (isAuthenticated) {
+      setLoading(false);
+      return;
+    }
+
+    // Firebase user exists → try to match staff
+    if (firebaseUser?.email) {
+      authenticateByEmail(firebaseUser.email).then(() => {
+        setLoading(false);
+      });
+    } else {
+      setLoading(false);
+    }
+  }, [firebaseAuthChecked, firebaseUser, isAuthenticated, authenticateByEmail]);
+
+  // --- Passcode login handler (existing) ---
+  const handlePasscodeLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passcode) return;
 
@@ -56,18 +145,16 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         where("isActive", "==", true)
       );
       const snap = await getDocs(q);
-      
+
       if (snap.empty) {
         setError("パスコードが一致しません");
         setChecking(false);
         return;
       }
 
-      // If multiple users have the same passcode, we just pick the first one.
-      // Ideally passcodes should be unique per active user.
       const doc = snap.docs[0];
       const data = doc.data();
-      
+
       if (allowedRoles && !allowedRoles.includes(data.role as any)) {
         setError("このページにアクセスする権限がありません");
         setChecking(false);
@@ -80,11 +167,9 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         role: data.role,
         rank: data.rank || "レギュラー",
       };
-      
+
       localStorage.setItem("staffSession", JSON.stringify(userSession));
-      // Dispatch an event so layout can update user info
       window.dispatchEvent(new Event("staffLogin"));
-      
       setIsAuthenticated(true);
     } catch (e) {
       console.error("Login verify failed", e);
@@ -94,6 +179,45 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     }
   };
 
+  // --- Google login handler ---
+  const handleGoogleLogin = async () => {
+    setChecking(true);
+    setError("");
+    try {
+      const result = await signInWithPopup(auth, new GoogleAuthProvider());
+      if (result.user.email) {
+        await authenticateByEmail(result.user.email);
+      } else {
+        setError("Googleアカウントにメールアドレスがありません。");
+      }
+    } catch (e: any) {
+      console.error(e);
+      setError("Googleログインに失敗しました。");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  // --- Email/Password login handler ---
+  const handleEmailLogin = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!email || !password) return;
+    setChecking(true);
+    setError("");
+    try {
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      if (result.user.email) {
+        await authenticateByEmail(result.user.email);
+      }
+    } catch (err: any) {
+      console.error(err);
+      setError("メールアドレスまたはパスワードが間違っています。");
+    } finally {
+      setChecking(false);
+    }
+  };
+
+  // --- Render: Loading ---
   if (loading) {
     return (
       <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb" }}>
@@ -106,31 +230,97 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     );
   }
 
+  // --- Render: Authenticated ---
   if (isAuthenticated) {
     return <>{children}</>;
   }
 
+  // --- Render: Login form ---
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20 }}>
-      <div style={{ background: "#fff", borderRadius: 24, padding: "32px 24px", width: "100%", maxWidth: 360, boxShadow: "0 10px 25px -5px rgba(0,0,0,0.05), 0 8px 10px -6px rgba(0,0,0,0.01)" }}>
-        
-        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 32 }}>
-          <div style={{ width: 56, height: 56, borderRadius: 16, background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16 }}>
+      <div style={{
+        background: "#fff", borderRadius: 24, padding: "32px 24px", width: "100%", maxWidth: 380,
+        boxShadow: "0 20px 40px rgba(0,0,0,0.06)",
+      }}>
+        {/* Header */}
+        <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 28 }}>
+          <div style={{
+            width: 56, height: 56, borderRadius: 16,
+            background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+            display: "flex", alignItems: "center", justifyContent: "center", marginBottom: 16,
+          }}>
             <Lock size={28} color="#fff" />
           </div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>スタッフ・ログイン</h1>
-          <p style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>パスコードを入力してください</p>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>スタッフ用</h1>
+          <p style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>ログインしてください</p>
         </div>
 
+        {/* Error */}
         {error && (
-          <div style={{ background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12, padding: "12px 16px", marginBottom: 20, display: "flex", alignItems: "center", gap: 10 }}>
+          <div style={{
+            background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12,
+            padding: "12px 16px", marginBottom: 20, display: "flex", alignItems: "center", gap: 10,
+          }}>
             <AlertCircle size={18} color="#ef4444" style={{ flexShrink: 0 }} />
             <p style={{ fontSize: 13, fontWeight: 600, color: "#991b1b" }}>{error}</p>
           </div>
         )}
 
-        <form onSubmit={handleLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          <div>
+        {/* Google login button */}
+        <button
+          onClick={handleGoogleLogin}
+          disabled={checking}
+          style={{
+            display: "flex", alignItems: "center", justifyContent: "center", gap: 12,
+            width: "100%", padding: "13px", borderRadius: 12,
+            background: "#fff", color: "#334155",
+            border: "2px solid #e2e8f0", fontSize: 15, fontWeight: 700,
+            cursor: checking ? "not-allowed" : "pointer",
+            transition: "all 0.2s", opacity: checking ? 0.7 : 1,
+          }}
+        >
+          <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" style={{ width: 20, height: 20 }} />
+          Google でログイン
+        </button>
+
+        {/* Divider */}
+        <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "18px 0" }}>
+          <div style={{ flex: 1, height: 1, background: "#e2e8f0" }} />
+          <span style={{ color: "#94a3b8", fontSize: 12, fontWeight: 600 }}>または</span>
+          <div style={{ flex: 1, height: 1, background: "#e2e8f0" }} />
+        </div>
+
+        {/* Method toggle: Passcode / Email */}
+        <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 3, marginBottom: 16 }}>
+          <button
+            onClick={() => { setLoginMethod("passcode"); setError(""); }}
+            style={{
+              flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700,
+              background: loginMethod === "passcode" ? "#fff" : "transparent",
+              color: loginMethod === "passcode" ? "#6366f1" : "#94a3b8",
+              boxShadow: loginMethod === "passcode" ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+              cursor: "pointer", transition: "all 0.2s",
+            }}
+          >
+            パスコード
+          </button>
+          <button
+            onClick={() => { setLoginMethod("email"); setError(""); }}
+            style={{
+              flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700,
+              background: loginMethod === "email" ? "#fff" : "transparent",
+              color: loginMethod === "email" ? "#6366f1" : "#94a3b8",
+              boxShadow: loginMethod === "email" ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+              cursor: "pointer", transition: "all 0.2s",
+            }}
+          >
+            メール
+          </button>
+        </div>
+
+        {loginMethod === "passcode" ? (
+          /* Passcode form (existing) */
+          <form onSubmit={handlePasscodeLogin} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <input
               type="password"
               inputMode="numeric"
@@ -142,32 +332,90 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
               style={{
                 width: "100%", padding: "14px", fontSize: 24, fontWeight: 700,
                 border: "2px solid #e2e8f0", borderRadius: 12, outline: "none", color: "#0f172a",
-                textAlign: "center", letterSpacing: "0.2em", transition: "border-color 0.2s"
+                textAlign: "center", letterSpacing: "0.2em", transition: "border-color 0.2s",
               }}
               onFocus={(e) => e.target.style.borderColor = "#6366f1"}
               onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
             />
-          </div>
-
-          <button
-            type="submit"
-            disabled={checking || !passcode}
-            style={{
-              width: "100%", padding: "14px", borderRadius: 12, border: "none",
-              background: (checking || !passcode) ? "#c7d2fe" : "#6366f1",
-              color: "#fff", fontSize: 16, fontWeight: 800, cursor: (checking || !passcode) ? "not-allowed" : "pointer",
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginTop: 12,
-              transition: "background 0.2s",
-            }}
-          >
-            {checking ? (
-              <><div style={{ width: 18, height: 18, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} /> 確認中…</>
-            ) : (
-              <><CheckCircle2 size={18} /> ログイン</>
-            )}
-          </button>
-        </form>
+            <button
+              type="submit"
+              disabled={checking || !passcode}
+              style={{
+                width: "100%", padding: "14px", borderRadius: 12, border: "none",
+                background: (checking || !passcode) ? "#c7d2fe" : "#6366f1",
+                color: "#fff", fontSize: 15, fontWeight: 800,
+                cursor: (checking || !passcode) ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                marginTop: 4, transition: "background 0.2s",
+              }}
+            >
+              {checking ? (
+                <><div style={{ width: 18, height: 18, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} /> 確認中…</>
+              ) : (
+                <><CheckCircle2 size={18} /> ログイン</>
+              )}
+            </button>
+          </form>
+        ) : (
+          /* Email/Password form */
+          <form onSubmit={handleEmailLogin} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div style={{ position: "relative" }}>
+              <Mail size={18} color="#94a3b8" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                type="email"
+                placeholder="メールアドレス"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                style={{
+                  width: "100%", padding: "12px 12px 12px 42px",
+                  borderRadius: 12, border: "2px solid #e2e8f0",
+                  fontSize: 15, outline: "none", transition: "border-color 0.2s",
+                }}
+                onFocus={(e) => e.target.style.borderColor = "#6366f1"}
+                onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
+              />
+            </div>
+            <div style={{ position: "relative" }}>
+              <KeyRound size={18} color="#94a3b8" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
+              <input
+                type="password"
+                placeholder="パスワード"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                style={{
+                  width: "100%", padding: "12px 12px 12px 42px",
+                  borderRadius: 12, border: "2px solid #e2e8f0",
+                  fontSize: 15, outline: "none", transition: "border-color 0.2s",
+                }}
+                onFocus={(e) => e.target.style.borderColor = "#6366f1"}
+                onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
+              />
+            </div>
+            <button
+              type="submit"
+              disabled={checking || !email || !password}
+              style={{
+                width: "100%", padding: "14px", borderRadius: 12, border: "none",
+                background: (checking || !email || !password) ? "#c7d2fe" : "#6366f1",
+                color: "#fff", fontSize: 15, fontWeight: 800,
+                cursor: (checking || !email || !password) ? "not-allowed" : "pointer",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                marginTop: 4, transition: "background 0.2s",
+              }}
+            >
+              {checking ? (
+                <><div style={{ width: 18, height: 18, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} /> 確認中…</>
+              ) : (
+                <><LogIn size={18} /> メールでログイン</>
+              )}
+            </button>
+          </form>
+        )}
       </div>
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

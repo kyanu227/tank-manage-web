@@ -28,10 +28,10 @@ export default function AppHeader() {
       <div className="flex items-center gap-4">
         {userProfile?.role === 'admin' && (
           <nav className="hidden md:flex gap-4 mr-4">
-            <Link href="/admin-portal-x8f2q" className={`text-sm ${pathname.startsWith('/admin') ? 'text-blue-600 font-medium' : 'text-slate-500 hover:text-slate-800'}`}>
+            <Link href="/admin" className={`text-sm ${pathname.startsWith('/admin') ? 'text-blue-600 font-medium' : 'text-slate-500 hover:text-slate-800'}`}>
               Dashboard
             </Link>
-            <Link href="/staff-ops-m9k4v" className={`text-sm ${pathname.startsWith('/staff') ? 'text-blue-600 font-medium' : 'text-slate-500 hover:text-slate-800'}`}>
+            <Link href="/staff" className={`text-sm ${pathname.startsWith('/staff') ? 'text-blue-600 font-medium' : 'text-slate-500 hover:text-slate-800'}`}>
               Workers
             </Link>
           </nav>
