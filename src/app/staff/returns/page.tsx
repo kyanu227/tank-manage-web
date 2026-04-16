@@ -6,8 +6,10 @@ import {
 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import {
-  collection, query, where, getDocs, doc, writeBatch, serverTimestamp,
+  collection, query, where, getDocs,
 } from "firebase/firestore";
+import { STATUS, RETURN_TAG, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
+import { applyBulkTankOperations } from "@/lib/tank-operation";
 
 type Condition = "normal" | "unused" | "uncharged";
 
@@ -40,7 +42,7 @@ export default function StaffReturnsPage() {
     const fetchCustomers = async () => {
       setLoadingCustomers(true);
       try {
-        const snap = await getDocs(query(collection(db, "tanks"), where("status", "==", "貸出中")));
+        const snap = await getDocs(query(collection(db, "tanks"), where("status", "==", STATUS.LENT)));
         const locationSet = new Set<string>();
         snap.forEach((d) => {
           const loc = d.data().location;
@@ -61,7 +63,7 @@ export default function StaffReturnsPage() {
       const snap = await getDocs(query(
         collection(db, "tanks"),
         where("location", "==", customer.name),
-        where("status", "==", "貸出中"),
+        where("status", "==", STATUS.LENT),
       ));
       const items: TankItem[] = [];
       snap.forEach((d) => items.push({ id: d.id, condition: "normal" }));
@@ -87,16 +89,25 @@ export default function StaffReturnsPage() {
     if (!confirm(`${selectedCustomer.name} のタンク ${tanks.length}本 を返却処理しますか？`)) return;
     setSubmitting(true);
     try {
-      const batch = writeBatch(db);
       const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-      for (const tank of tanks) {
-        const finalStatus = tank.condition === "unused" ? "充填済み" : "空";
-        const action = tank.condition === "unused" ? "未使用返却" : tank.condition === "uncharged" ? "返却(未充填)" : "返却";
-        const note = `[現場受付] 顧客: ${selectedCustomer.name}`;
-        batch.set(doc(db, "tanks", tank.id), { status: finalStatus, location: "倉庫", staff: staffName, updatedAt: serverTimestamp(), logNote: note }, { merge: true });
-        batch.set(doc(collection(db, "logs")), { tankId: tank.id, action, prevStatus: "貸出中", newStatus: finalStatus, location: "倉庫", staff: staffName, timestamp: serverTimestamp(), note });
-      }
-      await batch.commit();
+      const note = `[現場受付] 顧客: ${selectedCustomer.name}`;
+      await applyBulkTankOperations(
+        tanks.map((tank) => {
+          const tag: ReturnTag =
+            tank.condition === "unused" ? RETURN_TAG.UNUSED
+              : tank.condition === "uncharged" ? RETURN_TAG.DEFECT
+              : RETURN_TAG.NORMAL;
+          return {
+            tankId: tank.id,
+            transitionAction: resolveReturnAction(tag, STATUS.LENT),
+            currentStatus: STATUS.LENT,
+            staff: staffName,
+            location: "倉庫",
+            logNote: note,
+            tankNote: note,
+          };
+        })
+      );
       setReturnedCount(tanks.length);
       setDone(true);
     } catch (e: any) { alert("エラー: " + e.message); }

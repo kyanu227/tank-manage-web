@@ -1,31 +1,21 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  ArrowDownToLine,
   LayoutDashboard, AlertTriangle, Wrench, ShoppingCart, User,
-  Menu, X, RotateCcw, Zap, Hand
+  Menu, X, Hand, Building2
 } from "lucide-react";
 import StaffAuthGuard from "@/components/StaffAuthGuard";
 
-/* ── Bottom tab bar: 手動 / 自動 ── */
-const BOTTOM_TABS = [
-  { href: "/staff",        label: "手動操作", icon: Hand, match: (p: string) => p === "/staff" },
-  { href: "/staff/orders", label: "自動操作", icon: Zap,  match: (p: string) => p === "/staff/orders" },
-];
-
-/* ── Side menu: everything else ── */
+/* ── Side menu ── */
 const SIDE_NAV = [
   { href: "/staff",             label: "操作 (貸出/返却/充填)", icon: Hand },
-  { href: "/staff/orders",      label: "受注・承認",     icon: Zap },
-  { href: "/staff/returns",     label: "現場返却",       icon: RotateCcw },
-  { href: "/staff/bulk-return", label: "一括返却",       icon: ArrowDownToLine },
+  { href: "/staff/inhouse",     label: "自社管理",       icon: Building2 },
   { href: "/staff/damage",      label: "破損報告",       icon: AlertTriangle },
   { href: "/staff/maintenance", label: "メンテナンス",   icon: Wrench },
   { href: "/staff/dashboard",   label: "ダッシュボード", icon: LayoutDashboard },
-  { href: "/staff/inhouse",     label: "自社管理",       icon: Wrench },
   { href: "/staff/order",       label: "資材発注",       icon: ShoppingCart },
   { href: "/staff/mypage",      label: "マイページ",     icon: User },
 ];
@@ -33,26 +23,20 @@ const SIDE_NAV = [
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
-  const [staffName, setStaffName] = useState("スタッフ");
+  const isOpsPage = pathname === "/staff";
+  const isInhousePage = pathname === "/staff/inhouse";
 
-  useEffect(() => {
-    const loadUser = () => {
-      const session = localStorage.getItem("staffSession");
-      if (session) {
-        try { setStaffName(JSON.parse(session).name); } catch (e) {}
-      }
-    };
-    loadUser();
-    window.addEventListener("staffLogin", loadUser);
-    return () => window.removeEventListener("staffLogin", loadUser);
+  // 操作スタイル: 手動 / 受注（操作ページでのみ表示）
+  const [opStyle, setOpStyle] = useState<"manual" | "order">("manual");
+
+  const toggleOpStyle = useCallback((style: "manual" | "order") => {
+    setOpStyle(style);
+    window.dispatchEvent(new CustomEvent("opStyleChange", { detail: style }));
   }, []);
-
-  /* Show bottom tabs only on the two main pages */
-  const showBottomTabs = pathname === "/staff" || pathname === "/staff/orders";
 
   return (
     <StaffAuthGuard>
-      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "#f8f9fb" }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "#f8f9fb", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
         {/* Header */}
         <header
           style={{
@@ -77,12 +61,45 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             <Menu size={18} />
           </button>
           <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#f1f5f9", borderRadius: 8, padding: "5px 10px" }}>
-            <div style={{ width: 24, height: 24, borderRadius: "50%", background: "linear-gradient(135deg, #6366f1, #8b5cf6)", display: "flex", alignItems: "center", justifyContent: "center", color: "#fff", fontSize: 10, fontWeight: 700 }}>
-              {staffName.charAt(0)}
+          <Link
+            href="/staff/inhouse"
+            style={{
+              display: "flex", alignItems: "center", gap: 6,
+              padding: "6px 12px", borderRadius: 8,
+              background: isInhousePage ? "#6366f1" : "#f1f5f9",
+              color: isInhousePage ? "#fff" : "#64748b",
+              fontSize: 12, fontWeight: 700, textDecoration: "none",
+              marginRight: 8,
+            }}
+          >
+            <Building2 size={14} />
+            自社管理
+          </Link>
+          {isOpsPage && (
+            <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 3 }}>
+              {([
+                { id: "manual" as const, label: "手動" },
+                { id: "order" as const, label: "受注" },
+              ]).map(({ id, label }) => {
+                const active = opStyle === id;
+                return (
+                  <button
+                    key={id}
+                    onClick={() => toggleOpStyle(id)}
+                    style={{
+                      padding: "5px 14px", borderRadius: 8, border: "none",
+                      background: active ? "#6366f1" : "transparent",
+                      color: active ? "#fff" : "#94a3b8",
+                      fontSize: 12, fontWeight: active ? 800 : 600,
+                      cursor: "pointer", transition: "all 0.15s",
+                    }}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
             </div>
-            <span style={{ fontSize: 12, fontWeight: 600, color: "#334155" }}>{staffName}</span>
-          </div>
+          )}
         </header>
 
         {/* Slide-over menu */}
@@ -98,10 +115,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             display: "flex", flexDirection: "column",
           }}
         >
-          <div style={{ padding: "20px 24px", borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "space-between", minHeight: 56 }}>
-            <span style={{ fontSize: 15, fontWeight: 800, color: "#1a1a2e" }}>
-              タンク管理<span style={{ color: "#6366f1", marginLeft: 4 }}>Operate</span>
-            </span>
+          <div style={{ padding: "20px 24px", borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "flex-end", minHeight: 56 }}>
             <button onClick={() => setMenuOpen(false)}
               style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#64748b" }}>
               <X size={16} />
@@ -131,49 +145,13 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
               );
             })}
           </nav>
-          <div style={{ padding: "16px 24px", borderTop: "1px solid #e8eaed", fontSize: 11, color: "#94a3b8" }}>
-            <Link href="/admin" style={{ color: "#94a3b8", textDecoration: "none", fontSize: 12 }}>
-              管理画面へ →
-            </Link>
-          </div>
+          <div style={{ padding: "16px 24px", borderTop: "1px solid #e8eaed", fontSize: 11, color: "#94a3b8" }} />
         </div>
 
         {/* Main content */}
         <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
           {children}
         </main>
-
-        {/* Bottom tab bar — only on main two pages */}
-        {showBottomTabs && (
-          <div style={{
-            flexShrink: 0,
-            background: "#fff", borderTop: "1px solid #e8eaed",
-            display: "flex",
-            paddingBottom: "env(safe-area-inset-bottom, 0px)",
-          }}>
-            {BOTTOM_TABS.map(({ href, label, icon: Icon, match }) => {
-              const active = match(pathname);
-              return (
-                <Link
-                  key={href}
-                  href={href}
-                  style={{
-                    flex: 1, display: "flex", flexDirection: "column",
-                    alignItems: "center", justifyContent: "center",
-                    gap: 3, padding: "10px 0",
-                    textDecoration: "none",
-                    color: active ? "#6366f1" : "#94a3b8",
-                    background: active ? "#eef2ff" : "transparent",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  <Icon size={20} strokeWidth={active ? 2.5 : 2} />
-                  <span style={{ fontSize: 11, fontWeight: active ? 700 : 500 }}>{label}</span>
-                </Link>
-              );
-            })}
-          </div>
-        )}
       </div>
     </StaffAuthGuard>
   );

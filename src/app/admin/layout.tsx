@@ -19,6 +19,7 @@ import {
   HardHat,
   Building2,
   ExternalLink,
+  Workflow,
 } from "lucide-react";
 import AdminAuthGuard from "@/components/AdminAuthGuard";
 import { auth } from "@/lib/firebase/config";
@@ -31,6 +32,7 @@ const ALL_NAV_ITEMS = [
   { href: "/admin/staff-analytics", label: "スタッフ実績", icon: Users },
   { href: "/admin/money", label: "金銭・ランク", icon: Wallet },
   { href: "/admin/billing", label: "請求書発行", icon: FileText },
+  { href: "/admin/state-diagram", label: "状態遷移図", icon: Workflow },
   { href: "/admin/permissions", label: "ページ権限", icon: Shield, adminOnly: true },
 ];
 

@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { AlertTriangle, Send, CheckCircle2, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
+import { STATUS, ACTION } from "@/lib/tank-rules";
+import { applyBulkTankOperations } from "@/lib/tank-operation";
 
 export default function DamageReportPage() {
   const [prefixes, setPrefixes] = useState<string[]>([]);
@@ -44,19 +46,16 @@ export default function DamageReportPage() {
     if (!confirm(`${queue.length}本の破損報告を送信しますか？`)) return;
     setSubmitting(true);
     try {
-      const batch = writeBatch(db);
-      queue.forEach((item) => {
-        batch.set(doc(db, "tanks", item.tankId), {
-          status: "破損", location: "倉庫", staff: "スタッフ",
-          note: note, updatedAt: serverTimestamp(),
-        }, { merge: true });
-        batch.set(doc(collection(db, "logs")), {
-          tankId: item.tankId, action: "破損報告",
-          newStatus: "破損", location: "倉庫", staff: "スタッフ",
-          note: note, timestamp: serverTimestamp(),
-        });
-      });
-      await batch.commit();
+      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
+      await applyBulkTankOperations(
+        queue.map((item) => ({
+          tankId: item.tankId,
+          transitionAction: ACTION.DAMAGE_REPORT,
+          staff: staffName,
+          location: "倉庫",
+          logNote: note,
+        }))
+      );
       setResult({ success: true, message: `${queue.length}本の破損報告を完了しました` });
       setQueue([]);
       setNote("");

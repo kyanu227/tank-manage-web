@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { Wrench, Plus, CheckCircle2, AlertCircle, X, Search, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, doc, writeBatch, serverTimestamp, query, where, orderBy } from "firebase/firestore";
+import { collection, getDocs, doc, writeBatch, query, where } from "firebase/firestore";
+import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
 
 interface TankDoc {
   id: string;
@@ -37,7 +39,7 @@ export default function InHousePage() {
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const q = query(collection(db, "tanks"), where("status", "==", "自社利用中"));
+      const q = query(collection(db, "tanks"), where("status", "==", STATUS.IN_HOUSE));
       const snap = await getDocs(q);
       const tanks: (TankDoc & { tag: TagType })[] = [];
       snap.forEach((d) => {
@@ -88,7 +90,6 @@ export default function InHousePage() {
     setReporting(true);
     try {
       const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-      const batch = writeBatch(db);
 
       // Check current status
       const snap = await getDocs(query(collection(db, "tanks"), where("__name__", "==", tankId)));
@@ -98,29 +99,24 @@ export default function InHousePage() {
         return;
       }
 
-      const docRef = snap.docs[0];
-      const data = docRef.data();
+      const data = snap.docs[0].data();
 
-      if (data.status === "自社利用中") {
+      if (data.status === STATUS.IN_HOUSE) {
         setReportResult({ success: true, message: `${tankId} は既に自社利用中です` });
         setInputValue("");
         setReporting(false);
         return;
       }
 
-      // Update Tank
-      batch.set(doc(db, "tanks", tankId), {
-        status: "自社利用中", location: "自社", staff: staffName,
-        logNote: "", updatedAt: serverTimestamp()
-      }, { merge: true });
-
-      // Write Log
-      batch.set(doc(collection(db, "logs")), {
-        tankId, action: "自社利用(事後)", prevStatus: data.status, newStatus: "自社利用中",
-        location: "自社", staff: staffName, note: "事後報告", timestamp: serverTimestamp()
+      await applyTankOperation({
+        tankId,
+        transitionAction: ACTION.IN_HOUSE_USE_RETRO,
+        currentStatus: data.status,
+        staff: staffName,
+        location: "自社",
+        logNote: "事後報告",
       });
 
-      await batch.commit();
       setInputValue("");
       setReportResult({ success: true, message: `${tankId} の事後報告を完了しました` });
       fetchData();
@@ -138,34 +134,20 @@ export default function InHousePage() {
     setReturning(true);
     try {
       const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-      const batch = writeBatch(db);
 
-      inHouseTanks.forEach((tank) => {
-        let nextStatus = "空";
-        let logAction = "自社返却";
+      await applyBulkTankOperations(
+        inHouseTanks.map((tank) => {
+          const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
+          return {
+            tankId: tank.id,
+            transitionAction: resolveReturnAction(tag, STATUS.IN_HOUSE),
+            currentStatus: STATUS.IN_HOUSE,
+            staff: staffName,
+            location: "倉庫",
+          };
+        })
+      );
 
-        if (tank.tag === "unused") {
-          nextStatus = "充填済み";
-          logAction = "自社返却(未使用)";
-        } else if (tank.tag === "defect") {
-          nextStatus = "空";
-          logAction = "自社返却(不備)";
-        }
-
-        // Update tank
-        batch.set(doc(db, "tanks", tank.id), {
-          status: nextStatus, location: "倉庫", staff: staffName,
-          logNote: "", updatedAt: serverTimestamp(),
-        }, { merge: true });
-
-        // Add log
-        batch.set(doc(collection(db, "logs")), {
-          tankId: tank.id, action: logAction, prevStatus: "自社利用中", newStatus: nextStatus,
-          location: "倉庫", staff: staffName, note: "", timestamp: serverTimestamp(),
-        });
-      });
-
-      await batch.commit();
       alert("一括返却が完了しました。");
       fetchData();
     } catch (e: any) {

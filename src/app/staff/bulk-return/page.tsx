@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { ArrowDownToLine, ChevronDown, ChevronRight, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, doc, writeBatch, serverTimestamp, query, where } from "firebase/firestore";
+import { collection, getDocs, doc, writeBatch, query, where } from "firebase/firestore";
+import { STATUS, RETURN_TAG, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
+import { applyBulkTankOperations } from "@/lib/tank-operation";
 
 interface TankDoc {
   id: string;
@@ -32,7 +34,7 @@ export default function BulkReturnPage() {
     setLoading(true);
     try {
       // Fetch all tanks that are currently lent out
-      const q = query(collection(db, "tanks"), where("status", "in", ["貸出中", "未返却"]));
+      const q = query(collection(db, "tanks"), where("status", "in", [STATUS.LENT, STATUS.UNRETURNED]));
       const snap = await getDocs(q);
       
       const groups: Record<string, (TankDoc & { tag: TagType })[]> = {};
@@ -104,43 +106,20 @@ export default function BulkReturnPage() {
     setReturning(prev => ({ ...prev, [loc]: true }));
     try {
       const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-      const batch = writeBatch(db);
 
-      tanksToReturn.forEach((tank) => {
-        let nextStatus = "空";
-        let logAction = "返却";
+      await applyBulkTankOperations(
+        tanksToReturn.map((tank) => {
+          const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
+          return {
+            tankId: tank.id,
+            transitionAction: resolveReturnAction(tag, tank.status),
+            currentStatus: tank.status,
+            staff: staffName,
+            location: "倉庫",
+          };
+        })
+      );
 
-        if (tank.tag === "unused") {
-          nextStatus = "充填済み";
-          logAction = "未使用返却";
-        } else if (tank.tag === "defect") {
-          nextStatus = "空";
-          logAction = "返却(未充填)"; // Gas missing but wasn't properly filled by us
-        }
-
-        // Update tank
-        batch.set(doc(db, "tanks", tank.id), {
-          status: nextStatus,
-          location: "倉庫",
-          staff: staffName,
-          logNote: "",
-          updatedAt: serverTimestamp(),
-        }, { merge: true });
-
-        // Build new log entry
-        batch.set(doc(collection(db, "logs")), {
-          tankId: tank.id,
-          action: logAction,
-          prevStatus: tank.status,
-          newStatus: nextStatus,
-          location: "倉庫",
-          staff: staffName,
-          note: "",
-          timestamp: serverTimestamp(),
-        });
-      });
-
-      await batch.commit();
       alert(`${loc} の一括返却が完了しました。`);
       fetchData(); // Refresh all data
 

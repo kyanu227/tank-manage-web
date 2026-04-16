@@ -4,14 +4,21 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import {
   ClipboardList, ArrowLeft, Loader2, Search, CheckCircle2,
   Package, Minus, Check, X, ThumbsUp,
+  ArrowDownToLine, ChevronDown, ChevronRight,
 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import {
   collection, query, where, getDocs, doc, writeBatch, serverTimestamp, orderBy,
 } from "firebase/firestore";
+import {
+  STATUS, ACTION, RETURN_TAG,
+  validateTransition, resolveReturnAction,
+  type ReturnTag,
+} from "@/lib/tank-rules";
+import { applyBulkTankOperations } from "@/lib/tank-operation";
 
 /* ─── Types ─── */
-type TabId = "orders" | "approvals";
+type TabId = "orders" | "approvals" | "bulk";
 
 interface PendingOrder {
   id: string;
@@ -57,6 +64,7 @@ export default function StaffOrdersPage() {
           {([
             { id: "orders" as TabId, label: "受注管理" },
             { id: "approvals" as TabId, label: "返却承認" },
+            { id: "bulk" as TabId, label: "一括返却" },
           ]).map(({ id, label }) => {
             const active = tab === id;
             return (
@@ -78,7 +86,7 @@ export default function StaffOrdersPage() {
         </div>
       </div>
 
-      {tab === "orders" ? <OrdersTab /> : <ApprovalsTab />}
+      {tab === "orders" ? <OrdersTab /> : tab === "approvals" ? <ApprovalsTab /> : <BulkReturnTab />}
     </div>
   );
 }
@@ -101,25 +109,7 @@ function OrdersTab() {
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const dialContainerRef = useRef<HTMLDivElement>(null);
-  const [dialMetrics, setDialMetrics] = useState({ gap: 16, blockHeight: 64 });
-
-  useEffect(() => {
-    const updateMetrics = () => {
-      if (dialContainerRef.current && prefixes.length > 0) {
-        const h = dialContainerRef.current.offsetHeight;
-        if (h > 0) {
-          const n = prefixes.length;
-          const totalItemHeight = n * 48;
-          const availableSpace = h - 16 - totalItemHeight;
-          const calculatedGap = n > 1 ? Math.max(16, availableSpace / (n - 1)) : 16;
-          setDialMetrics({ gap: calculatedGap, blockHeight: 48 + calculatedGap });
-        }
-      }
-    };
-    updateMetrics();
-    window.addEventListener("resize", updateMetrics);
-    return () => window.removeEventListener("resize", updateMetrics);
-  }, [prefixes, loading]);
+  const BLOCK_HEIGHT = 60;
 
   const fetchData = async () => {
     setLoading(true);
@@ -178,14 +168,6 @@ function OrdersTab() {
     }
   };
 
-  const handleManualOkTrigger = () => {
-    if (!activePrefix) return;
-    const tankId = `${activePrefix}-${inputValue || "OK"}`;
-    addScannedTank(tankId);
-    setInputValue("");
-    if (inputRef.current) inputRef.current.focus();
-  };
-
   const addScannedTank = (tankId: string) => {
     if (scannedTanks.some((t) => t.id === tankId)) return;
     if (!selectedOrder) return;
@@ -195,8 +177,11 @@ function OrdersTab() {
     const tank = allTanks[tankId];
     let valid = true, error = "";
     if (!tank) { valid = false; error = "未登録タンク"; }
-    else if (tank.status !== "充填済み" && tank.status !== "保管中") { valid = false; error = `[${tank.status}] は貸出不可`; }
-    else if (tank.location !== "倉庫") { valid = false; error = "倉庫にありません"; }
+    else {
+      const v = validateTransition(tank.status, ACTION.LEND);
+      if (!v.ok) { valid = false; error = v.reason || `[${tank.status}] は貸出不可`; }
+      else if (tank.location !== "倉庫") { valid = false; error = "倉庫にありません"; }
+    }
 
     setScannedTanks([{ id: tankId, valid, error }, ...scannedTanks]);
     setLastAdded(tankId);
@@ -215,14 +200,30 @@ function OrdersTab() {
     }
     setSubmitting(true);
     try {
-      const batch = writeBatch(db);
       const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-      validTanks.forEach((tank) => {
-        batch.set(doc(db, "tanks", tank.id), { status: "貸出中", location: selectedOrder.customerName, staff: staffName, updatedAt: serverTimestamp(), logNote: `受注ID: ${selectedOrder.id}` }, { merge: true });
-        batch.set(doc(collection(db, "logs")), { tankId: tank.id, action: "受注貸出", prevStatus: allTanks[tank.id]?.status || "不明", newStatus: "貸出中", location: selectedOrder.customerName, staff: staffName, timestamp: serverTimestamp(), note: `受注ID: ${selectedOrder.id}`, customerId: selectedOrder.customerId });
-      });
-      batch.update(doc(db, "transactions", selectedOrder.id), { status: "completed", fulfilledAt: serverTimestamp(), fulfilledBy: staffName });
-      await batch.commit();
+      const orderNote = `受注ID: ${selectedOrder.id}`;
+
+      await applyBulkTankOperations(
+        validTanks.map((tank) => ({
+          tankId: tank.id,
+          transitionAction: ACTION.LEND,
+          logAction: "受注貸出",
+          currentStatus: allTanks[tank.id]?.status ?? "",
+          staff: staffName,
+          location: selectedOrder.customerName,
+          tankNote: orderNote,
+          logNote: orderNote,
+          logExtra: { customerId: selectedOrder.customerId },
+        })),
+        (batch) => {
+          batch.update(doc(db, "transactions", selectedOrder.id), {
+            status: "completed",
+            fulfilledAt: serverTimestamp(),
+            fulfilledBy: staffName,
+          });
+        }
+      );
+
       alert("受注したタンクを貸し出しました");
       closeFulfillment();
       fetchData();
@@ -272,10 +273,25 @@ function OrdersTab() {
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
             <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
-              <button onClick={handleManualOkTrigger} disabled={!activePrefix}
-                style={{ width: "100%", padding: "14px", borderRadius: 12, border: "none", background: lastAdded ? "#10b981" : (activePrefix ? "#3b82f6" : "#e2e8f0"), color: (activePrefix || lastAdded) ? "#fff" : "#94a3b8", fontSize: 20, fontWeight: 900, boxShadow: (activePrefix || lastAdded) ? `0 4px 12px ${lastAdded ? "#10b981" : "#3b82f6"}40` : "none", cursor: activePrefix ? "pointer" : "not-allowed", transition: "background 0.2s" }}>
-                {lastAdded ? lastAdded : (!activePrefix ? "OK入力" : inputValue ? `${activePrefix} - ${inputValue}` : `${activePrefix} - OK`)}
-              </button>
+              <div style={{
+                display: "flex", alignItems: "center", gap: 8,
+                background: "#fff", borderRadius: 14,
+                border: `2px solid ${activePrefix ? "#3b82f6" : "#e2e8f0"}`,
+                padding: "8px 12px", transition: "border-color 0.2s",
+              }}>
+                <span style={{ fontSize: 28, fontWeight: 900, fontFamily: "monospace", color: activePrefix ? "#3b82f6" : "#cbd5e1", minWidth: 36, textAlign: "center" }}>
+                  {activePrefix || "?"}
+                </span>
+                <span style={{ fontSize: 24, fontWeight: 300, color: "#cbd5e1" }}>-</span>
+                <input ref={inputRef} type="tel" inputMode="numeric" pattern="[0-9]*" placeholder="00" value={inputValue} onChange={handleInputChange} disabled={!activePrefix} autoComplete="off"
+                  style={{ flex: 1, fontSize: 28, fontWeight: 900, fontFamily: "monospace", color: "#0f172a", background: "transparent", border: "none", outline: "none", letterSpacing: "0.15em", textAlign: "center", maxWidth: 80 }}
+                />
+              </div>
+              {lastAdded && (
+                <div style={{ marginTop: 8, padding: "8px 12px", borderRadius: 10, background: "#ecfdf5", border: "1px solid #a7f3d0", textAlign: "center", fontSize: 14, fontWeight: 800, color: "#059669" }}>
+                  ✓ {lastAdded} 追加
+                </div>
+              )}
             </div>
             <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
               {scannedTanks.length === 0 ? (
@@ -309,40 +325,30 @@ function OrdersTab() {
             </div>
           </div>
 
-          <div style={{ width: 70, background: "#fff", borderLeft: "1px solid #e2e8f0", display: "flex", flexDirection: "column", position: "relative" }}>
+          <div style={{ width: 80, background: "#fff", borderLeft: "1px solid #e2e8f0", display: "flex", flexDirection: "column", position: "relative" }}>
             {prefixes.length > 0 && (
-              <>
-                <div style={{ position: "absolute", bottom: 16, left: 6, right: 6, height: 48, border: "3px solid #3b82f6", borderRadius: 12, pointerEvents: "none", zIndex: 10, background: "#3b82f60A" }} />
-                <input ref={inputRef} type="tel" inputMode="numeric" pattern="[0-9]*" value={inputValue} onChange={handleInputChange} style={{ position: "absolute", opacity: 0.01, zIndex: -1 }} />
-                <div ref={dialContainerRef}
-                  onScroll={(e) => {
-                    const el = e.currentTarget;
-                    const { blockHeight } = dialMetrics;
-                    const rawIdx = Math.round(el.scrollTop / blockHeight);
-                    const wrappedIdx = rawIdx % prefixes.length;
-                    if (prefixes[wrappedIdx] && prefixes[wrappedIdx] !== activePrefix) setActivePrefix(prefixes[wrappedIdx]);
-                    const cycleHeight = blockHeight * prefixes.length;
-                    const totalHeight = cycleHeight * 30;
-                    if (el.scrollTop < cycleHeight * 5) el.scrollTop += cycleHeight * 10;
-                    else if (el.scrollTop > totalHeight - cycleHeight * 5) el.scrollTop -= cycleHeight * 10;
-                  }}
-                  style={{ flex: 1, overflowY: "auto", overflowX: "hidden", scrollSnapType: "y mandatory", scrollPaddingBottom: 16 }}>
-                  <div style={{ height: `calc(100% - ${dialMetrics.blockHeight}px)`, flexShrink: 0 }} />
-                  <div style={{ display: "flex", flexDirection: "column", gap: dialMetrics.gap, padding: "0 6px 16px 6px" }}>
-                    {Array(30).fill(prefixes).flat().map((p, index) => {
-                      const isActive = activePrefix === p;
-                      return (
-                        <div key={`${p}-${index}`} style={{ scrollSnapAlign: "end", scrollSnapStop: "always" }}>
-                          <button onClick={(e) => { focusInput(p); e.currentTarget.scrollIntoView({ behavior: "smooth", block: "end" }); }}
-                            style={{ width: "100%", height: 48, borderRadius: 10, flexShrink: 0, border: "none", background: "transparent", color: isActive ? "#3b82f6" : "#94a3b8", fontSize: 22, fontWeight: 900, fontFamily: "monospace", transition: "all 0.15s", cursor: "pointer", transform: isActive ? "scale(1.3)" : "scale(1.0)" }}>
-                            {p}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
+              <div ref={dialContainerRef}
+                onScroll={(e) => {
+                  const el = e.currentTarget;
+                  const rawIdx = Math.round(el.scrollTop / BLOCK_HEIGHT);
+                  const idx = Math.min(Math.max(rawIdx, 0), prefixes.length - 1);
+                  if (prefixes[idx] && prefixes[idx] !== activePrefix) setActivePrefix(prefixes[idx]);
+                }}
+                style={{ flex: 1, overflowY: "auto", overflowX: "hidden", scrollSnapType: "y mandatory", scrollPaddingBottom: 16 }}>
+                <div style={{ display: "flex", flexDirection: "column", padding: "0 6px 16px 6px" }}>
+                  {prefixes.map((p, index) => {
+                    const isActive = activePrefix === p;
+                    return (
+                      <div key={p} style={{ scrollSnapAlign: "end", scrollSnapStop: "always" }}>
+                        <button onClick={(e) => { focusInput(p); e.currentTarget.scrollIntoView({ behavior: "smooth", block: "end" }); }}
+                          style={{ width: "100%", height: 48, borderRadius: 10, flexShrink: 0, border: "none", background: isActive ? "#3b82f615" : "transparent", borderLeft: isActive ? "3px solid #3b82f6" : "3px solid transparent", color: isActive ? "#3b82f6" : "#94a3b8", fontSize: 22, fontWeight: 900, fontFamily: "monospace", transition: "all 0.15s", cursor: "pointer", transform: isActive ? "scale(1.3)" : "scale(1.0)" }}>
+                          {p}
+                        </button>
+                      </div>
+                    );
+                  })}
                 </div>
-              </>
+              </div>
             )}
           </div>
         </div>
@@ -435,18 +441,41 @@ function ApprovalsTab() {
     if (approved.length === 0) { alert("承認するタンクを選択してください"); return; }
     setSubmitting(true);
     try {
-      const batch = writeBatch(db);
       const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-      for (const item of approved) {
+
+      const approvedData = approved.map((item) => {
         const appData = approvals[item.id];
-        const finalStatus = appData.condition === "unused" ? "充填済み" : "空";
-        const finalAction = appData.condition === "unused" ? "未使用返却" : appData.condition === "uncharged" ? "返却(未充填)" : "返却";
+        const tag: ReturnTag =
+          appData.condition === "unused" ? RETURN_TAG.UNUSED
+            : appData.condition === "uncharged" ? RETURN_TAG.DEFECT
+            : RETURN_TAG.NORMAL;
         const note = `[承認] 顧客: ${selectedGroup.customerName} (タグ:${appData.condition})`;
-        batch.set(doc(db, "tanks", item.tankId), { status: finalStatus, location: "倉庫", staff: staffName, updatedAt: serverTimestamp(), logNote: note }, { merge: true });
-        batch.set(doc(collection(db, "logs")), { tankId: item.tankId, action: finalAction, prevStatus: "貸出中", newStatus: finalStatus, location: "倉庫", staff: staffName, timestamp: serverTimestamp(), note, customerId: selectedGroup.customerId });
-        batch.update(doc(db, "transactions", item.id), { status: "completed", finalCondition: appData.condition, fulfilledAt: serverTimestamp(), fulfilledBy: staffName });
-      }
-      await batch.commit();
+        return { item, tag, condition: appData.condition, note };
+      });
+
+      await applyBulkTankOperations(
+        approvedData.map(({ item, tag, note }) => ({
+          tankId: item.tankId,
+          transitionAction: resolveReturnAction(tag, STATUS.LENT),
+          currentStatus: STATUS.LENT,
+          staff: staffName,
+          location: "倉庫",
+          tankNote: note,
+          logNote: note,
+          logExtra: { customerId: selectedGroup.customerId },
+        })),
+        (batch) => {
+          approvedData.forEach(({ item, condition }) => {
+            batch.update(doc(db, "transactions", item.id), {
+              status: "completed",
+              finalCondition: condition,
+              fulfilledAt: serverTimestamp(),
+              fulfilledBy: staffName,
+            });
+          });
+        }
+      );
+
       alert(`${approved.length}件の返却を承認しました`);
       setSelectedGroup(null);
       fetchData();
@@ -530,6 +559,256 @@ function ApprovalsTab() {
         </div>
       )}
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+    </div>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   Tab 3: 一括返却
+═══════════════════════════════════════════════ */
+type BulkTagType = "normal" | "unused" | "defect";
+
+interface BulkTankDoc {
+  id: string;
+  status: string;
+  location: string;
+  staff: string;
+  updatedAt: any;
+  logNote?: string;
+}
+
+const BULK_TAGS: { id: BulkTagType; label: string; color: string; bg: string; borderColor: string }[] = [
+  { id: "normal", label: "通常", color: "#64748b", bg: "#f1f5f9", borderColor: "#e2e8f0" },
+  { id: "unused", label: "未使用", color: "#10b981", bg: "#ecfdf5", borderColor: "#6ee7b7" },
+  { id: "defect", label: "未充填", color: "#ef4444", bg: "#fef2f2", borderColor: "#fca5a5" },
+];
+
+function BulkReturnTab() {
+  const [loading, setLoading] = useState(true);
+  const [groupedTanks, setGroupedTanks] = useState<Record<string, (BulkTankDoc & { tag: BulkTagType })[]>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [returning, setReturning] = useState<Record<string, boolean>>({});
+
+  const fetchData = useCallback(async () => {
+    setLoading(true);
+    try {
+      const q = query(collection(db, "tanks"), where("status", "in", [STATUS.LENT, STATUS.UNRETURNED]));
+      const snap = await getDocs(q);
+
+      const groups: Record<string, (BulkTankDoc & { tag: BulkTagType })[]> = {};
+
+      snap.forEach((d) => {
+        const data = d.data();
+        const loc = data.location || "不明";
+        if (!groups[loc]) groups[loc] = [];
+
+        let tag: BulkTagType = "normal";
+        if (data.logNote === "[TAG:unused]") tag = "unused";
+        if (data.logNote === "[TAG:defect]") tag = "defect";
+
+        groups[loc].push({ id: d.id, ...data, tag } as any);
+      });
+
+      // グループ内のタンクをIDでソート
+      Object.keys(groups).forEach(loc => {
+        groups[loc].sort((a, b) => a.id.localeCompare(b.id));
+      });
+
+      setGroupedTanks(groups);
+
+      // 全て展開
+      const newExpanded: Record<string, boolean> = {};
+      Object.keys(groups).forEach(loc => newExpanded[loc] = true);
+      setExpanded(newExpanded);
+
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchData(); }, [fetchData]);
+
+  const toggleExpand = (loc: string) => {
+    setExpanded(prev => ({ ...prev, [loc]: !prev[loc] }));
+  };
+
+  const updateTag = async (loc: string, tankId: string, newTag: BulkTagType) => {
+    // 楽観的UI更新
+    setGroupedTanks(prev => {
+      const g = { ...prev };
+      g[loc] = g[loc].map(t => (t.id === tankId ? { ...t, tag: newTag } : t));
+      return g;
+    });
+
+    try {
+      let logNote = "";
+      if (newTag === "unused") logNote = "[TAG:unused]";
+      if (newTag === "defect") logNote = "[TAG:defect]";
+
+      const ref = doc(db, "tanks", tankId);
+      await writeBatch(db).update(ref, { logNote }).commit();
+    } catch (e) {
+      console.error("Failed to update tag", e);
+      fetchData();
+    }
+  };
+
+  const handleBulkReturnForLocation = async (loc: string) => {
+    const tanksToReturn = groupedTanks[loc];
+    if (!tanksToReturn || tanksToReturn.length === 0) return;
+
+    if (!confirm(`${loc} の貸出中タンク全 ${tanksToReturn.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`)) return;
+
+    setReturning(prev => ({ ...prev, [loc]: true }));
+    try {
+      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
+
+      await applyBulkTankOperations(
+        tanksToReturn.map((tank) => {
+          const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
+          return {
+            tankId: tank.id,
+            transitionAction: resolveReturnAction(tag, tank.status),
+            currentStatus: tank.status,
+            staff: staffName,
+            location: "倉庫",
+          };
+        })
+      );
+
+      alert(`${loc} の一括返却が完了しました。`);
+      fetchData();
+
+    } catch (e: any) {
+      alert("エラー: " + e.message);
+    } finally {
+      setReturning(prev => ({ ...prev, [loc]: false }));
+    }
+  };
+
+  const locationKeys = Object.keys(groupedTanks).sort();
+
+  if (loading) {
+    return (
+      <div style={{ textAlign: "center", padding: 60, color: "#94a3b8", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+        <Loader2 size={24} style={{ animation: "spin 1s linear infinite", color: "#64748b" }} />
+        <span style={{ fontSize: 14, fontWeight: 600 }}>読み込み中…</span>
+        <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
+      {locationKeys.length === 0 ? (
+        <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 40, textAlign: "center" }}>
+          <CheckCircle2 size={40} color="#10b981" style={{ marginBottom: 16, opacity: 0.8 }} />
+          <p style={{ fontSize: 15, fontWeight: 700, color: "#334155" }}>貸出中のタンクはありません</p>
+          <p style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>すべて返却済みです</p>
+        </div>
+      ) : (
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          {locationKeys.map(loc => {
+            const tanks = groupedTanks[loc];
+            const isExpanded = expanded[loc];
+            const isReturning = returning[loc];
+
+            return (
+              <div key={loc} style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, overflow: "hidden" }}>
+
+                {/* アコーディオンヘッダー */}
+                <div
+                  onClick={() => toggleExpand(loc)}
+                  style={{
+                    padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between",
+                    cursor: "pointer", userSelect: "none", background: isExpanded ? "#f8fafc" : "#fff",
+                    borderBottom: isExpanded ? "1px solid #e8eaed" : "none", transition: "background 0.2s"
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <div style={{ padding: 4, background: "#e0f2fe", borderRadius: 8, color: "#0284c7" }}>
+                      {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", margin: 0 }}>{loc}</h3>
+                      <p style={{ fontSize: 13, color: "#64748b", margin: "2px 0 0 0", fontWeight: 600 }}>
+                        {tanks.length}本 貸出中
+                      </p>
+                    </div>
+                  </div>
+
+                  {/* 一括返却ボタン */}
+                  <div onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleBulkReturnForLocation(loc)}
+                      disabled={isReturning}
+                      style={{
+                        padding: "8px 16px", borderRadius: 10, border: "none",
+                        background: isReturning ? "#e2e8f0" : "#0f172a",
+                        color: isReturning ? "#94a3b8" : "#fff",
+                        fontSize: 13, fontWeight: 700, cursor: isReturning ? "not-allowed" : "pointer",
+                        display: "flex", alignItems: "center", gap: 6, transition: "all 0.15s",
+                        boxShadow: isReturning ? "none" : "0 2px 4px rgba(0,0,0,0.1)"
+                      }}
+                    >
+                      {isReturning ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <ArrowDownToLine size={16} />}
+                      {loc}分を一括返却
+                    </button>
+                  </div>
+                </div>
+
+                {/* アコーディオンボディ */}
+                {isExpanded && (
+                  <div style={{ padding: "16px 20px", background: "#fff" }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                      {tanks.map(tank => (
+                        <div key={tank.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", border: "1px solid #f1f5f9", borderRadius: 12, background: "#f8fafc" }}>
+
+                          <div style={{ display: "flex", flexDirection: "column" }}>
+                            <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "monospace", color: "#1e293b", letterSpacing: "0.05em" }}>
+                              {tank.id}
+                            </span>
+                            <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>
+                              {tank.staff}
+                            </span>
+                          </div>
+
+                          {/* タグセレクター */}
+                          <div style={{ display: "flex", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 2, flexShrink: 0 }}>
+                            {BULK_TAGS.map((tag) => {
+                              const active = tank.tag === tag.id;
+                              return (
+                                <button
+                                  key={tag.id}
+                                  onClick={() => updateTag(loc, tank.id, tag.id)}
+                                  style={{
+                                    padding: "6px 10px", border: "none", borderRadius: 6,
+                                    background: active ? tag.bg : "transparent",
+                                    color: active ? tag.color : "#94a3b8",
+                                    fontSize: 11, fontWeight: active ? 800 : 600,
+                                    cursor: "pointer", transition: "all 0.15s",
+                                  }}
+                                >
+                                  {tag.label}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

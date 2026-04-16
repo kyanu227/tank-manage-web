@@ -1,9 +1,11 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { PieChart, Clock, Trash2, Edit2, Filter, X, CheckCircle2 } from "lucide-react";
+import { PieChart, Clock, Edit2, X, CheckCircle2, Undo2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { collection, getDocs, query, orderBy, limit, doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { STATUS_COLORS } from "@/lib/tank-rules";
+import { voidLog } from "@/lib/tank-operation";
 
 interface TankSummary {
   [status: string]: number;
@@ -17,19 +19,16 @@ interface LogEntry {
   location: string;
   timestamp: any;
   note: string;
+  voided?: boolean;
+  voidedAt?: any;
+  voidedBy?: string;
+  voidReason?: string;
+  prevStatus?: string;
 }
 
-const STATUS_COLORS: Record<string, string> = {
-  "充填済み": "#10b981",
-  "空": "#94a3b8",
-  "貸出中": "#6366f1",
-  "自社利用中": "#f59e0b",
-  "破損": "#ef4444",
-  "不良": "#ef4444",
-  "故障": "#ef4444",
-  "未返却": "#f97316",
-  "保管中": "#8b5cf6",
-};
+type LogFilter = "active" | "voided" | "all";
+
+// STATUS_COLORS は @/lib/tank-rules から import
 
 export default function StaffDashboard() {
   const [summary, setSummary] = useState<TankSummary>({});
@@ -42,6 +41,9 @@ export default function StaffDashboard() {
   const [editTankId, setEditTankId] = useState("");
   const [editLocation, setEditLocation] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+
+  // Log filter
+  const [logFilter, setLogFilter] = useState<LogFilter>("active");
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -72,48 +74,36 @@ export default function StaffDashboard() {
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
-  const handleDelete = async (log: LogEntry) => {
-    if (!confirm("このログを削除しますか？\nタンクのステータスは直前の状態に巻き戻ります。")) return;
-    
+  const handleVoid = async (log: LogEntry) => {
+    const reason = prompt(
+      "このログを取消しますか？\n\n物理削除ではなく論理削除（voided フラグ）です。\n取消後も監査のため記録は残ります。\n\n取消理由（任意）:",
+      ""
+    );
+    if (reason === null) return; // キャンセル
+
     try {
-      const batch = writeBatch(db);
-      
-      // 1. Delete the log entry
-      batch.delete(doc(db, "logs", log.id));
-
-      // 2. Rollback the tank status
-      // We look up the 'prevStatus' from the log, and we try to guess the location.
-      // If returning, we guess it goes back to the customer. If lending, it goes back to warehouse.
-      let rollbackLocation = "倉庫";
-      if (log.action.includes("返却")) {
-         rollbackLocation = log.location; // Return from someone, so prev location is them
-      } else if (log.action === "貸出") {
-         rollbackLocation = "倉庫"; 
-      } else if (log.action.includes("自社")) {
-         rollbackLocation = "倉庫";
-      }
-
-      batch.set(doc(db, "tanks", log.tankId), {
-        status: (log as any).prevStatus || "空", // Fallback to 空 if prevStatus missing
-        location: rollbackLocation,
-        updatedAt: serverTimestamp(),
-      }, { merge: true });
-
-      // 3. Record deletion in 'delete_history' (optional but good practice for audits)
       const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-      batch.set(doc(collection(db, "delete_history")), {
-        deletedLogId: log.id,
-        tankId: log.tankId,
-        originalAction: log.action,
-        deletedBy: staffName,
-        deletedAt: serverTimestamp(),
-        restoredStatus: (log as any).prevStatus || "空",
+
+      // 巻き戻し先の location を推定
+      let rollbackLocation = "倉庫";
+      if (log.action.includes("返却")) rollbackLocation = log.location;
+
+      await voidLog({
+        logId: log.id,
+        voidedBy: staffName,
+        reason,
+        rollbackTank: log.prevStatus
+          ? {
+              tankId: log.tankId,
+              toStatus: log.prevStatus,
+              toLocation: rollbackLocation,
+            }
+          : undefined,
       });
 
-      await batch.commit();
       fetchData();
     } catch (e: any) {
-      alert("削除エラー: " + e.message);
+      alert("取消エラー: " + e.message);
     }
   };
 
@@ -218,56 +208,114 @@ export default function StaffDashboard() {
 
           {/* Recent Logs */}
           <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 20 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 12 }}>
               <Clock size={16} color="#0ea5e9" />
-              <span style={{ fontSize: 13, fontWeight: 700, color: "#64748b" }}>直近の操作ログ ({logs.length}件)</span>
-            </div>
-            {logs.length === 0 ? (
-              <p style={{ fontSize: 13, color: "#cbd5e1", textAlign: "center", padding: 16 }}>ログがありません</p>
-            ) : (
-              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                {logs.map((log) => (
-                  <div
-                    key={log.id}
+              <span style={{ fontSize: 13, fontWeight: 700, color: "#64748b", flex: 1 }}>
+                操作ログ ({logs.filter(l => logFilter === "all" ? true : logFilter === "voided" ? l.voided : !l.voided).length}件)
+              </span>
+              {/* Filter tabs */}
+              <div style={{ display: "flex", gap: 2, background: "#f1f5f9", borderRadius: 8, padding: 2 }}>
+                {([
+                  { id: "active", label: "有効" },
+                  { id: "voided", label: "取消済" },
+                  { id: "all", label: "全て" },
+                ] as const).map((f) => (
+                  <button
+                    key={f.id}
+                    onClick={() => setLogFilter(f.id)}
                     style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      padding: "10px 12px", borderRadius: 10,
-                      background: "#f8fafc", border: "1px solid #f1f5f9",
+                      padding: "4px 10px",
+                      borderRadius: 6,
+                      border: "none",
+                      background: logFilter === f.id ? "#fff" : "transparent",
+                      color: logFilter === f.id ? "#0f172a" : "#94a3b8",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      boxShadow: logFilter === f.id ? "0 1px 2px rgba(0,0,0,0.06)" : "none",
                     }}
                   >
-                    <span style={{ fontFamily: "monospace", fontSize: 14, fontWeight: 700, color: "#0f172a", minWidth: 48 }}>
-                      {log.tankId}
-                    </span>
-                    <span
-                      style={{
-                        fontSize: 11, fontWeight: 700, padding: "2px 8px",
-                        borderRadius: 6, background: STATUS_COLORS[log.action]
-                          ? `${STATUS_COLORS[log.action]}18` : "#f1f5f9",
-                        color: STATUS_COLORS[log.action] || "#64748b",
-                      }}
-                    >
-                      {log.action}
-                    </span>
-                    <span style={{ fontSize: 12, color: "#94a3b8", flex: 1 }}>{log.location}</span>
-                    <span style={{ fontSize: 11, color: "#cbd5e1", minWidth: 70, textAlign: "right" as const }}>
-                      {formatTime(log.timestamp)}
-                    </span>
-                    <button
-                      onClick={() => startEdit(log)}
-                      style={{ border: "none", background: "none", cursor: "pointer", color: "#94a3b8", padding: 2 }}
-                    >
-                      <Edit2 size={14} />
-                    </button>
-                    <button
-                      onClick={() => handleDelete(log)}
-                      style={{ border: "none", background: "none", cursor: "pointer", color: "#cbd5e1", padding: 2 }}
-                    >
-                      <Trash2 size={14} />
-                    </button>
-                  </div>
+                    {f.label}
+                  </button>
                 ))}
               </div>
-            )}
+            </div>
+            {(() => {
+              const filtered = logs.filter((l) =>
+                logFilter === "all" ? true : logFilter === "voided" ? l.voided : !l.voided
+              );
+              if (filtered.length === 0) {
+                return <p style={{ fontSize: 13, color: "#cbd5e1", textAlign: "center", padding: 16 }}>
+                  {logFilter === "voided" ? "取消済のログはありません" : "ログがありません"}
+                </p>;
+              }
+              return (
+                <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                  {filtered.map((log) => (
+                    <div
+                      key={log.id}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 10,
+                        padding: "10px 12px", borderRadius: 10,
+                        background: log.voided ? "#fafbfc" : "#f8fafc",
+                        border: `1px solid ${log.voided ? "#fecaca" : "#f1f5f9"}`,
+                        opacity: log.voided ? 0.65 : 1,
+                      }}
+                    >
+                      <span style={{
+                        fontFamily: "monospace", fontSize: 14, fontWeight: 700,
+                        color: "#0f172a", minWidth: 48,
+                        textDecoration: log.voided ? "line-through" : "none",
+                      }}>
+                        {log.tankId}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11, fontWeight: 700, padding: "2px 8px",
+                          borderRadius: 6, background: STATUS_COLORS[log.action]
+                            ? `${STATUS_COLORS[log.action]}18` : "#f1f5f9",
+                          color: STATUS_COLORS[log.action] || "#64748b",
+                          textDecoration: log.voided ? "line-through" : "none",
+                        }}
+                      >
+                        {log.action}
+                      </span>
+                      {log.voided && (
+                        <span style={{
+                          fontSize: 10, fontWeight: 800, padding: "2px 6px",
+                          borderRadius: 5, background: "#fef2f2", color: "#dc2626",
+                          border: "1px solid #fecaca",
+                        }}>
+                          取消
+                        </span>
+                      )}
+                      <span style={{ fontSize: 12, color: "#94a3b8", flex: 1 }}>{log.location}</span>
+                      <span style={{ fontSize: 11, color: "#cbd5e1", minWidth: 70, textAlign: "right" as const }}>
+                        {formatTime(log.timestamp)}
+                      </span>
+                      {!log.voided && (
+                        <>
+                          <button
+                            onClick={() => startEdit(log)}
+                            style={{ border: "none", background: "none", cursor: "pointer", color: "#94a3b8", padding: 2 }}
+                            title="編集"
+                          >
+                            <Edit2 size={14} />
+                          </button>
+                          <button
+                            onClick={() => handleVoid(log)}
+                            style={{ border: "none", background: "none", cursor: "pointer", color: "#cbd5e1", padding: 2 }}
+                            title="取消"
+                          >
+                            <Undo2 size={14} />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
         </>
       )}

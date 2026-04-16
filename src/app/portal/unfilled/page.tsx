@@ -4,19 +4,18 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, Send, CheckCircle2, Delete, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase/config";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, getDocs, query, where, serverTimestamp } from "firebase/firestore";
 
 interface TankItem {
   id: string;
   tankId: string;
 }
 
-// Temporary simulated query for lent tanks.
-// Replace with: collection(db, "lendings").where("status", "==", "active")
-const simulatedLentTanks = ["A-01", "A-02", "B-10", "C-05", "D-99", "E-10", "F-22", "X-01"];
-
 export default function UnfilledReportPage() {
   const router = useRouter();
+  const sessionStr = typeof window !== "undefined" ? localStorage.getItem("customerSession") : null;
+  const session = sessionStr ? JSON.parse(sessionStr) : {};
+  const customerName: string = session.name || "";
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [tanks, setTanks] = useState<TankItem[]>([]);
@@ -30,21 +29,38 @@ export default function UnfilledReportPage() {
   const [lentTanks, setLentTanks] = useState<string[]>([]);
 
   useEffect(() => {
-    // Simulate fetching lent tanks from Firebase
-    const timer = setTimeout(() => {
-      setLentTanks(simulatedLentTanks);
-      
-      const prefixes = new Set<string>();
-      simulatedLentTanks.forEach(id => {
-        const match = id.match(/^[A-Za-z]/);
-        if (match) prefixes.add(match[0].toUpperCase());
-      });
-      setAvailablePrefixes(Array.from(prefixes).sort());
-      
+    if (!customerName) {
       setLoading(false);
-    }, 600);
-    return () => clearTimeout(timer);
-  }, []);
+      return;
+    }
+
+    const fetchLentTanks = async () => {
+      try {
+        const tankSnap = await getDocs(query(
+          collection(db, "tanks"),
+          where("location", "==", customerName),
+          where("status", "==", "貸出中"),
+        ));
+
+        const tankIds: string[] = [];
+        tankSnap.forEach((d) => tankIds.push(d.id));
+        setLentTanks(tankIds);
+
+        const prefixes = new Set<string>();
+        tankIds.forEach((id) => {
+          const match = id.match(/^[A-Za-z]/);
+          if (match) prefixes.add(match[0].toUpperCase());
+        });
+        setAvailablePrefixes(Array.from(prefixes).sort());
+      } catch (e) {
+        console.error("Failed to fetch lent tanks:", e);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchLentTanks();
+  }, [customerName]);
 
   const handlePrefixClick = (prefix: string) => {
     setSelectedPrefix(prefix);

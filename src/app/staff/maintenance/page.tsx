@@ -3,7 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { Wrench, CheckCircle2, Send, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
+import { STATUS, ACTION } from "@/lib/tank-rules";
+import { applyBulkTankOperations } from "@/lib/tank-operation";
 
 type MaintMode = "repair" | "inspection";
 
@@ -17,19 +19,19 @@ interface TankItem {
 const MODES = {
   repair: {
     label: "修理済み",
-    desc: "破損/不良/故障 → 空に変更",
+    desc: "破損/不良 → 空に変更",
     color: "#0ea5e9",
     bg: "#f0f9ff",
-    targetStatuses: ["破損", "不良", "故障"],
-    nextStatus: "空",
+    targetStatuses: [STATUS.DAMAGED, STATUS.DEFECTIVE],
+    action: ACTION.REPAIRED,
   },
   inspection: {
     label: "耐圧検査完了",
     desc: "期限切れタンクの検査完了処理",
     color: "#8b5cf6",
     bg: "#f5f3ff",
-    targetStatuses: [],  // All tanks — filter by date in real implementation
-    nextStatus: "空",
+    targetStatuses: [] as string[],
+    action: ACTION.INSPECTION,
   },
 } as const;
 
@@ -50,7 +52,7 @@ export default function MaintenancePage() {
       snap.forEach((d) => {
         const data = d.data();
         if (mode === "repair") {
-          if (["破損", "不良", "故障"].includes(data.status)) {
+          if ((MODES.repair.targetStatuses as readonly string[]).includes(data.status)) {
             items.push({ id: d.id, status: data.status, note: data.note || "", selected: false });
           }
         } else {
@@ -85,19 +87,16 @@ export default function MaintenancePage() {
     if (!confirm(`${config.label}：${selected.length}本を処理しますか？`)) return;
     setSubmitting(true);
     try {
-      const batch = writeBatch(db);
-      selected.forEach((t) => {
-        batch.set(doc(db, "tanks", t.id), {
-          status: config.nextStatus, location: "倉庫", staff: "スタッフ",
-          note: "", updatedAt: serverTimestamp(),
-        }, { merge: true });
-        batch.set(doc(collection(db, "logs")), {
-          tankId: t.id, action: config.label, prevStatus: t.status,
-          newStatus: config.nextStatus, location: "倉庫", staff: "スタッフ",
-          timestamp: serverTimestamp(),
-        });
-      });
-      await batch.commit();
+      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
+      await applyBulkTankOperations(
+        selected.map((t) => ({
+          tankId: t.id,
+          transitionAction: config.action,
+          currentStatus: t.status,
+          staff: staffName,
+          location: "倉庫",
+        }))
+      );
       setResult({ success: true, message: `${selected.length}本の${config.label}を完了しました` });
       fetchTanks();
     } catch (e: any) {

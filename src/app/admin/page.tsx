@@ -1,15 +1,81 @@
 "use client";
 
+import { useState, useEffect } from "react";
 import { BarChart3, Truck, Users, AlertTriangle } from "lucide-react";
+import { db } from "@/lib/firebase/config";
+import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
 
-const CARDS = [
-  { label: "本日の売上", value: "—", icon: BarChart3, color: "#6366f1", bg: "#eef2ff" },
-  { label: "貸出中", value: "—", icon: Truck, color: "#0ea5e9", bg: "#f0f9ff" },
-  { label: "稼働スタッフ", value: "—", icon: Users, color: "#10b981", bg: "#ecfdf5" },
-  { label: "要対応", value: "—", icon: AlertTriangle, color: "#f59e0b", bg: "#fffbeb" },
-];
+// カード定義（アイコン・色のみ。値はstateで管理）
+const CARD_DEFS = [
+  { key: "todayOps", label: "本日の操作", icon: BarChart3, color: "#6366f1", bg: "#eef2ff" },
+  { key: "renting", label: "貸出中", icon: Truck, color: "#0ea5e9", bg: "#f0f9ff" },
+  { key: "activeStaff", label: "稼働スタッフ", icon: Users, color: "#10b981", bg: "#ecfdf5" },
+  { key: "pending", label: "要対応", icon: AlertTriangle, color: "#f59e0b", bg: "#fffbeb" },
+] as const;
+
+type CardKey = (typeof CARD_DEFS)[number]["key"];
 
 export default function AdminDashboardPage() {
+  const [loading, setLoading] = useState(true);
+  const [values, setValues] = useState<Record<CardKey, number>>({
+    todayOps: 0,
+    renting: 0,
+    activeStaff: 0,
+    pending: 0,
+  });
+
+  useEffect(() => {
+    const fetchDashboardData = async () => {
+      try {
+        // 今日の0時（ローカルタイム）
+        const now = new Date();
+        const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
+        const todayTimestamp = Timestamp.fromDate(todayStart);
+
+        // 3つのクエリを並列実行
+        const [logsSnap, tanksSnap, txSnap] = await Promise.all([
+          // 本日のログ → 操作件数 + ユニークスタッフ数
+          getDocs(
+            query(collection(db, "logs"), where("timestamp", ">=", todayTimestamp))
+          ),
+          // 貸出中タンク数
+          getDocs(
+            query(collection(db, "tanks"), where("status", "==", "貸出中"))
+          ),
+          // 要対応トランザクション（pending / pending_approval）
+          getDocs(
+            query(
+              collection(db, "transactions"),
+              where("status", "in", ["pending", "pending_approval"])
+            )
+          ),
+        ]);
+
+        // ログからユニークスタッフ数を集計
+        const staffSet = new Set<string>();
+        logsSnap.docs.forEach((doc) => {
+          const data = doc.data();
+          if (data.staff) {
+            staffSet.add(data.staff);
+          }
+        });
+
+        setValues({
+          todayOps: logsSnap.size,
+          renting: tanksSnap.size,
+          activeStaff: staffSet.size,
+          pending: txSnap.size,
+        });
+      } catch (err) {
+        console.error("ダッシュボードデータ取得エラー:", err);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchDashboardData();
+  }, []);
+
   return (
     <div>
       <div style={{ marginBottom: 32 }}>
@@ -29,11 +95,12 @@ export default function AdminDashboardPage() {
           marginBottom: 32,
         }}
       >
-        {CARDS.map((card) => {
+        {CARD_DEFS.map((card) => {
           const Icon = card.icon;
+          const displayValue = loading ? "—" : values[card.key].toLocaleString();
           return (
             <div
-              key={card.label}
+              key={card.key}
               style={{
                 background: "#fff",
                 border: "1px solid #e8eaed",
@@ -49,7 +116,7 @@ export default function AdminDashboardPage() {
                   {card.label}
                 </p>
                 <p style={{ fontSize: 32, fontWeight: 800, color: "#0f172a", lineHeight: 1 }}>
-                  {card.value}
+                  {displayValue}
                 </p>
               </div>
               <div
@@ -64,24 +131,6 @@ export default function AdminDashboardPage() {
             </div>
           );
         })}
-      </div>
-
-      <div
-        style={{
-          background: "#fff",
-          border: "1px solid #e8eaed",
-          borderRadius: 16,
-          padding: "32px",
-          textAlign: "center",
-          color: "#94a3b8",
-        }}
-      >
-        <p style={{ fontSize: 15, fontWeight: 600, marginBottom: 4 }}>
-          Firebaseに接続後、リアルタイムデータが表示されます
-        </p>
-        <p style={{ fontSize: 13 }}>
-          先に「設定変更」からマスターデータを登録してください
-        </p>
       </div>
     </div>
   );

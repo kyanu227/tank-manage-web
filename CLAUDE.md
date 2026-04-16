@@ -26,7 +26,7 @@ src/
 │   ├── globals.css             # CSS変数・プリセットクラス
 │   ├── admin/                  # 管理画面（AdminAuthGuard）
 │   │   ├── layout.tsx          # 管理レイアウト・ナビ
-│   │   ├── page.tsx            # ダッシュボード [スケルトン]
+│   │   ├── page.tsx            # ダッシュボード
 │   │   ├── settings/           # マスターデータ管理
 │   │   ├── permissions/        # ページ権限制御
 │   │   ├── customers/          # 顧客管理・PIN管理
@@ -38,14 +38,14 @@ src/
 │   ├── staff/                  # スタッフ操作画面（StaffAuthGuard）
 │   │   ├── layout.tsx          # スタッフレイアウト・ナビ
 │   │   ├── page.tsx            # メイン操作（貸出/返却/充填）
-│   │   ├── orders/             # 受注管理・返却承認
-│   │   ├── returns/            # 現場返却（タグ付け）
+│   │   ├── orders/             # 受注管理・返却承認・一括返却（3タブ）
+│   │   ├── returns/            # 現場返却（※ordersに統合済み、残存）
 │   │   ├── damage/             # 破損報告
 │   │   ├── maintenance/        # メンテナンス（修理・耐圧）
 │   │   ├── order/              # 資材発注
-│   │   ├── mypage/             # マイページ [スケルトン]
+│   │   ├── mypage/             # マイページ
 │   │   ├── inhouse/            # 自社タンク管理
-│   │   ├── bulk-return/        # 一括返却
+│   │   ├── bulk-return/        # 一括返却（※ordersに統合済み、残存）
 │   │   └── dashboard/          # ステータス集計・ログ管理
 │   └── portal/                 # 顧客ポータル（localStorageセッション）
 │       ├── layout.tsx          # ポータルレイアウト・セッション管理
@@ -55,7 +55,7 @@ src/
 │       ├── setup/              # 初期設定（会社名・パスコード表示）
 │       ├── order/              # タンク発注
 │       ├── return/             # 返却申請（自動返却対応）
-│       └── unfilled/           # 未充填報告 [一部スケルトン]
+│       └── unfilled/           # 未充填報告
 ├── components/
 │   ├── AdminAuthGuard.tsx      # 管理者認証・権限ガード
 │   ├── StaffAuthGuard.tsx      # スタッフ認証ガード

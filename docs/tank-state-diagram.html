@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>タンク状態遷移図</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Hiragino Sans", sans-serif;
+    background: #0f172a;
+    color: #e2e8f0;
+    min-height: 100vh;
+    padding: 40px 20px;
+  }
+  h1 { text-align: center; font-size: 24px; font-weight: 700; margin-bottom: 8px; color: #fff; }
+  .subtitle { text-align: center; font-size: 13px; color: #64748b; margin-bottom: 40px; }
+  .diagram-container {
+    max-width: 900px;
+    margin: 0 auto;
+    position: relative;
+  }
+
+  /* ── Section ── */
+  .section {
+    background: #1e293b;
+    border-radius: 16px;
+    padding: 28px 24px;
+    margin-bottom: 24px;
+    border: 1px solid #334155;
+  }
+  .section-title {
+    font-size: 14px;
+    font-weight: 700;
+    color: #94a3b8;
+    margin-bottom: 20px;
+    letter-spacing: 0.5px;
+  }
+
+  /* ── Flow row ── */
+  .flow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+  }
+  .flow:last-child { margin-bottom: 0; }
+
+  /* ── Status node ── */
+  .node {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 10px 18px;
+    border-radius: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    white-space: nowrap;
+    min-width: 80px;
+    text-align: center;
+  }
+  .node.filled    { background: #166534; color: #bbf7d0; border: 2px solid #22c55e; }
+  .node.lent      { background: #1e3a5f; color: #93c5fd; border: 2px solid #3b82f6; }
+  .node.empty     { background: #44403c; color: #d6d3d1; border: 2px solid #78716c; }
+  .node.inhouse   { background: #713f12; color: #fde68a; border: 2px solid #f59e0b; }
+  .node.damaged   { background: #7f1d1d; color: #fca5a5; border: 2px solid #ef4444; }
+  .node.special   { background: #312e81; color: #c7d2fe; border: 2px solid #6366f1; }
+  .node.storage   { background: #2e1065; color: #ddd6fe; border: 2px solid #8b5cf6; }
+  .node.unreturned{ background: #4c1d95; color: #e9d5ff; border: 2px solid #a78bfa; }
+
+  /* ── Arrow ── */
+  .arrow {
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    min-width: 80px;
+  }
+  .arrow-line {
+    font-size: 18px;
+    color: #475569;
+    letter-spacing: -2px;
+  }
+  .arrow-label {
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    white-space: nowrap;
+  }
+  .arrow-sub {
+    font-size: 10px;
+    color: #64748b;
+    font-weight: 400;
+  }
+
+  /* ── Branch ── */
+  .branch {
+    margin-left: 60px;
+    padding-left: 20px;
+    border-left: 2px dashed #334155;
+  }
+  .branch .flow { justify-content: flex-start; }
+
+  /* ── Note ── */
+  .note {
+    display: inline-block;
+    padding: 6px 12px;
+    border-radius: 8px;
+    font-size: 11px;
+    color: #94a3b8;
+    background: #0f172a;
+    border: 1px solid #334155;
+  }
+
+  /* ── Table ── */
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+  }
+  th {
+    text-align: left;
+    padding: 8px 12px;
+    background: #0f172a;
+    color: #94a3b8;
+    font-weight: 600;
+    border-bottom: 2px solid #334155;
+  }
+  td {
+    padding: 8px 12px;
+    border-bottom: 1px solid #1e293b;
+    color: #cbd5e1;
+  }
+  tr:hover td { background: #0f172a; }
+  .tag { font-size: 11px; padding: 2px 8px; border-radius: 4px; font-weight: 600; }
+  .tag-yes { background: #166534; color: #bbf7d0; }
+  .tag-no  { background: #7f1d1d; color: #fca5a5; }
+  .tag-na  { background: #334155; color: #64748b; }
+
+  /* ── Legend ── */
+  .legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    justify-content: center;
+    margin-bottom: 32px;
+  }
+  .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: #94a3b8;
+  }
+  .legend-dot {
+    width: 12px;
+    height: 12px;
+    border-radius: 4px;
+  }
+
+  /* ── Context info ── */
+  .context-box {
+    background: #0f172a;
+    border: 1px solid #334155;
+    border-radius: 10px;
+    padding: 16px 20px;
+    margin-top: 16px;
+  }
+  .context-box h4 {
+    font-size: 12px;
+    color: #64748b;
+    margin-bottom: 8px;
+    font-weight: 600;
+  }
+  .context-box p {
+    font-size: 12px;
+    color: #94a3b8;
+    line-height: 1.6;
+  }
+  .context-box code {
+    background: #1e293b;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-size: 11px;
+    color: #e2e8f0;
+  }
+</style>
+</head>
+<body>
+
+<h1>タンク状態遷移図</h1>
+<p class="subtitle">タンク管理システム - 全ステータスと遷移パスの一覧</p>
+
+<!-- Legend -->
+<div class="legend">
+  <div class="legend-item"><div class="legend-dot" style="background:#22c55e"></div>充填済み</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#3b82f6"></div>貸出中</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#78716c"></div>空</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#f59e0b"></div>自社利用中</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#ef4444"></div>破損/不良/故障</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#8b5cf6"></div>保管中</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#a78bfa"></div>未返却</div>
+  <div class="legend-item"><div class="legend-dot" style="background:#6366f1"></div>特殊(免除)</div>
+</div>
+
+<div class="diagram-container">
+
+  <!-- ═══ 1. Main cycle ═══ -->
+  <div class="section">
+    <div class="section-title">1. メインサイクル（通常業務フロー）</div>
+
+    <div class="flow">
+      <div class="node filled">充填済み</div>
+      <div class="arrow">
+        <div class="arrow-label">貸出</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node lent">貸出中</div>
+      <div class="arrow">
+        <div class="arrow-label">返却(通常)</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node empty">空</div>
+      <div class="arrow">
+        <div class="arrow-label">充填</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node filled">充填済み</div>
+    </div>
+
+    <div class="context-box">
+      <h4>コンテキスト情報（遷移ルールには含めない）</h4>
+      <p>
+        <code>destination</code> 貸出先名（例: 〇〇商事）<br>
+        <code>staffId</code> 操作したスタッフ<br>
+        <code>location</code> 現在地（倉庫 / 自社 / 貸出先名）
+      </p>
+    </div>
+  </div>
+
+  <!-- ═══ 2. Return branches ═══ -->
+  <div class="section">
+    <div class="section-title">2. 返却の分岐（タグで遷移先が変わる）</div>
+
+    <div class="flow">
+      <div class="node lent">貸出中</div>
+      <div class="arrow">
+        <div class="arrow-label">通常返却</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node empty">空</div>
+      <div class="note">ガスを使い切った（通常）</div>
+    </div>
+    <div class="flow">
+      <div class="node lent">貸出中</div>
+      <div class="arrow">
+        <div class="arrow-label">未使用返却</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node filled">充填済み</div>
+      <div class="note">ガスが残っている → 充填不要</div>
+    </div>
+    <div class="flow">
+      <div class="node lent">貸出中</div>
+      <div class="arrow">
+        <div class="arrow-label">未充填返却</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node empty">空</div>
+      <div class="note">こちら側の充填不備</div>
+    </div>
+  </div>
+
+  <!-- ═══ 3. In-house ═══ -->
+  <div class="section">
+    <div class="section-title">3. 自社利用フロー</div>
+
+    <div class="flow">
+      <div class="node filled">充填済み</div>
+      <div class="arrow">
+        <div class="arrow-label">自社利用</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node inhouse">自社利用中</div>
+    </div>
+    <div class="branch">
+      <div class="flow">
+        <div class="node inhouse">自社利用中</div>
+        <div class="arrow">
+          <div class="arrow-label">自社返却(通常)</div>
+          <div class="arrow-line">-----&gt;</div>
+        </div>
+        <div class="node empty">空</div>
+      </div>
+      <div class="flow">
+        <div class="node inhouse">自社利用中</div>
+        <div class="arrow">
+          <div class="arrow-label">自社返却(未使用)</div>
+          <div class="arrow-line">-----&gt;</div>
+        </div>
+        <div class="node filled">充填済み</div>
+      </div>
+      <div class="flow">
+        <div class="node inhouse">自社利用中</div>
+        <div class="arrow">
+          <div class="arrow-label">自社返却(不備)</div>
+          <div class="arrow-line">-----&gt;</div>
+        </div>
+        <div class="node empty">空</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 4. Damage / Maintenance ═══ -->
+  <div class="section">
+    <div class="section-title">4. 異常系 & メンテナンス</div>
+
+    <div class="flow">
+      <div class="note">任意のステータス</div>
+      <div class="arrow">
+        <div class="arrow-label">破損報告</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node damaged">破損</div>
+      <div class="arrow">
+        <div class="arrow-label">修理済み</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node empty">空</div>
+    </div>
+    <div class="flow">
+      <div class="node damaged" style="border-color:#f87171">不良 / 故障</div>
+      <div class="arrow">
+        <div class="arrow-label">修理済み</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node empty">空</div>
+    </div>
+    <div class="flow">
+      <div class="note">耐圧期限切れのタンク</div>
+      <div class="arrow">
+        <div class="arrow-label">耐圧検査完了</div>
+        <div class="arrow-line">-----&gt;</div>
+      </div>
+      <div class="node empty">空</div>
+      <div class="note">+ 耐圧期限を更新</div>
+    </div>
+  </div>
+
+  <!-- ═══ 5. Special statuses ═══ -->
+  <div class="section">
+    <div class="section-title">5. 特殊ステータス</div>
+
+    <div class="flow" style="gap: 16px; flex-wrap: wrap;">
+      <div>
+        <div class="node storage">保管中</div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:6px; text-align:center;">
+          貸出・自社利用の元として許可<br>(充填済みと同等に扱う)
+        </div>
+      </div>
+      <div>
+        <div class="node unreturned">未返却</div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:6px; text-align:center;">
+          返却・一括返却の元として許可<br>(貸出中と同等に扱う)
+        </div>
+      </div>
+      <div>
+        <div class="node special">新規登録 / 不明 / メンテ完了 / 空文字</div>
+        <div style="font-size:11px; color:#94a3b8; margin-top:6px; text-align:center;">
+          バリデーション免除<br>(どの操作でも通過する)
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ═══ 6. Rules table ═══ -->
+  <div class="section">
+    <div class="section-title">6. 遷移ルール一覧</div>
+    <div style="overflow-x:auto;">
+      <table>
+        <thead>
+          <tr>
+            <th>操作</th>
+            <th>許容する元ステータス</th>
+            <th>遷移先</th>
+            <th>報酬</th>
+            <th>請求</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>貸出</strong></td>
+            <td>充填済み, 保管中</td>
+            <td><span class="node lent" style="padding:3px 10px;font-size:11px;">貸出中</span></td>
+            <td><span class="tag tag-yes">あり</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+          <tr>
+            <td><strong>返却(通常)</strong></td>
+            <td>貸出中, 未返却, 自社利用中</td>
+            <td><span class="node empty" style="padding:3px 10px;font-size:11px;">空</span></td>
+            <td><span class="tag tag-yes">あり</span></td>
+            <td><span class="tag tag-yes">請求可</span></td>
+          </tr>
+          <tr>
+            <td><strong>返却(未使用)</strong></td>
+            <td>貸出中, 未返却, 自社利用中</td>
+            <td><span class="node filled" style="padding:3px 10px;font-size:11px;">充填済み</span></td>
+            <td><span class="tag tag-yes">あり</span></td>
+            <td><span class="tag tag-no">不可</span></td>
+          </tr>
+          <tr>
+            <td><strong>返却(未充填)</strong></td>
+            <td>貸出中, 未返却, 自社利用中</td>
+            <td><span class="node empty" style="padding:3px 10px;font-size:11px;">空</span></td>
+            <td><span class="tag tag-no">なし</span></td>
+            <td><span class="tag tag-no">不可</span></td>
+          </tr>
+          <tr>
+            <td><strong>充填</strong></td>
+            <td>空</td>
+            <td><span class="node filled" style="padding:3px 10px;font-size:11px;">充填済み</span></td>
+            <td><span class="tag tag-yes">あり</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+          <tr style="background:#1a1a2e;">
+            <td><strong>自社利用</strong></td>
+            <td>充填済み, 保管中</td>
+            <td><span class="node inhouse" style="padding:3px 10px;font-size:11px;">自社利用中</span></td>
+            <td><span class="tag tag-no">なし</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+          <tr style="background:#1a1a2e;">
+            <td><strong>自社返却(通常)</strong></td>
+            <td>自社利用中</td>
+            <td><span class="node empty" style="padding:3px 10px;font-size:11px;">空</span></td>
+            <td><span class="tag tag-no">なし</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+          <tr style="background:#1a1a2e;">
+            <td><strong>自社返却(未使用)</strong></td>
+            <td>自社利用中</td>
+            <td><span class="node filled" style="padding:3px 10px;font-size:11px;">充填済み</span></td>
+            <td><span class="tag tag-no">なし</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+          <tr style="background:#1a1a2e;">
+            <td><strong>自社返却(不備)</strong></td>
+            <td>自社利用中</td>
+            <td><span class="node empty" style="padding:3px 10px;font-size:11px;">空</span></td>
+            <td><span class="tag tag-no">なし</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+          <tr>
+            <td><strong>破損報告</strong></td>
+            <td>制限なし</td>
+            <td><span class="node damaged" style="padding:3px 10px;font-size:11px;">破損</span></td>
+            <td><span class="tag tag-yes">あり</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+          <tr>
+            <td><strong>修理済み</strong></td>
+            <td>破損, 不良, 故障</td>
+            <td><span class="node empty" style="padding:3px 10px;font-size:11px;">空</span></td>
+            <td><span class="tag tag-yes">あり</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+          <tr>
+            <td><strong>耐圧検査完了</strong></td>
+            <td>(リストから選択)</td>
+            <td><span class="node empty" style="padding:3px 10px;font-size:11px;">空</span></td>
+            <td><span class="tag tag-yes">あり</span></td>
+            <td><span class="tag tag-na">-</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <div style="margin-top:12px; font-size:11px; color:#64748b;">
+      ※ 自社系操作（紫背景行）は報酬・スコア・請求の対象外<br>
+      ※ 「保管中」「未返却」は手動設定ステータス。遷移先になるパスはない<br>
+      ※ 特殊ステータス(新規登録/不明/メンテ完了/空文字)はバリデーション免除
+    </div>
+  </div>
+
+  <!-- ═══ 7. Separation of concerns ═══ -->
+  <div class="section">
+    <div class="section-title">7. 関心事の分離</div>
+    <div style="display:flex; gap:12px; flex-wrap:wrap;">
+      <div style="flex:1; min-width:200px; background:#0f172a; border-radius:10px; padding:16px; border:1px solid #22c55e;">
+        <div style="font-size:13px; font-weight:700; color:#22c55e; margin-bottom:8px;">tank-rules.ts</div>
+        <div style="font-size:12px; color:#94a3b8; line-height:1.6;">
+          ステータス定数<br>
+          遷移ルール (OP_RULES)<br>
+          バリデーション関数<br>
+          返却タグ → 遷移先の解決
+        </div>
+      </div>
+      <div style="flex:1; min-width:200px; background:#0f172a; border-radius:10px; padding:16px; border:1px solid #f59e0b;">
+        <div style="font-size:13px; font-weight:700; color:#f59e0b; margin-bottom:8px;">incentive-rules.ts</div>
+        <div style="font-size:12px; color:#94a3b8; line-height:1.6;">
+          報酬対象の判定<br>
+          自社操作 → 報酬なし<br>
+          未充填返却 → 報酬なし<br>
+          ランク加算ルール
+        </div>
+      </div>
+      <div style="flex:1; min-width:200px; background:#0f172a; border-radius:10px; padding:16px; border:1px solid #3b82f6;">
+        <div style="font-size:13px; font-weight:700; color:#3b82f6; margin-bottom:8px;">billing-rules.ts</div>
+        <div style="font-size:12px; color:#94a3b8; line-height:1.6;">
+          通常返却 → 請求可<br>
+          未使用返却 → 請求不可<br>
+          未充填返却 → 請求不可
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<div style="text-align:center; padding:40px 0 20px; font-size:11px; color:#475569;">
+  Generated for タンク管理Web - State Transition Diagram
+</div>
+
+</body>
+</html>
