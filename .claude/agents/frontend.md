@@ -3,6 +3,7 @@ name: frontend
 description: フロントエンド開発スペシャリスト。UI/UX、コンポーネント設計・実装、スタイリング、レイアウト構成を担当。
 tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
 model: opus
+effort: xhigh
 ---
 
 # フロントエンド開発スペシャリスト

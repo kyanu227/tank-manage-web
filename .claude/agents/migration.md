@@ -3,6 +3,7 @@ name: migration
 description: 移植スペシャリスト。旧GASシステム（主にOperate）のコードを読み解き、web版の技術スタックに適応させて実装する。
 tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
 model: opus
+effort: xhigh
 ---
 
 # 移植スペシャリスト

@@ -9,6 +9,7 @@ import {
   ArrowLeft, Package, ThumbsUp, ChevronRight,
 } from "lucide-react";
 import QuickSelect from "@/components/QuickSelect";
+import DrumRoll from "@/components/DrumRoll";
 import { db } from "@/lib/firebase/config";
 import {
   collection, getDocs, doc, writeBatch,
@@ -1044,6 +1045,16 @@ export default function OperationsPage() {
       {mode === "lend" && opStyle === "manual" && (
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
+            {/* 隠し数字入力（フォーカス用）: position:absolute の祖先になるよう左カラムに配置 */}
+            <input
+              ref={inputRef}
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={inputValue}
+              onChange={handleInputChange}
+              style={{ position: "absolute", opacity: 0, width: 1, height: 1, overflow: "hidden", pointerEvents: "none", caretColor: "transparent" }}
+            />
             {/* Top OK Button Area */}
             <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
               <button
@@ -1156,81 +1167,14 @@ export default function OperationsPage() {
             )}
           </div>
 
-          {/* Right Column: Prefix Drum Roll */}
-          <div style={{
-            width: 70, background: "#fff", borderLeft: "1px solid #e2e8f0",
-            display: "flex", flexDirection: "column", position: "relative"
-          }}>
-            {prefixes.length > 0 && (
-              <>
-                <div style={{
-                  position: "absolute", bottom: 16, left: 6, right: 6, height: 48,
-                  border: `3px solid ${config.color}`, borderRadius: 12, pointerEvents: "none", zIndex: 10,
-                  background: `${config.color}0A`
-                }} />
-                <input
-                  ref={inputRef}
-                  type="tel"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={inputValue}
-                  onChange={handleInputChange}
-                  style={{ position: "absolute", opacity: 0, width: 1, height: 1, overflow: "hidden", pointerEvents: "none", caretColor: "transparent" }}
-                />
-                <div
-                  ref={dialContainerRef}
-                  onScroll={(e) => {
-                    const el = e.currentTarget;
-                    const { blockHeight } = dialMetrics;
-                    const rawIdx = Math.round(el.scrollTop / blockHeight);
-                    const wrappedIdx = rawIdx % prefixes.length;
-                    if (prefixes[wrappedIdx] && prefixes[wrappedIdx] !== activePrefix) {
-                      setActivePrefix(prefixes[wrappedIdx]);
-                    }
-                    const cycleHeight = blockHeight * prefixes.length;
-                    const totalHeight = cycleHeight * 30;
-                    if (el.scrollTop < cycleHeight * 5) {
-                      el.scrollTop = el.scrollTop + (cycleHeight * 10);
-                    } else if (el.scrollTop > totalHeight - (cycleHeight * 5)) {
-                      el.scrollTop = el.scrollTop - (cycleHeight * 10);
-                    }
-                  }}
-                  style={{
-                    flex: 1, overflowY: "auto",
-                    overflowX: "hidden", position: "relative",
-                    scrollSnapType: "y mandatory", scrollPaddingBottom: "max(12px, env(safe-area-inset-bottom, 12px))"
-                  }}
-                >
-                  <div style={{ height: `calc(100% - ${dialMetrics.blockHeight}px)`, flexShrink: 0 }} />
-                  <div style={{ display: "flex", flexDirection: "column", gap: dialMetrics.gap, padding: "0 6px max(12px, env(safe-area-inset-bottom, 12px)) 6px" }}>
-                    {Array(30).fill(prefixes).flat().map((p, index) => {
-                      const isActive = activePrefix === p;
-                      return (
-                        <div key={`${p}-${index}`} style={{ scrollSnapAlign: "end", scrollSnapStop: "always" }}>
-                          <button
-                            onClick={(e) => {
-                              focusInput(p);
-                              e.currentTarget.scrollIntoView({ behavior: "smooth", block: "end" });
-                            }}
-                            style={{
-                              width: "100%", height: 48, borderRadius: 10, flexShrink: 0,
-                              border: "none", background: "transparent",
-                              color: isActive ? config.color : "#94a3b8",
-                              fontSize: 22, fontWeight: 900, fontFamily: "monospace",
-                              transition: "all 0.15s ease", cursor: "pointer",
-                              transform: isActive ? "scale(1.3)" : "scale(1.0)",
-                            }}
-                          >
-                            {p}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          {/* Right Column: Prefix Drum Roll（共通コンポーネント化） */}
+          <DrumRoll
+            items={prefixes}
+            value={activePrefix}
+            onChange={(p) => setActivePrefix(p)}
+            onSelect={(p) => focusInput(p)}
+            accentColor={config.color}
+          />
         </div>
       )}
 

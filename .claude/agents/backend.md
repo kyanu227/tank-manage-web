@@ -3,6 +3,7 @@ name: backend
 description: バックエンド開発スペシャリスト。Firebase Auth、Firestore、認証ガード、データモデル設計、セキュリティを担当。
 tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
 model: opus
+effort: xhigh
 ---
 
 # バックエンド開発スペシャリスト

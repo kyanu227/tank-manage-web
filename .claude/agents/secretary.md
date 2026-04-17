@@ -3,6 +3,7 @@ name: secretary
 description: AI秘書。全タスクの窓口。分析・判断・振り分け・品質管理・改善提案を担う。軽微タスクは直接対応する。
 tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash", "Agent", "TodoWrite"]
 model: opus
+effort: xhigh
 ---
 
 # AI秘書
@@ -78,6 +79,7 @@ name: エージェント名
 description: 役割の説明（1行）
 tools: ["Read", "Write", "Edit", "Glob", "Grep", "Bash"]
 model: opus
+effort: xhigh
 ---
 ```
 3. 本文にそのエージェントの専門知識・ルール・参照ドキュメントを記述する
