@@ -726,38 +726,35 @@ export default function OperationsPage() {
   /* ─── 受注対応 (fulfillment) 全画面表示 ─── */
   if (mode === "lend" && opStyle === "order" && selectedOrder) {
     const orderValidCount = scannedTanks.filter((t) => t.valid).length;
-    const isReady = orderValidCount === selectedOrder.quantity;
+    // 型防衛: Firestore 由来のデータが文字列の可能性もあるため Number() で正規化
+    const requiredQty = Number(selectedOrder.quantity) || 0;
+    const isReady = orderValidCount === requiredQty;
+    const remaining = Math.max(0, requiredQty - orderValidCount);
 
     return (
       <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "#f8fafc" }}>
-        <div style={{ padding: "16px 20px", background: "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 12 }}>
-          <button onClick={closeFulfillment} style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b" }}>
+        {/* 統合ヘッダー（1行） */}
+        <div style={{ padding: "10px 16px", background: "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
+          <button onClick={closeFulfillment} style={{ width: 32, height: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b" }}>
             <ArrowLeft size={16} />
           </button>
-          <div>
-            <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", margin: 0 }}>受注対応</h2>
-            <p style={{ fontSize: 12, color: "#64748b", margin: 0, marginTop: 2 }}>{selectedOrder.customerName}</p>
+          {/* 顧客名 */}
+          <div style={{ flex: "1 1 auto", minWidth: 0 }}>
+            <p style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {selectedOrder.customerName}
+            </p>
           </div>
-        </div>
-
-        <div style={{ padding: "16px 20px", background: "#fff", borderBottom: "1px solid #e2e8f0" }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: "#eff6ff", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                <Package size={20} color="#3b82f6" />
-              </div>
-              <div>
-                <p style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 2 }}>要求</p>
-                <p style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>{selectedOrder.tankType}</p>
-              </div>
-            </div>
-            <div style={{ textAlign: "right" }}>
-              <p style={{ fontSize: 13, fontWeight: 700, color: "#64748b", marginBottom: 2 }}>スキャン状況</p>
-              <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-                <span style={{ fontSize: 24, fontWeight: 900, color: isReady ? "#10b981" : "#3b82f6" }}>{orderValidCount}</span>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#94a3b8" }}>/ {selectedOrder.quantity}本</span>
-              </div>
-            </div>
+          {/* タンク種別 × 本数 */}
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "#eff6ff", borderRadius: 8, maxWidth: "45%", overflow: "hidden" }}>
+            <Package size={14} color="#3b82f6" style={{ flexShrink: 0 }} />
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#1e40af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              {selectedOrder.tankType} × {requiredQty}本
+            </span>
+          </div>
+          {/* スキャン状況 X/Y */}
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "baseline", gap: 2 }}>
+            <span style={{ fontSize: 24, fontWeight: 900, color: isReady ? "#10b981" : "#3b82f6", lineHeight: 1 }}>{orderValidCount}</span>
+            <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>/ {requiredQty}</span>
           </div>
         </div>
 
@@ -794,8 +791,8 @@ export default function OperationsPage() {
               </button>
             </div>
 
-            {/* スキャン済みリスト */}
-            <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+            {/* スキャン済みリスト（下部にフローティングボタン分の余白を確保） */}
+            <div style={{ flex: 1, overflowY: "auto", padding: 16, paddingBottom: 96 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                 <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>スキャンリスト</span>
                 {scannedTanks.length > 0 && (
@@ -824,28 +821,34 @@ export default function OperationsPage() {
               )}
             </div>
 
-            {/* Floating 受注完了ボタン */}
-            {isReady && (
-              <div style={{
-                position: "absolute", bottom: 0, left: 0, right: 0,
-                padding: "12px 16px max(12px, env(safe-area-inset-bottom, 12px))",
-                background: "linear-gradient(transparent, rgba(248,250,252,0.95) 20%)",
-                zIndex: 20, pointerEvents: "none",
-              }}>
-                <button onClick={fulfillOrder} disabled={orderSubmitting}
-                  style={{
-                    width: "100%", padding: "14px", borderRadius: 12, border: "none",
-                    background: "#10b981", color: "#fff", fontSize: 16, fontWeight: 900,
-                    boxShadow: "0 4px 16px rgba(16,185,129,0.25)",
-                    display: "flex", justifyContent: "center", alignItems: "center", gap: 8,
-                    cursor: orderSubmitting ? "wait" : "pointer",
-                    pointerEvents: "auto",
-                  }}>
-                  {orderSubmitting ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={18} />}
-                  受注を完了する（{selectedOrder.customerName}）
-                </button>
-              </div>
-            )}
+            {/* Floating 受注完了ボタン（常時表示／isReady でないときは disabled） */}
+            <div style={{
+              position: "absolute", bottom: 0, left: 0, right: 0,
+              padding: "12px 16px max(12px, env(safe-area-inset-bottom, 12px))",
+              background: "linear-gradient(transparent, rgba(248,250,252,0.95) 20%)",
+              zIndex: 20, pointerEvents: "none",
+            }}>
+              <button onClick={fulfillOrder} disabled={!isReady || orderSubmitting}
+                style={{
+                  width: "100%", padding: "14px", borderRadius: 12, border: "none",
+                  background: isReady ? "#10b981" : "#cbd5e1",
+                  color: "#fff", fontSize: 16, fontWeight: 900,
+                  boxShadow: isReady ? "0 4px 16px rgba(16,185,129,0.25)" : "none",
+                  display: "flex", justifyContent: "center", alignItems: "center", gap: 8,
+                  cursor: !isReady ? "not-allowed" : (orderSubmitting ? "wait" : "pointer"),
+                  pointerEvents: "auto",
+                  transition: "background 0.15s, box-shadow 0.15s",
+                }}>
+                {orderSubmitting ? (
+                  <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} />
+                ) : (
+                  <CheckCircle2 size={18} />
+                )}
+                {isReady
+                  ? `受注を完了する（${selectedOrder.customerName}）`
+                  : `あと ${remaining} 本スキャンしてください`}
+              </button>
+            </div>
           </div>
 
           {/* 循環ドラムロール（共通コンポーネント化） */}
