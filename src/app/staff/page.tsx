@@ -6,7 +6,7 @@ import {
   ArrowUpFromLine, ArrowDownToLine, Droplets,
   Plus, X, Send, CheckCircle2, AlertCircle, Loader2,
   Building, CheckSquare, Square, ChevronDown, MapPin,
-  ArrowLeft, Package, ThumbsUp, ChevronRight,
+  ArrowLeft, ThumbsUp, ChevronRight,
 } from "lucide-react";
 import QuickSelect from "@/components/QuickSelect";
 import DrumRoll from "@/components/DrumRoll";
@@ -21,6 +21,10 @@ import {
   type TankAction, type ReturnTag,
 } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
+import {
+  type PendingOrder,
+  normalizeOrderDoc, findMatchingItem, totalOrderQuantity,
+} from "@/lib/order-types";
 
 /* ─── Types ─── */
 type OpMode = "lend" | "return" | "fill";
@@ -44,17 +48,11 @@ interface TankDoc {
   status: string;
   location: string;
   staff: string;
+  type?: string;
 }
 
 /* ─── 受注管理 Types ─── */
-interface PendingOrder {
-  id: string;
-  customerId: string;
-  customerName: string;
-  tankType: string;
-  quantity: number;
-  createdAt: any;
-}
+// PendingOrder / OrderItem は src/lib/order-types.ts に集約。
 
 /* ─── 返却承認 Types ─── */
 interface PendingReturn {
@@ -245,7 +243,14 @@ export default function OperationsPage() {
       const pSet = new Set<string>();
 
       tankSnap.forEach((d) => {
-        const t = { id: d.id, ...d.data() } as TankDoc;
+        const raw = d.data();
+        const t: TankDoc = {
+          id: d.id,
+          status: String(raw.status ?? ""),
+          location: String(raw.location ?? ""),
+          staff: String(raw.staff ?? ""),
+          type: raw.type ? String(raw.type) : undefined,
+        };
         tankMap[d.id] = t;
         const match = t.id.match(/^([A-Z]+)/i);
         if (match) pSet.add(match[1].toUpperCase());
@@ -275,7 +280,8 @@ export default function OperationsPage() {
       const q = query(collection(db, "transactions"), where("type", "==", "order"), where("status", "==", "pending"));
       const snap = await getDocs(q);
       const ordersData: PendingOrder[] = [];
-      snap.forEach((d) => ordersData.push({ id: d.id, ...d.data() } as PendingOrder));
+      // normalizeOrderDoc を通して旧スキーマ(tankType/quantityスカラー)にも対応
+      snap.forEach((d) => ordersData.push(normalizeOrderDoc(d.id, d.data())));
       ordersData.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
       setPendingOrders(ordersData);
     } catch (err) { console.error(err); }
@@ -535,8 +541,10 @@ export default function OperationsPage() {
   const addScannedTank = (tankId: string) => {
     if (scannedTanks.some((t) => t.id === tankId)) return;
     if (!selectedOrder) return;
+
+    const totalRequired = totalOrderQuantity(selectedOrder.items);
     const validCount = scannedTanks.filter((t) => t.valid).length;
-    if (validCount >= selectedOrder.quantity) { alert("発注数に達しています"); return; }
+    if (validCount >= totalRequired) { alert("発注数に達しています"); return; }
 
     const tank = allTanks[tankId];
     let valid = true, error = "";
@@ -545,6 +553,25 @@ export default function OperationsPage() {
       const v = validateTransition(tank.status, ACTION.LEND);
       if (!v.ok) { valid = false; error = v.reason || `[${tank.status}] は貸出不可`; }
       else if (tank.location !== "倉庫") { valid = false; error = "倉庫にありません"; }
+      else {
+        // items 配列（種別ごとの要求本数）との突合
+        const matched = findMatchingItem(tank.type ?? "", selectedOrder.items);
+        if (!matched) {
+          valid = false;
+          error = "この受注に含まれない種別です";
+        } else {
+          // すでに該当種別を必要数スキャン済みか？
+          const scannedSameType = scannedTanks.filter((t) => {
+            if (!t.valid) return false;
+            const sTank = allTanks[t.id];
+            return sTank && sTank.type === tank.type;
+          }).length;
+          if (scannedSameType >= matched.quantity) {
+            valid = false;
+            error = "この種別は必要数スキャン済みです";
+          }
+        }
+      }
     }
 
     setScannedTanks(prev => [{ id: tankId, valid, error }, ...prev]);
@@ -558,8 +585,20 @@ export default function OperationsPage() {
   const fulfillOrder = async () => {
     if (!selectedOrder) return;
     const validTanks = scannedTanks.filter((t) => t.valid);
-    if (validTanks.length !== selectedOrder.quantity) {
-      alert(`数量が一致しません (${validTanks.length}/${selectedOrder.quantity})`);
+    const totalRequired = totalOrderQuantity(selectedOrder.items);
+
+    // items 配列の各種別について、必要本数をスキャンしきったか確認する
+    const scannedByType = new Map<string, number>();
+    validTanks.forEach((t) => {
+      const tk = allTanks[t.id];
+      const tType = tk?.type ?? "";
+      scannedByType.set(tType, (scannedByType.get(tType) ?? 0) + 1);
+    });
+    const unmetItems = selectedOrder.items.filter(
+      (it) => (scannedByType.get(it.tankType) ?? 0) !== it.quantity
+    );
+    if (validTanks.length !== totalRequired || unmetItems.length > 0) {
+      alert(`数量が一致しません (${validTanks.length}/${totalRequired})`);
       return;
     }
     setOrderSubmitting(true);
@@ -726,14 +765,32 @@ export default function OperationsPage() {
   /* ─── 受注対応 (fulfillment) 全画面表示 ─── */
   if (mode === "lend" && opStyle === "order" && selectedOrder) {
     const orderValidCount = scannedTanks.filter((t) => t.valid).length;
-    // 型防衛: Firestore 由来のデータが文字列の可能性もあるため Number() で正規化
-    const requiredQty = Number(selectedOrder.quantity) || 0;
-    const isReady = orderValidCount === requiredQty;
+    // items 配列ベースで必要本数と種別ごとの完了状態を算出
+    const requiredQty = totalOrderQuantity(selectedOrder.items);
+    // 種別ごとのスキャン済み本数（valid のみ集計）
+    const orderScannedByType = new Map<string, number>();
+    scannedTanks.forEach((t) => {
+      if (!t.valid) return;
+      const tk = allTanks[t.id];
+      const tType = tk?.type ?? "";
+      orderScannedByType.set(tType, (orderScannedByType.get(tType) ?? 0) + 1);
+    });
+    // items 配列ベースで完了判定（全種別が必要本数に到達）
+    const isReady = selectedOrder.items.every(
+      (it) => (orderScannedByType.get(it.tankType) ?? 0) === it.quantity
+    );
     const remaining = Math.max(0, requiredQty - orderValidCount);
+    // ヘッダー用サマリー
+    //  - 1種別: "スチール10L × 3本"
+    //  - 複数種別: "2種・合計5本"（幅を食わないコンパクト表記）
+    const isSingleType = selectedOrder.items.length === 1;
+    const headerBadgeText = isSingleType
+      ? `${selectedOrder.items[0].tankType} × ${selectedOrder.items[0].quantity}本`
+      : `${selectedOrder.items.length}種・合計${requiredQty}本`;
 
     return (
       <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "#f8fafc" }}>
-        {/* 統合ヘッダー（1行） */}
+        {/* 統合ヘッダー（1行・Packageアイコン無し） */}
         <div style={{ padding: "10px 16px", background: "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
           <button onClick={closeFulfillment} style={{ width: 32, height: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b" }}>
             <ArrowLeft size={16} />
@@ -744,11 +801,10 @@ export default function OperationsPage() {
               {selectedOrder.customerName}
             </p>
           </div>
-          {/* タンク種別 × 本数 */}
-          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", gap: 4, padding: "4px 10px", background: "#eff6ff", borderRadius: 8, maxWidth: "45%", overflow: "hidden" }}>
-            <Package size={14} color="#3b82f6" style={{ flexShrink: 0 }} />
+          {/* 種別バッジ: 単一種別なら種別名+本数、複数種別なら要約 */}
+          <div style={{ flexShrink: 0, display: "flex", alignItems: "center", padding: "4px 10px", background: "#eff6ff", borderRadius: 8, maxWidth: "45%", overflow: "hidden" }}>
             <span style={{ fontSize: 13, fontWeight: 800, color: "#1e40af", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {selectedOrder.tankType} × {requiredQty}本
+              {headerBadgeText}
             </span>
           </div>
           {/* スキャン状況 X/Y */}
@@ -757,6 +813,31 @@ export default function OperationsPage() {
             <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>/ {requiredQty}</span>
           </div>
         </div>
+
+        {/* 種別別進捗（複数種別時のみ表示・コンパクト） */}
+        {!isSingleType && (
+          <div style={{ padding: "8px 16px", background: "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", flexDirection: "column", gap: 4, flexShrink: 0 }}>
+            {selectedOrder.items.map((it) => {
+              const scanned = orderScannedByType.get(it.tankType) ?? 0;
+              const done = scanned === it.quantity;
+              const color = done ? "#10b981" : "#3b82f6";
+              return (
+                <div key={it.tankType} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, padding: "4px 10px", background: done ? "#f0fdf4" : "#f8fafc", borderRadius: 8, minHeight: 28 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 6, minWidth: 0 }}>
+                    <span style={{ width: 6, height: 6, borderRadius: "50%", background: color, flexShrink: 0 }} />
+                    <span style={{ fontSize: 12, fontWeight: 600, color: "#334155", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {it.tankType}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: 2, flexShrink: 0 }}>
+                    <span style={{ fontSize: 13, fontWeight: 800, color, lineHeight: 1 }}>{scanned}</span>
+                    <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>/ {it.quantity}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
@@ -1123,6 +1204,10 @@ export default function OperationsPage() {
             <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
               {pendingOrders.map((order) => {
                 const dateStr = order.createdAt ? new Date(order.createdAt.toMillis()).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+                const total = totalOrderQuantity(order.items);
+                const label = order.items.length === 1
+                  ? order.items[0].tankType
+                  : `${order.items.length}種類`;
                 return (
                   <button key={order.id} onClick={() => openFulfillment(order)}
                     style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: 16, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", textAlign: "left", width: "100%" }}>
@@ -1131,10 +1216,10 @@ export default function OperationsPage() {
                         <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>{order.customerName}</span>
                         <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>{dateStr}</span>
                       </div>
-                      <span style={{ fontSize: 13, fontWeight: 600, color: "#475569", background: "#f1f5f9", padding: "4px 8px", borderRadius: 6 }}>{order.tankType}</span>
+                      <span style={{ fontSize: 13, fontWeight: 600, color: "#475569", background: "#f1f5f9", padding: "4px 8px", borderRadius: 6 }}>{label}</span>
                     </div>
                     <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-                      <span style={{ fontSize: 28, fontWeight: 900, color: "#3b82f6" }}>{order.quantity}</span>
+                      <span style={{ fontSize: 28, fontWeight: 900, color: "#3b82f6" }}>{total}</span>
                       <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>本</span>
                     </div>
                   </button>

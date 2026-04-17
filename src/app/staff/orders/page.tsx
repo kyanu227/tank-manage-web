@@ -17,19 +17,15 @@ import {
 } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import DrumRoll from "@/components/DrumRoll";
+import {
+  type PendingOrder,
+  normalizeOrderDoc, findMatchingItem, totalOrderQuantity, summarizeOrderItems,
+} from "@/lib/order-types";
 
 /* ─── Types ─── */
 type TabId = "orders" | "approvals" | "bulk";
 
-interface PendingOrder {
-  id: string;
-  customerId: string;
-  customerName: string;
-  tankType: string;
-  quantity: number;
-  createdAt: any;
-}
-interface TankDoc { id: string; status: string; location: string; }
+interface TankDoc { id: string; status: string; location: string; type?: string; }
 interface PendingReturn {
   id: string;
   customerId: string;
@@ -116,7 +112,9 @@ function OrdersTab() {
       const q = query(collection(db, "transactions"), where("type", "==", "order"), where("status", "==", "pending"));
       const snap = await getDocs(q);
       const ordersData: PendingOrder[] = [];
-      snap.forEach((d) => ordersData.push({ id: d.id, ...d.data() } as PendingOrder));
+      // normalizeOrderDoc を通して旧スキーマ(tankType/quantityスカラー)も
+      // 新スキーマ(items配列)も一律 items ベースで扱えるようにする。
+      snap.forEach((d) => ordersData.push(normalizeOrderDoc(d.id, d.data())));
       ordersData.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
       setOrders(ordersData);
 
@@ -124,7 +122,13 @@ function OrdersTab() {
       const tankMap: Record<string, TankDoc> = {};
       const pSet = new Set<string>();
       tankSnap.forEach((d) => {
-        const t = { id: d.id, ...d.data() } as TankDoc;
+        const raw = d.data();
+        const t: TankDoc = {
+          id: d.id,
+          status: String(raw.status ?? ""),
+          location: String(raw.location ?? ""),
+          type: raw.type ? String(raw.type) : undefined,
+        };
         tankMap[d.id] = t;
         const match = t.id.match(/^([A-Z]+)/i);
         if (match) pSet.add(match[1].toUpperCase());
@@ -170,8 +174,10 @@ function OrdersTab() {
   const addScannedTank = (tankId: string) => {
     if (scannedTanks.some((t) => t.id === tankId)) return;
     if (!selectedOrder) return;
+
+    const totalRequired = totalOrderQuantity(selectedOrder.items);
     const validCount = scannedTanks.filter((t) => t.valid).length;
-    if (validCount >= selectedOrder.quantity) { alert("発注数に達しています"); return; }
+    if (validCount >= totalRequired) { alert("発注数に達しています"); return; }
 
     const tank = allTanks[tankId];
     let valid = true, error = "";
@@ -180,6 +186,25 @@ function OrdersTab() {
       const v = validateTransition(tank.status, ACTION.LEND);
       if (!v.ok) { valid = false; error = v.reason || `[${tank.status}] は貸出不可`; }
       else if (tank.location !== "倉庫") { valid = false; error = "倉庫にありません"; }
+      else {
+        // items 配列（種別ごとの要求本数）との突合
+        const matched = findMatchingItem(tank.type ?? "", selectedOrder.items);
+        if (!matched) {
+          valid = false;
+          error = "この受注に含まれない種別です";
+        } else {
+          // すでに該当種別を必要数スキャン済みか？
+          const scannedSameType = scannedTanks.filter((t) => {
+            if (!t.valid) return false;
+            const sTank = allTanks[t.id];
+            return sTank && sTank.type === tank.type;
+          }).length;
+          if (scannedSameType >= matched.quantity) {
+            valid = false;
+            error = "この種別は必要数スキャン済みです";
+          }
+        }
+      }
     }
 
     setScannedTanks([{ id: tankId, valid, error }, ...scannedTanks]);
@@ -193,8 +218,21 @@ function OrdersTab() {
   const fulfillOrder = async () => {
     if (!selectedOrder) return;
     const validTanks = scannedTanks.filter((t) => t.valid);
-    if (validTanks.length !== selectedOrder.quantity) {
-      alert(`数量が一致しません (${validTanks.length}/${selectedOrder.quantity})`);
+    const totalRequired = totalOrderQuantity(selectedOrder.items);
+
+    // items 配列の各種別について、必要本数をスキャンしきったか確認する
+    // （scannedTanks を tank.type でグループ化して、items 側の quantity と突合）
+    const scannedByType = new Map<string, number>();
+    validTanks.forEach((t) => {
+      const tk = allTanks[t.id];
+      const tType = tk?.type ?? "";
+      scannedByType.set(tType, (scannedByType.get(tType) ?? 0) + 1);
+    });
+    const unmetItems = selectedOrder.items.filter(
+      (it) => (scannedByType.get(it.tankType) ?? 0) !== it.quantity
+    );
+    if (validTanks.length !== totalRequired || unmetItems.length > 0) {
+      alert(`数量が一致しません (${validTanks.length}/${totalRequired})`);
       return;
     }
     setSubmitting(true);
@@ -234,7 +272,18 @@ function OrdersTab() {
 
   if (selectedOrder) {
     const validCount = scannedTanks.filter((t) => t.valid).length;
-    const isReady = validCount === selectedOrder.quantity;
+    const totalRequired = totalOrderQuantity(selectedOrder.items);
+    // 各種別ごとに必要本数をスキャンしきった場合のみ完了可能とする
+    const scannedByType = new Map<string, number>();
+    scannedTanks.forEach((t) => {
+      if (!t.valid) return;
+      const tk = allTanks[t.id];
+      const tType = tk?.type ?? "";
+      scannedByType.set(tType, (scannedByType.get(tType) ?? 0) + 1);
+    });
+    const isReady =
+      validCount === totalRequired &&
+      selectedOrder.items.every((it) => (scannedByType.get(it.tankType) ?? 0) === it.quantity);
 
     return (
       <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden" }}>
@@ -256,14 +305,14 @@ function OrdersTab() {
               </div>
               <div>
                 <p style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 2 }}>要求</p>
-                <p style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>{selectedOrder.tankType}</p>
+                <p style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>{summarizeOrderItems(selectedOrder.items)}</p>
               </div>
             </div>
             <div style={{ textAlign: "right" }}>
               <p style={{ fontSize: 13, fontWeight: 700, color: "#64748b", marginBottom: 2 }}>スキャン状況</p>
               <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
                 <span style={{ fontSize: 24, fontWeight: 900, color: isReady ? "#10b981" : "#3b82f6" }}>{validCount}</span>
-                <span style={{ fontSize: 14, fontWeight: 600, color: "#94a3b8" }}>/ {selectedOrder.quantity}本</span>
+                <span style={{ fontSize: 14, fontWeight: 600, color: "#94a3b8" }}>/ {totalRequired}本</span>
               </div>
             </div>
           </div>
@@ -353,18 +402,23 @@ function OrdersTab() {
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {orders.map((order) => {
             const dateStr = order.createdAt ? new Date(order.createdAt.toMillis()).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+            const total = totalOrderQuantity(order.items);
+            // 1種別: "スチール10L × 3本" / 複数種別: "3種・合計10本"
+            const summary = order.items.length === 1
+              ? `${order.items[0].tankType} × ${order.items[0].quantity}本`
+              : `${order.items.length}種・合計${total}本`;
             return (
               <button key={order.id} onClick={() => openFulfillment(order)}
                 style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 16, padding: 16, display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "pointer", textAlign: "left", width: "100%" }}>
-                <div>
+                <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
                     <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>{order.customerName}</span>
                     <span style={{ fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>{dateStr}</span>
                   </div>
-                  <span style={{ fontSize: 13, fontWeight: 600, color: "#475569", background: "#f1f5f9", padding: "4px 8px", borderRadius: 6 }}>{order.tankType}</span>
+                  <span style={{ fontSize: 13, fontWeight: 600, color: "#475569", background: "#f1f5f9", padding: "4px 8px", borderRadius: 6 }}>{summary}</span>
                 </div>
-                <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-                  <span style={{ fontSize: 28, fontWeight: 900, color: "#3b82f6" }}>{order.quantity}</span>
+                <div style={{ display: "flex", alignItems: "baseline", gap: 4, flexShrink: 0, marginLeft: 12 }}>
+                  <span style={{ fontSize: 28, fontWeight: 900, color: "#3b82f6" }}>{total}</span>
                   <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>本</span>
                 </div>
               </button>

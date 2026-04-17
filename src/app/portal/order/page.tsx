@@ -58,21 +58,20 @@ export default function CustomerOrderPage() {
       const customerId = session.uid || "unknown";
       const customerName = session.name || "不明な顧客";
 
-      const ids: string[] = [];
-      for (const item of cart) {
-        const ref = await addDoc(collection(db, "transactions"), {
-          type: "order",
-          status: "pending",
+      // 1発注 = 1ドキュメント（items配列）としてまとめて保存する
+      const ref = await addDoc(collection(db, "transactions"), {
+        type: "order",
+        status: "pending",
+        items: cart.map((item) => ({
           tankType: item.tankType,
           quantity: item.quantity,
-          customerId,
-          customerName,
-          createdAt: serverTimestamp(),
-          source: "customer_portal",
-        });
-        ids.push(ref.id);
-      }
-      setOrderIds(ids);
+        })),
+        customerId,
+        customerName,
+        createdAt: serverTimestamp(),
+        source: "customer_portal",
+      });
+      setOrderIds([ref.id]);
       setIsSuccess(true);
     } catch (err) {
       console.error(err);
