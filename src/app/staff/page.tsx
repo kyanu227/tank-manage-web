@@ -206,10 +206,6 @@ export default function OperationsPage() {
   // Submit State
   const [submitting, setSubmitting] = useState(false);
 
-  // dialMetrics: 受注（order）モードのドラムロール用。他モードは <DrumRoll> 共通コンポーネント化済み。
-  // 受注モードも共通化できたらまとめて削除予定。
-  const [dialMetrics] = useState({ gap: 16, blockHeight: 64 });
-
   /* ─── 受注管理 State ─── */
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
@@ -221,7 +217,6 @@ export default function OperationsPage() {
   const [orderLastAdded, setOrderLastAdded] = useState<string | null>(null);
   const orderSuccessTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [orderSubmitting, setOrderSubmitting] = useState(false);
-  const orderDialContainerRef = useRef<HTMLDivElement>(null);
 
   // 手動返却モード表示
   const [showManualReturn, setShowManualReturn] = useState(false);
@@ -768,6 +763,16 @@ export default function OperationsPage() {
 
         <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
           <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
+            {/* 隠し数字入力（フォーカス用）: position:absolute の祖先になるよう左カラムに配置 */}
+            <input
+              ref={orderInputRef}
+              type="tel"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              value={orderInputValue}
+              onChange={handleOrderInputChange}
+              style={{ position: "absolute", opacity: 0, width: 1, height: 1, overflow: "hidden", pointerEvents: "none", caretColor: "transparent" }}
+            />
             {/* OKボタン */}
             <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
               <button
@@ -843,81 +848,14 @@ export default function OperationsPage() {
             )}
           </div>
 
-          {/* 循環ドラムロール */}
-          <div style={{
-            width: 70, background: "#fff", borderLeft: "1px solid #e2e8f0",
-            display: "flex", flexDirection: "column", position: "relative"
-          }}>
-            {prefixes.length > 0 && (
-              <>
-                <div style={{
-                  position: "absolute", bottom: 16, left: 6, right: 6, height: 48,
-                  border: "3px solid #3b82f6", borderRadius: 12, pointerEvents: "none", zIndex: 10,
-                  background: "#3b82f60A"
-                }} />
-                <input
-                  ref={orderInputRef}
-                  type="tel"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  value={orderInputValue}
-                  onChange={handleOrderInputChange}
-                  style={{ position: "absolute", opacity: 0, width: 1, height: 1, overflow: "hidden", pointerEvents: "none", caretColor: "transparent" }}
-                />
-                <div
-                  ref={orderDialContainerRef}
-                  onScroll={(e) => {
-                    const el = e.currentTarget;
-                    const { blockHeight } = dialMetrics;
-                    const rawIdx = Math.round(el.scrollTop / blockHeight);
-                    const wrappedIdx = rawIdx % prefixes.length;
-                    if (prefixes[wrappedIdx] && prefixes[wrappedIdx] !== orderActivePrefix) {
-                      setOrderActivePrefix(prefixes[wrappedIdx]);
-                    }
-                    const cycleHeight = blockHeight * prefixes.length;
-                    const totalHeight = cycleHeight * 30;
-                    if (el.scrollTop < cycleHeight * 5) {
-                      el.scrollTop = el.scrollTop + (cycleHeight * 10);
-                    } else if (el.scrollTop > totalHeight - (cycleHeight * 5)) {
-                      el.scrollTop = el.scrollTop - (cycleHeight * 10);
-                    }
-                  }}
-                  style={{
-                    flex: 1, overflowY: "auto",
-                    overflowX: "hidden", position: "relative",
-                    scrollSnapType: "y mandatory", scrollPaddingBottom: "max(12px, env(safe-area-inset-bottom, 12px))"
-                  }}
-                >
-                  <div style={{ height: `calc(100% - ${dialMetrics.blockHeight}px)`, flexShrink: 0 }} />
-                  <div style={{ display: "flex", flexDirection: "column", gap: dialMetrics.gap, padding: "0 6px max(12px, env(safe-area-inset-bottom, 12px)) 6px" }}>
-                    {Array(30).fill(prefixes).flat().map((p, index) => {
-                      const isActive = orderActivePrefix === p;
-                      return (
-                        <div key={`${p}-${index}`} style={{ scrollSnapAlign: "end", scrollSnapStop: "always" }}>
-                          <button
-                            onClick={(e) => {
-                              orderFocusInput(p);
-                              e.currentTarget.scrollIntoView({ behavior: "smooth", block: "end" });
-                            }}
-                            style={{
-                              width: "100%", height: 48, borderRadius: 10, flexShrink: 0,
-                              border: "none", background: "transparent",
-                              color: isActive ? "#3b82f6" : "#94a3b8",
-                              fontSize: 22, fontWeight: 900, fontFamily: "monospace",
-                              transition: "all 0.15s ease", cursor: "pointer",
-                              transform: isActive ? "scale(1.3)" : "scale(1.0)",
-                            }}
-                          >
-                            {p}
-                          </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-          </div>
+          {/* 循環ドラムロール（共通コンポーネント化） */}
+          <DrumRoll
+            items={prefixes}
+            value={orderActivePrefix}
+            onChange={(p) => setOrderActivePrefix(p)}
+            onSelect={(p) => orderFocusInput(p)}
+            accentColor="#3b82f6"
+          />
         </div>
 
         <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>

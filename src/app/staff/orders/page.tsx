@@ -16,6 +16,7 @@ import {
   type ReturnTag,
 } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
+import DrumRoll from "@/components/DrumRoll";
 
 /* ─── Types ─── */
 type TabId = "orders" | "approvals" | "bulk";
@@ -108,8 +109,6 @@ function OrdersTab() {
   const [allTanks, setAllTanks] = useState<Record<string, TankDoc>>({});
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
-  const dialContainerRef = useRef<HTMLDivElement>(null);
-  const BLOCK_HEIGHT = 60;
 
   const fetchData = async () => {
     setLoading(true);
@@ -325,32 +324,14 @@ function OrdersTab() {
             </div>
           </div>
 
-          <div style={{ width: 80, background: "#fff", borderLeft: "1px solid #e2e8f0", display: "flex", flexDirection: "column", position: "relative" }}>
-            {prefixes.length > 0 && (
-              <div ref={dialContainerRef}
-                onScroll={(e) => {
-                  const el = e.currentTarget;
-                  const rawIdx = Math.round(el.scrollTop / BLOCK_HEIGHT);
-                  const idx = Math.min(Math.max(rawIdx, 0), prefixes.length - 1);
-                  if (prefixes[idx] && prefixes[idx] !== activePrefix) setActivePrefix(prefixes[idx]);
-                }}
-                style={{ flex: 1, overflowY: "auto", overflowX: "hidden", scrollSnapType: "y mandatory", scrollPaddingBottom: 16 }}>
-                <div style={{ display: "flex", flexDirection: "column", padding: "0 6px 16px 6px" }}>
-                  {prefixes.map((p, index) => {
-                    const isActive = activePrefix === p;
-                    return (
-                      <div key={p} style={{ scrollSnapAlign: "end", scrollSnapStop: "always" }}>
-                        <button onClick={(e) => { focusInput(p); e.currentTarget.scrollIntoView({ behavior: "smooth", block: "end" }); }}
-                          style={{ width: "100%", height: 48, borderRadius: 10, flexShrink: 0, border: "none", background: isActive ? "#3b82f615" : "transparent", borderLeft: isActive ? "3px solid #3b82f6" : "3px solid transparent", color: isActive ? "#3b82f6" : "#94a3b8", fontSize: 22, fontWeight: 900, fontFamily: "monospace", transition: "all 0.15s", cursor: "pointer", transform: isActive ? "scale(1.3)" : "scale(1.0)" }}>
-                          {p}
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </div>
-            )}
-          </div>
+          {/* 循環ドラムロール（共通コンポーネント化） */}
+          <DrumRoll
+            items={prefixes}
+            value={activePrefix}
+            onChange={(p) => setActivePrefix(p)}
+            onSelect={(p) => focusInput(p)}
+            accentColor="#3b82f6"
+          />
         </div>
 
         <style>{`@keyframes slideInLeft { from { opacity: 0; transform: translateX(-20px); } to { opacity: 1; transform: translateX(0); } }`}</style>
