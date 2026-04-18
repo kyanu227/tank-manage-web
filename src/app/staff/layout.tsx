@@ -4,26 +4,32 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard, AlertTriangle, Wrench, ShoppingCart, User,
+  LayoutDashboard, Wrench, ShoppingCart, User,
   Menu, X, Hand, Building2
 } from "lucide-react";
 import StaffAuthGuard from "@/components/StaffAuthGuard";
 
-/* ── Side menu ── */
+/* ── Side menu ──
+   破損報告/修理完了/耐圧検査完了の3画面は「メンテナンス」グループとして
+   /staff/damage を代表パスにする。3画面の切替は共通タブ (MaintenanceTabs) で行う。*/
 const SIDE_NAV = [
-  { href: "/staff",             label: "操作 (貸出/返却/充填)", icon: Hand },
-  { href: "/staff/inhouse",     label: "自社管理",       icon: Building2 },
-  { href: "/staff/damage",      label: "破損報告",       icon: AlertTriangle },
-  { href: "/staff/maintenance", label: "メンテナンス",   icon: Wrench },
-  { href: "/staff/dashboard",   label: "ダッシュボード", icon: LayoutDashboard },
-  { href: "/staff/order",       label: "資材発注",       icon: ShoppingCart },
-  { href: "/staff/mypage",      label: "マイページ",     icon: User },
+  { href: "/staff/lend",      label: "操作 (貸出/返却/充填)", icon: Hand },
+  { href: "/staff/inhouse",   label: "自社管理",       icon: Building2 },
+  { href: "/staff/damage",    label: "メンテナンス",   icon: Wrench },
+  { href: "/staff/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
+  { href: "/staff/order",     label: "資材発注",       icon: ShoppingCart },
+  { href: "/staff/mypage",    label: "マイページ",     icon: User },
 ];
+
+// 操作ページ（貸出/返却/充填）配下の判定
+const OPS_PATHS = ["/staff/lend", "/staff/return", "/staff/fill"];
 
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
-  const isOpsPage = pathname === "/staff";
+  // 手動/受注サブタブは貸出ページでのみ表示
+  const isLendPage = pathname === "/staff/lend";
+  const isOpsGroup = OPS_PATHS.includes(pathname ?? "");
   const isInhousePage = pathname === "/staff/inhouse";
 
   // 操作スタイル: 手動 / 受注（操作ページでのみ表示）
@@ -75,7 +81,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             <Building2 size={14} />
             自社管理
           </Link>
-          {isOpsPage && (
+          {isLendPage && (
             <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 3 }}>
               {([
                 { id: "manual" as const, label: "手動" },
@@ -124,7 +130,14 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
           <nav style={{ flex: 1, padding: "8px 8px", overflowY: "auto" }}>
             {SIDE_NAV.map((item) => {
               const Icon = item.icon;
-              const active = pathname === item.href;
+              // 複数URLを束ねるグループナビは個別判定
+              const isMaintenance = item.href === "/staff/damage";
+              const isOpsGroupItem = item.href === "/staff/lend";
+              const active = isMaintenance
+                ? ["/staff/damage", "/staff/repair", "/staff/inspection"].includes(pathname ?? "")
+                : isOpsGroupItem
+                ? isOpsGroup
+                : pathname === item.href;
               return (
                 <Link
                   key={item.href}

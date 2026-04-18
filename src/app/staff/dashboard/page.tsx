@@ -6,6 +6,7 @@ import { db } from "@/lib/firebase/config";
 import { collection, getDocs, query, orderBy, limit, doc, writeBatch, serverTimestamp } from "firebase/firestore";
 import { STATUS_COLORS } from "@/lib/tank-rules";
 import { voidLog } from "@/lib/tank-operation";
+import { getStaffName } from "@/hooks/useStaffSession";
 
 interface TankSummary {
   [status: string]: number;
@@ -82,7 +83,7 @@ export default function StaffDashboard() {
     if (reason === null) return; // キャンセル
 
     try {
-      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
+      const staffName = getStaffName();
 
       // 巻き戻し先の location を推定
       let rollbackLocation = "倉庫";
@@ -123,7 +124,7 @@ export default function StaffDashboard() {
     setSavingEdit(true);
     try {
       const batch = writeBatch(db);
-      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
+      const staffName = getStaffName();
 
       // 1. If tank ID changed, rollback old tank status, and update new tank status
       // Note: Full logic requires fetching both old and new tanks to swap properly in 'tanks', or just swapping history. 

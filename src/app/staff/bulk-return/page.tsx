@@ -6,6 +6,7 @@ import { db } from "@/lib/firebase/config";
 import { collection, getDocs, doc, writeBatch, query, where } from "firebase/firestore";
 import { STATUS, RETURN_TAG, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
+import { getStaffName } from "@/hooks/useStaffSession";
 
 interface TankDoc {
   id: string;
@@ -105,7 +106,7 @@ export default function BulkReturnPage() {
 
     setReturning(prev => ({ ...prev, [loc]: true }));
     try {
-      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
+      const staffName = getStaffName();
 
       await applyBulkTankOperations(
         tanksToReturn.map((tank) => {

@@ -10,6 +10,7 @@ import {
 } from "firebase/firestore";
 import { STATUS, RETURN_TAG, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
+import { getStaffName } from "@/hooks/useStaffSession";
 
 type Condition = "normal" | "unused" | "uncharged";
 
@@ -89,7 +90,7 @@ export default function StaffReturnsPage() {
     if (!confirm(`${selectedCustomer.name} のタンク ${tanks.length}本 を返却処理しますか？`)) return;
     setSubmitting(true);
     try {
-      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
+      const staffName = getStaffName();
       const note = `[現場受付] 顧客: ${selectedCustomer.name}`;
       await applyBulkTankOperations(
         tanks.map((tank) => {

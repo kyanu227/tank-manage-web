@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback } from "react";
 import {
   Users, Building2, Package, Plus, Save, RefreshCw, Trash2,
-  ToggleLeft, ToggleRight, Eye, EyeOff, ChevronDown, Clock,
+  ToggleLeft, ToggleRight, Eye, EyeOff, ChevronDown, Clock, ShieldCheck,
 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import {
@@ -52,14 +52,15 @@ interface Customer {
   linkedLocation?: string; // Links to a destination ID
 }
 
-type TabId = "staff" | "dest" | "customer" | "order" | "portal";
+type TabId = "staff" | "dest" | "customer" | "order" | "portal" | "inspection";
 
 const TABS: { id: TabId; label: string; icon: any }[] = [
-  { id: "staff",   label: "担当者",       icon: Users },
-  { id: "dest",    label: "貸出先",       icon: Building2 },
-  { id: "customer",label: "ポータル利用者", icon: Users },
-  { id: "order",   label: "発注品目",     icon: Package },
-  { id: "portal",  label: "ポータル設定", icon: Clock },
+  { id: "staff",      label: "担当者",       icon: Users },
+  { id: "dest",       label: "貸出先",       icon: Building2 },
+  { id: "customer",   label: "ポータル利用者", icon: Users },
+  { id: "order",      label: "発注品目",     icon: Package },
+  { id: "portal",     label: "ポータル設定", icon: Clock },
+  { id: "inspection", label: "耐圧検査",     icon: ShieldCheck },
 ];
 
 const ROLES = ["一般", "準管理者", "管理者"] as const;
@@ -118,6 +119,11 @@ export default function SettingsPage() {
   const [autoReturnMinute, setAutoReturnMinute] = useState<number>(0);
   const [portalSaving, setPortalSaving] = useState(false);
 
+  // Inspection settings（耐圧検査）
+  const [inspValidityYears, setInspValidityYears] = useState<number>(5);
+  const [inspAlertMonths, setInspAlertMonths] = useState<number>(6);
+  const [inspectionSaving, setInspectionSaving] = useState(false);
+
   /* ─── Fetch All ─── */
   const fetchAll = useCallback(async () => {
     setLoading(true);
@@ -152,6 +158,14 @@ export default function SettingsPage() {
         const p = portalSnap.data();
         if (p.autoReturnHour != null) setAutoReturnHour(p.autoReturnHour);
         if (p.autoReturnMinute != null) setAutoReturnMinute(p.autoReturnMinute);
+      }
+
+      // Inspection settings
+      const inspSnap = await getDoc(doc(db, "settings", "inspection"));
+      if (inspSnap.exists()) {
+        const i = inspSnap.data();
+        if (typeof i.validityYears === "number" && i.validityYears > 0) setInspValidityYears(i.validityYears);
+        if (typeof i.alertMonths === "number" && i.alertMonths > 0) setInspAlertMonths(i.alertMonths);
       }
     } catch (e) {
       console.error("Fetch error:", e);
@@ -949,6 +963,83 @@ export default function SettingsPage() {
                 >
                   <Save size={16} />
                   {portalSaving ? "保存中…" : "ポータル設定を保存"}
+                </button>
+              </div>
+            )}
+
+            {/* ── Inspection Settings Tab ── */}
+            {activeTab === "inspection" && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 24 }}>
+                <div>
+                  <h2 style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 4 }}>耐圧検査設定</h2>
+                  <p style={{ fontSize: 13, color: "#64748b", margin: 0 }}>
+                    耐圧検査の有効期間と告知開始タイミングを設定します。
+                  </p>
+                </div>
+
+                <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                    <ShieldCheck size={16} color="#8b5cf6" />
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", margin: 0 }}>検査有効期間</h3>
+                  </div>
+                  <p style={{ fontSize: 12, color: "#64748b", marginBottom: 20 }}>
+                    検査完了時、次回期限を「今日＋この年数」で更新します。（標準: 5年）
+                  </p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <input
+                      type="number"
+                      min={1} max={20}
+                      value={inspValidityYears}
+                      onChange={(e) => setInspValidityYears(Math.min(20, Math.max(1, Number(e.target.value))))}
+                      style={{ ...inputStyle, width: 100, textAlign: "center", fontSize: 24, fontWeight: 800, fontFamily: "monospace", padding: "10px 8px" }}
+                    />
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#64748b" }}>年</span>
+                  </div>
+                </div>
+
+                <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 24 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 16 }}>
+                    <Clock size={16} color="#f59e0b" />
+                    <h3 style={{ fontSize: 14, fontWeight: 700, color: "#0f172a", margin: 0 }}>告知開始タイミング</h3>
+                  </div>
+                  <p style={{ fontSize: 12, color: "#64748b", marginBottom: 20 }}>
+                    次回期限がこのヶ月数以内に迫ったタンクをスタッフ画面に表示します。（標準: 6ヶ月）
+                  </p>
+                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                    <input
+                      type="number"
+                      min={1} max={24}
+                      value={inspAlertMonths}
+                      onChange={(e) => setInspAlertMonths(Math.min(24, Math.max(1, Number(e.target.value))))}
+                      style={{ ...inputStyle, width: 100, textAlign: "center", fontSize: 24, fontWeight: 800, fontFamily: "monospace", padding: "10px 8px" }}
+                    />
+                    <span style={{ fontSize: 14, fontWeight: 600, color: "#64748b" }}>ヶ月前から</span>
+                  </div>
+                </div>
+
+                <button
+                  disabled={inspectionSaving}
+                  onClick={async () => {
+                    if (!confirm(`耐圧検査設定を「有効期間 ${inspValidityYears}年 / 告知 ${inspAlertMonths}ヶ月前〜」に保存しますか？`)) return;
+                    setInspectionSaving(true);
+                    try {
+                      await setDoc(doc(db, "settings", "inspection"), {
+                        validityYears: inspValidityYears,
+                        alertMonths: inspAlertMonths,
+                        updatedAt: serverTimestamp(),
+                      }, { merge: true });
+                      alert("保存しました");
+                    } catch (e) {
+                      console.error(e);
+                      alert("保存に失敗しました");
+                    } finally {
+                      setInspectionSaving(false);
+                    }
+                  }}
+                  style={btnPrimary}
+                >
+                  <Save size={16} />
+                  {inspectionSaving ? "保存中…" : "耐圧検査設定を保存"}
                 </button>
               </div>
             )}

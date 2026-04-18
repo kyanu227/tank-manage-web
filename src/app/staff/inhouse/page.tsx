@@ -1,125 +1,124 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { Wrench, Plus, CheckCircle2, AlertCircle, X, Search, Loader2 } from "lucide-react";
+import { useState, useEffect, useMemo, useRef } from "react";
+import { Wrench, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, doc, writeBatch, query, where } from "firebase/firestore";
+import { doc, writeBatch } from "firebase/firestore";
 import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
-
-interface TankDoc {
-  id: string;
-  status: string;
-  location: string;
-  staff: string;
-  updatedAt: any;
-  logNote?: string;
-}
+import TankIdInput from "@/components/TankIdInput";
+import { getStaffName } from "@/hooks/useStaffSession";
+import { useTanks } from "@/hooks/useTanks";
 
 type TagType = "normal" | "unused" | "defect";
 
-const TAGS: { id: TagType; label: string; color: string; bg: string; borderColor: string }[] = [
-  { id: "normal", label: "通常", color: "#64748b", bg: "#f1f5f9", borderColor: "#e2e8f0" },
-  { id: "unused", label: "未使用", color: "#10b981", bg: "#ecfdf5", borderColor: "#6ee7b7" },
-  { id: "defect", label: "不備", color: "#ef4444", bg: "#fef2f2", borderColor: "#fca5a5" },
+const TAGS: { id: TagType; label: string; color: string; bg: string }[] = [
+  { id: "normal", label: "通常", color: "#64748b", bg: "#f1f5f9" },
+  { id: "unused", label: "未使用", color: "#10b981", bg: "#ecfdf5" },
+  { id: "defect", label: "不備", color: "#ef4444", bg: "#fef2f2" },
 ];
 
-export default function InHousePage() {
-  const [inHouseTanks, setInHouseTanks] = useState<(TankDoc & { tag: TagType })[]>([]);
-  const [loading, setLoading] = useState(true);
-  
-  // Retro reporting state
-  const [inputValue, setInputValue] = useState("");
-  const [reportResult, setReportResult] = useState<{ success: boolean; message: string } | null>(null);
-  const [reporting, setReporting] = useState(false);
+const ACCENT = "#6366f1";
 
-  // Return state
+export default function InHousePage() {
+  const { tanks: allTanks, tankMap, prefixes, loading, refetch } = useTanks();
+  const [activePrefix, setActivePrefix] = useState<string | null>(null);
+  const [numberValue, setNumberValue] = useState("");
+  const [lastAdded, setLastAdded] = useState<string | null>(null);
+  const successTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // タグの楽観更新を保持（refetch までの間 UI を即時反映するため）
+  const [tagOverrides, setTagOverrides] = useState<Record<string, TagType>>({});
+  const [reporting, setReporting] = useState(false);
+  const [reportResult, setReportResult] = useState<{ success: boolean; message: string } | null>(null);
   const [returning, setReturning] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
-      const q = query(collection(db, "tanks"), where("status", "==", STATUS.IN_HOUSE));
-      const snap = await getDocs(q);
-      const tanks: (TankDoc & { tag: TagType })[] = [];
-      snap.forEach((d) => {
-        const data = d.data();
-        let tag: TagType = "normal";
-        if (data.logNote === "[TAG:unused]") tag = "unused";
-        if (data.logNote === "[TAG:defect]") tag = "defect";
-        tanks.push({ id: d.id, ...data, tag } as any);
-      });
-      // Sort by ID
-      tanks.sort((a, b) => a.id.localeCompare(b.id));
-      setInHouseTanks(tanks);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoading(false);
-    }
+  // ページ全体スクロールロック（ドラムロール用）
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+      document.documentElement.style.overflow = "";
+    };
   }, []);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  // 自社利用中タンク（tagOverrides を反映）
+  const inHouseTanks = useMemo(() => {
+    const list = allTanks
+      .filter((t) => t.status === STATUS.IN_HOUSE)
+      .map((t) => {
+        const baseTag: TagType =
+          t.logNote === "[TAG:unused]" ? "unused" :
+          t.logNote === "[TAG:defect]" ? "defect" : "normal";
+        return {
+          id: t.id,
+          status: t.status,
+          location: t.location ?? "",
+          staff: t.staff ?? "",
+          updatedAt: t.updatedAt,
+          logNote: t.logNote,
+          tag: tagOverrides[t.id] ?? baseTag,
+        };
+      });
+    return list;
+  }, [allTanks, tagOverrides]);
 
   const updateTag = async (tankId: string, newTag: TagType) => {
-    // Optimistic UI update
-    setInHouseTanks((prev) => prev.map((t) => (t.id === tankId ? { ...t, tag: newTag } : t)));
+    setTagOverrides((prev) => ({ ...prev, [tankId]: newTag }));
     try {
       let logNote = "";
       if (newTag === "unused") logNote = "[TAG:unused]";
       if (newTag === "defect") logNote = "[TAG:defect]";
-
       const ref = doc(db, "tanks", tankId);
       await writeBatch(db).update(ref, { logNote }).commit();
     } catch (e) {
       console.error("Failed to update tag", e);
-      fetchData(); // rollback
+      // 失敗時はオーバーライドを取り消して最新状態を取り直す
+      setTagOverrides((prev) => {
+        const next = { ...prev };
+        delete next[tankId];
+        return next;
+      });
+      refetch();
     }
   };
 
-  const handleRetroReport = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!inputValue) return;
-
-    const tankId = inputValue.toUpperCase().trim();
+  // TankIdInput からの commit: その場で事後報告実行
+  const handleCommit = async (tankId: string) => {
+    if (reporting) return;
     if (!/^[A-Z]+-\d{2}$/.test(tankId)) {
       setReportResult({ success: false, message: "ID形式が正しくありません (例: A-01)" });
       return;
     }
-
     setReporting(true);
+    setReportResult(null);
     try {
-      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-
-      // Check current status
-      const snap = await getDocs(query(collection(db, "tanks"), where("__name__", "==", tankId)));
-      if (snap.empty) {
-        setReportResult({ success: false, message: "タンクが見つかりません" });
-        setReporting(false);
+      const staffName = getStaffName();
+      const tank = tankMap[tankId];
+      if (!tank) {
+        setReportResult({ success: false, message: `${tankId} は登録されていません` });
         return;
       }
-
-      const data = snap.docs[0].data();
-
-      if (data.status === STATUS.IN_HOUSE) {
+      if (tank.status === STATUS.IN_HOUSE) {
         setReportResult({ success: true, message: `${tankId} は既に自社利用中です` });
-        setInputValue("");
-        setReporting(false);
         return;
       }
-
       await applyTankOperation({
         tankId,
         transitionAction: ACTION.IN_HOUSE_USE_RETRO,
-        currentStatus: data.status,
+        currentStatus: tank.status,
         staff: staffName,
         location: "自社",
         logNote: "事後報告",
       });
-
-      setInputValue("");
+      setLastAdded(tankId);
+      if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+      successTimeoutRef.current = setTimeout(() => setLastAdded(null), 1500);
       setReportResult({ success: true, message: `${tankId} の事後報告を完了しました` });
-      fetchData();
+      setTagOverrides({});
+      refetch();
     } catch (e: any) {
       setReportResult({ success: false, message: "エラー: " + e.message });
     } finally {
@@ -130,11 +129,9 @@ export default function InHousePage() {
   const handleBulkReturn = async () => {
     if (inHouseTanks.length === 0) return;
     if (!confirm(`自社利用中のタンク全 ${inHouseTanks.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`)) return;
-
     setReturning(true);
     try {
-      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
-
+      const staffName = getStaffName();
       await applyBulkTankOperations(
         inHouseTanks.map((tank) => {
           const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
@@ -147,9 +144,9 @@ export default function InHousePage() {
           };
         })
       );
-
       alert("一括返却が完了しました。");
-      fetchData();
+      setTagOverrides({});
+      refetch();
     } catch (e: any) {
       alert("エラー: " + e.message);
     } finally {
@@ -158,116 +155,132 @@ export default function InHousePage() {
   };
 
   return (
-    <div style={{ maxWidth: 640, margin: "0 auto", padding: "16px 16px 24px" }}>
-      <div style={{ marginBottom: 20 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", marginBottom: 4, letterSpacing: "-0.02em", display: "flex", alignItems: "center", gap: 8 }}>
-          <Wrench size={24} color="#6366f1" />
-          自社管理
-        </h1>
-        <p style={{ fontSize: 13, color: "#94a3b8" }}>自社で利用したタンクの事後報告と返却確定を行います</p>
-      </div>
-
-      {/* Retro Report Section */}
-      <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 20, marginBottom: 24 }}>
-        <h2 style={{ fontSize: 15, fontWeight: 700, color: "#334155", marginBottom: 12 }}>事後報告 (利用開始)</h2>
-        <form onSubmit={handleRetroReport} style={{ display: "flex", gap: 8 }}>
-          <div style={{ position: "relative", flex: 1 }}>
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value.toUpperCase())}
-              placeholder="例: A-01"
-              style={{
-                width: "100%", padding: "12px 14px 12px 38px", fontSize: 16, fontWeight: 700,
-                fontFamily: "monospace", border: "1px solid #e2e8f0", borderRadius: 10,
-                outline: "none", color: "#0f172a", textTransform: "uppercase",
-              }}
-            />
-            <Search size={18} color="#94a3b8" style={{ position: "absolute", left: 14, top: 15 }} />
-          </div>
-          <button
-            type="submit"
-            disabled={reporting || !inputValue}
-            style={{
-              padding: "0 20px", borderRadius: 10, border: "none", background: reporting || !inputValue ? "#c7d2fe" : "#6366f1",
-              color: "#fff", fontSize: 14, fontWeight: 700, cursor: reporting || !inputValue ? "not-allowed" : "pointer",
-              transition: "all 0.15s", whiteSpace: "nowrap",
-            }}
-          >
-            {reporting ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : "追加"}
-          </button>
-        </form>
-
-        {reportResult && (
-          <div style={{ marginTop: 12, display: "flex", alignItems: "center", gap: 8, padding: "10px 14px", borderRadius: 10, background: reportResult.success ? "#ecfdf5" : "#fef2f2", border: `1px solid ${reportResult.success ? "#bbf7d0" : "#fecaca"}` }}>
-            {reportResult.success ? <CheckCircle2 size={16} color="#10b981" /> : <AlertCircle size={16} color="#ef4444" />}
-            <span style={{ fontSize: 13, fontWeight: 600, color: reportResult.success ? "#166534" : "#991b1b" }}>{reportResult.message}</span>
-          </div>
-        )}
-      </div>
-
-      {/* Return Section */}
-      <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 20 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
-          <h2 style={{ fontSize: 15, fontWeight: 700, color: "#334155" }}>利用中タンク ({inHouseTanks.length}本)</h2>
-          <button
-            onClick={handleBulkReturn}
-            disabled={inHouseTanks.length === 0 || returning}
-            style={{
-              padding: "8px 16px", borderRadius: 8, border: "none",
-              background: inHouseTanks.length === 0 || returning ? "#e2e8f0" : "#0f172a",
-              color: inHouseTanks.length === 0 || returning ? "#94a3b8" : "#fff",
-              fontSize: 13, fontWeight: 700, cursor: inHouseTanks.length === 0 || returning ? "not-allowed" : "pointer",
-              display: "flex", alignItems: "center", gap: 6,
-            }}
-          >
-            {returning ? <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={14} />}
-            全て返却確定
-          </button>
-        </div>
-
-        {loading ? (
-          <div style={{ textAlign: "center", padding: 40, color: "#94a3b8" }}>読み込み中…</div>
-        ) : inHouseTanks.length === 0 ? (
-          <div style={{ textAlign: "center", padding: 40, color: "#cbd5e1", fontSize: 13 }}>利用中のタンクはありません</div>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {inHouseTanks.map((tank) => (
-              <div key={tank.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "12px 16px", background: "#f8fafc", borderRadius: 12, border: "1px solid #f1f5f9" }}>
-                <div>
-                  <div style={{ fontSize: 16, fontWeight: 800, fontFamily: "monospace", color: "#0f172a", letterSpacing: "0.05em" }}>
-                    {tank.id}
-                  </div>
-                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{tank.staff}</div>
-                </div>
-
-                {/* Tag Selector */}
-                <div style={{ display: "flex", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 2 }}>
-                  {TAGS.map((tag) => {
-                    const active = tank.tag === tag.id;
-                    return (
-                      <button
-                        key={tag.id}
-                        onClick={() => updateTag(tank.id, tag.id)}
-                        style={{
-                          padding: "6px 12px", border: "none", borderRadius: 6,
-                          background: active ? tag.bg : "transparent",
-                          color: active ? tag.color : "#94a3b8",
-                          fontSize: 12, fontWeight: active ? 700 : 500,
-                          cursor: "pointer", transition: "all 0.1s",
-                        }}
-                      >
-                        {tag.label}
-                      </button>
-                    );
-                  })}
-                </div>
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden" }}>
+      <TankIdInput
+        prefixes={prefixes}
+        activePrefix={activePrefix}
+        onPrefixChange={setActivePrefix}
+        numberValue={numberValue}
+        onNumberChange={setNumberValue}
+        onCommit={handleCommit}
+        accentColor={ACCENT}
+        confirmLabel={reporting ? "送信中…" : "事後報告"}
+        lastAdded={lastAdded}
+        headerSlot={
+          <div style={{ padding: "10px 16px 0", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#eef2ff", borderRadius: 12, border: "1px solid #c7d2fe" }}>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: ACCENT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Wrench size={14} color="#fff" />
               </div>
-            ))}
+              <div style={{ minWidth: 0 }}>
+                <h1 style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", margin: 0 }}>自社管理</h1>
+                <p style={{ fontSize: 11, color: "#64748b", margin: 0 }}>事後報告（利用開始）／利用中の返却確定</p>
+              </div>
+            </div>
           </div>
-        )}
-      </div>
+        }
+        beforeConfirm={
+          <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+            {/* フィードバック */}
+            {reportResult && (
+              <div style={{
+                marginBottom: 12, display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 12px", borderRadius: 10,
+                background: reportResult.success ? "#ecfdf5" : "#fef2f2",
+                border: `1px solid ${reportResult.success ? "#bbf7d0" : "#fecaca"}`,
+              }}>
+                {reportResult.success
+                  ? <CheckCircle2 size={14} color="#10b981" />
+                  : <AlertCircle size={14} color="#ef4444" />}
+                <span style={{ fontSize: 12, fontWeight: 600, color: reportResult.success ? "#166534" : "#991b1b" }}>
+                  {reportResult.message}
+                </span>
+              </div>
+            )}
 
+            {/* 利用中タンク一覧 */}
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>利用中タンク</span>
+              {inHouseTanks.length > 0 && (
+                <span style={{ background: ACCENT, color: "#fff", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 800 }}>
+                  {inHouseTanks.length}本
+                </span>
+              )}
+            </div>
+
+            {loading ? (
+              <div style={{ textAlign: "center", padding: 24, color: "#94a3b8" }}>
+                <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} />
+              </div>
+            ) : inHouseTanks.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "24px 12px", color: "#cbd5e1", fontSize: 13 }}>
+                利用中のタンクはありません
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {inHouseTanks.map((tank) => (
+                  <div key={tank.id} style={{
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                    padding: "10px 12px", background: "#fff", borderRadius: 12, border: "1px solid #e2e8f0",
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ fontSize: 15, fontWeight: 900, fontFamily: "monospace", color: "#0f172a", letterSpacing: "0.05em" }}>
+                        {tank.id}
+                      </div>
+                      <div style={{ fontSize: 10, color: "#94a3b8" }}>{tank.staff}</div>
+                    </div>
+                    <div style={{ display: "flex", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 2, flexShrink: 0 }}>
+                      {TAGS.map((tag) => {
+                        const active = tank.tag === tag.id;
+                        return (
+                          <button
+                            key={tag.id}
+                            onClick={() => updateTag(tank.id, tag.id)}
+                            style={{
+                              padding: "5px 9px", border: "none", borderRadius: 6,
+                              background: active ? tag.bg : "transparent",
+                              color: active ? tag.color : "#94a3b8",
+                              fontSize: 11, fontWeight: active ? 700 : 500,
+                              cursor: "pointer", transition: "all 0.1s",
+                            }}
+                          >
+                            {tag.label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        }
+        footerSlot={
+          <div style={{
+            padding: "8px 16px max(8px, env(safe-area-inset-bottom, 8px))",
+            background: "#fff", borderTop: "1px solid #e2e8f0", flexShrink: 0, zIndex: 20,
+          }}>
+            <button
+              onClick={handleBulkReturn}
+              disabled={inHouseTanks.length === 0 || returning}
+              style={{
+                width: "100%", padding: "12px", borderRadius: 12, border: "none",
+                background: inHouseTanks.length === 0 || returning ? "#e2e8f0" : "#0f172a",
+                color: inHouseTanks.length === 0 || returning ? "#94a3b8" : "#fff",
+                fontSize: 14, fontWeight: 900,
+                display: "flex", justifyContent: "center", alignItems: "center", gap: 6,
+                cursor: inHouseTanks.length === 0 || returning ? "not-allowed" : "pointer",
+              }}
+            >
+              {returning
+                ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} />
+                : <CheckCircle2 size={16} />}
+              全て返却確定
+            </button>
+          </div>
+        }
+      />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }

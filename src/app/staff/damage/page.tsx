@@ -1,44 +1,48 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
-import { AlertTriangle, Send, CheckCircle2, Loader2 } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
-import { STATUS, ACTION } from "@/lib/tank-rules";
+import { useState, useEffect, useRef } from "react";
+import { AlertTriangle, Send, CheckCircle2, Loader2, X } from "lucide-react";
+import { ACTION } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
+import TankIdInput from "@/components/TankIdInput";
+import MaintenanceTabs from "@/components/MaintenanceTabs";
+import { getStaffName } from "@/hooks/useStaffSession";
+import { useTanks } from "@/hooks/useTanks";
+
+const ACCENT = "#ef4444";
 
 export default function DamageReportPage() {
-  const [prefixes, setPrefixes] = useState<string[]>([]);
-  const [selectedPrefix, setSelectedPrefix] = useState<string | null>(null);
-  const [inputValue, setInputValue] = useState("");
+  const { prefixes } = useTanks();
+  const [activePrefix, setActivePrefix] = useState<string | null>(null);
+  const [numberValue, setNumberValue] = useState("");
   const [queue, setQueue] = useState<{ uid: string; tankId: string }[]>([]);
+  const [lastAdded, setLastAdded] = useState<string | null>(null);
   const [note, setNote] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
+  const successTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
+  // ページ全体スクロールロック（ドラムロール用）
   useEffect(() => {
-    (async () => {
-      const snap = await getDocs(collection(db, "tanks"));
-      const pSet = new Set<string>();
-      snap.forEach((d) => {
-        const m = d.id.match(/^([A-Z]+)/i);
-        if (m) pSet.add(m[1].toUpperCase());
-      });
-      setPrefixes(Array.from(pSet).sort());
-    })();
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+      document.documentElement.style.overflow = "";
+    };
   }, []);
 
-  const handleInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const val = e.target.value.replace(/[^0-9]/g, "");
-    if (val.length > 2) return;
-    setInputValue(val);
-    if (val.length === 2 && selectedPrefix) {
-      const tankId = `${selectedPrefix}-${val}`;
-      if (!queue.some((q) => q.tankId === tankId)) {
-        setQueue((prev) => [...prev, { uid: `${Date.now()}`, tankId }]);
-      }
-      setInputValue("");
-    }
+  const handleCommit = (tankId: string) => {
+    if (queue.some((q) => q.tankId === tankId)) return;
+    setQueue((prev) => [{ uid: `${Date.now()}_${Math.random()}`, tankId }, ...prev]);
+    setLastAdded(tankId);
+    if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    successTimeoutRef.current = setTimeout(() => setLastAdded(null), 1500);
+  };
+
+  const removeFromQueue = (uid: string) => {
+    setQueue((prev) => prev.filter((q) => q.uid !== uid));
   };
 
   const handleSubmit = async () => {
@@ -46,7 +50,7 @@ export default function DamageReportPage() {
     if (!confirm(`${queue.length}本の破損報告を送信しますか？`)) return;
     setSubmitting(true);
     try {
-      const staffName = JSON.parse(localStorage.getItem("staffSession") || "{}").name || "スタッフ";
+      const staffName = getStaffName();
       await applyBulkTankOperations(
         queue.map((item) => ({
           tankId: item.tankId,
@@ -67,74 +71,116 @@ export default function DamageReportPage() {
   };
 
   return (
-    <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 24px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 20, padding: "16px 20px", background: "#fef2f2", borderRadius: 16, border: "1.5px solid #fecaca" }}>
-        <div style={{ width: 44, height: 44, borderRadius: 12, background: "#ef4444", display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <AlertTriangle size={22} color="#fff" />
-        </div>
-        <div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>破損報告</h1>
-          <p style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>ステータスを「破損」に変更します</p>
-        </div>
-      </div>
-
-      {/* ID Input */}
-      <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 20, marginBottom: 20 }}>
-        <p style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 12 }}>タンクID</p>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 16 }}>
-          {prefixes.map((p) => (
-            <button key={p} onClick={() => { setSelectedPrefix(p); setInputValue(""); }}
-              style={{ width: 44, height: 44, borderRadius: 10, fontSize: 17, fontWeight: 800, fontFamily: "monospace", border: "1.5px solid", borderColor: selectedPrefix === p ? "#ef4444" : "#e2e8f0", background: selectedPrefix === p ? "#ef4444" : "#fff", color: selectedPrefix === p ? "#fff" : "#475569", cursor: "pointer" }}>
-              {p}
+    <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden" }}>
+      <MaintenanceTabs />
+      <TankIdInput
+        prefixes={prefixes}
+        activePrefix={activePrefix}
+        onPrefixChange={setActivePrefix}
+        numberValue={numberValue}
+        onNumberChange={setNumberValue}
+        onCommit={handleCommit}
+        accentColor={ACCENT}
+        lastAdded={lastAdded}
+        headerSlot={
+          <div style={{ padding: "10px 16px 0", flexShrink: 0 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#fef2f2", borderRadius: 12, border: "1px solid #fecaca" }}>
+              <div style={{ width: 28, height: 28, borderRadius: 8, background: ACCENT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <AlertTriangle size={14} color="#fff" />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <h1 style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", margin: 0 }}>破損報告</h1>
+                <p style={{ fontSize: 11, color: "#64748b", margin: 0 }}>ステータスを「破損」に変更</p>
+              </div>
+            </div>
+          </div>
+        }
+        beforeConfirm={
+          <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>送信リスト</span>
+              {queue.length > 0 && (
+                <span style={{ background: ACCENT, color: "#fff", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 800 }}>
+                  {queue.length}
+                </span>
+              )}
+            </div>
+            {queue.length === 0 ? (
+              <div style={{ textAlign: "center", padding: "24px 20px", color: "#cbd5e1", marginTop: 8 }}>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>右のドラムからアルファベットを選び、</p>
+                <p style={{ margin: "4px 0", fontSize: 13, fontWeight: 600 }}>数字2桁を入力してください</p>
+              </div>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {queue.map((item) => (
+                  <div key={item.uid} style={{
+                    background: "#fff", padding: "10px 14px", borderRadius: 12,
+                    borderLeft: `5px solid ${ACCENT}`,
+                    boxShadow: "0 2px 6px rgba(0,0,0,0.04)",
+                    display: "flex", alignItems: "center", justifyContent: "space-between",
+                  }}>
+                    <span style={{ fontSize: 17, fontWeight: 900, fontFamily: "monospace", letterSpacing: "0.05em", color: "#0f172a" }}>
+                      {item.tankId}
+                    </span>
+                    <button onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 6, cursor: "pointer", marginRight: -6 }}>
+                      <X size={18} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        }
+        footerSlot={
+          <div style={{
+            padding: "8px 16px max(8px, env(safe-area-inset-bottom, 8px))",
+            background: "#fff", borderTop: "1px solid #e2e8f0", flexShrink: 0,
+            display: "flex", flexDirection: "column", gap: 8, zIndex: 20,
+          }}>
+            <textarea
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+              placeholder="破損内容（例: バルブ不良、タンク凹み等）"
+              rows={2}
+              style={{
+                width: "100%", boxSizing: "border-box",
+                border: "1px solid #e2e8f0", borderRadius: 10, padding: "8px 12px",
+                // iOS Safari は font-size < 16px の入力欄でフォーカス時に画面を自動拡大するため 16px を保つ
+                fontSize: 16, resize: "none", outline: "none", fontFamily: "inherit",
+              }}
+            />
+            <button
+              onClick={handleSubmit}
+              disabled={submitting || queue.length === 0}
+              style={{
+                width: "100%", padding: "12px", borderRadius: 12, border: "none",
+                background: queue.length > 0 ? ACCENT : "#e2e8f0",
+                color: queue.length > 0 ? "#fff" : "#94a3b8",
+                fontSize: 15, fontWeight: 900,
+                display: "flex", justifyContent: "center", alignItems: "center", gap: 8,
+                cursor: submitting || queue.length === 0 ? "not-allowed" : "pointer",
+              }}
+            >
+              {submitting ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={16} />}
+              <span>{queue.length}件の破損報告</span>
             </button>
-          ))}
-        </div>
-        {selectedPrefix && (
-          <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
-            <div style={{ background: "#f1f5f9", borderRadius: 10, padding: "12px 16px", fontSize: 22, fontWeight: 800, fontFamily: "monospace", color: "#0f172a" }}>{selectedPrefix} -</div>
-            <input type="tel" inputMode="numeric" placeholder="00" value={inputValue} onChange={handleInput} autoFocus autoComplete="off"
-              style={{ flex: 1, border: "1.5px solid #ef4444", borderRadius: 10, padding: "12px 16px", fontSize: 24, fontWeight: 800, fontFamily: "monospace", textAlign: "center" as const, color: "#0f172a", outline: "none", height: 52 }} />
+            {result && (
+              <div style={{
+                padding: "6px 10px", borderRadius: 8,
+                background: result.success ? "#ecfdf5" : "#fef2f2",
+                border: `1px solid ${result.success ? "#bbf7d0" : "#fecaca"}`,
+                display: "flex", alignItems: "center", gap: 6,
+              }}>
+                <CheckCircle2 size={14} color={result.success ? "#10b981" : "#ef4444"} />
+                <span style={{ fontSize: 12, fontWeight: 600, color: result.success ? "#166534" : "#991b1b" }}>
+                  {result.message}
+                </span>
+              </div>
+            )}
           </div>
-        )}
-      </div>
-
-      {/* Note */}
-      <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 20, marginBottom: 20 }}>
-        <p style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 8 }}>破損内容（備考）</p>
-        <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="例: バルブ不良、タンク凹み等"
-          style={{ width: "100%", border: "1px solid #e2e8f0", borderRadius: 10, padding: "10px 14px", fontSize: 14, resize: "vertical", minHeight: 60, outline: "none", fontFamily: "inherit" }} />
-      </div>
-
-      {/* Queue */}
-      {queue.length > 0 && (
-        <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 20, marginBottom: 20 }}>
-          <p style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginBottom: 12 }}>キュー ({queue.length}本)</p>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-            {queue.map((q) => (
-              <span key={q.uid} onClick={() => setQueue((prev) => prev.filter((x) => x.uid !== q.uid))}
-                style={{ padding: "6px 12px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontFamily: "monospace", fontWeight: 700, fontSize: 14, color: "#991b1b", cursor: "pointer" }}>
-                {q.tankId} ✕
-              </span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {queue.length > 0 && (
-        <button onClick={handleSubmit} disabled={submitting}
-          style={{ width: "100%", padding: "14px 0", borderRadius: 14, border: "none", background: "#ef4444", color: "#fff", fontSize: 16, fontWeight: 800, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, opacity: submitting ? 0.7 : 1, marginBottom: 16 }}>
-          {submitting ? <Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={18} />}
-          {submitting ? "送信中…" : `破損報告（${queue.length}本）`}
-        </button>
-      )}
-
-      {result && (
-        <div style={{ padding: "16px 20px", borderRadius: 14, background: result.success ? "#ecfdf5" : "#fef2f2", border: `1px solid ${result.success ? "#bbf7d0" : "#fecaca"}`, display: "flex", alignItems: "center", gap: 10 }}>
-          <CheckCircle2 size={20} color={result.success ? "#10b981" : "#ef4444"} />
-          <span style={{ fontSize: 14, fontWeight: 600, color: result.success ? "#166534" : "#991b1b" }}>{result.message}</span>
-        </div>
-      )}
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+        }
+      />
+      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
 }
