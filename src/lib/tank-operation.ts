@@ -103,20 +103,18 @@ export function appendTankOperation(
   const location = input.location ?? "倉庫";
   const logAction = input.logAction ?? input.transitionAction;
 
-  // タンク更新
+  // タンク更新（必ず既存ドキュメントのみ。存在しない tankId で呼ばれた場合は
+  // update() が commit 時にエラーを投げ、batch 全体がロールバックされる。
+  // これにより、壊れた返却申請や古い受注で幽霊タンクが生成されるのを構造的に防ぐ。
   const tankRef = doc(db, "tanks", input.tankId);
-  batch.set(
-    tankRef,
-    {
-      status: nextStatus,
-      location,
-      staff: input.staff,
-      updatedAt: serverTimestamp(),
-      logNote: input.tankNote ?? "",
-      ...(input.tankExtra ?? {}),
-    },
-    { merge: true }
-  );
+  batch.update(tankRef, {
+    status: nextStatus,
+    location,
+    staff: input.staff,
+    updatedAt: serverTimestamp(),
+    logNote: input.tankNote ?? "",
+    ...(input.tankExtra ?? {}),
+  });
 
   // ログ書き込み（voided: false を必ず付与）
   const logRef = doc(collection(db, "logs"));
@@ -221,17 +219,14 @@ export async function voidLog(input: VoidLogInput): Promise<void> {
     voidReason: input.reason ?? "",
   });
 
-  // 2. タンクステータスを巻き戻す（指定時のみ）
+  // 2. タンクステータスを巻き戻す（指定時のみ）。
+  //    update() 固定にすることで、ログ取消の副作用で存在しないタンクが復活することを防ぐ。
   if (input.rollbackTank) {
-    batch.set(
-      doc(db, "tanks", input.rollbackTank.tankId),
-      {
-        status: input.rollbackTank.toStatus,
-        location: input.rollbackTank.toLocation,
-        updatedAt: serverTimestamp(),
-      },
-      { merge: true }
-    );
+    batch.update(doc(db, "tanks", input.rollbackTank.tankId), {
+      status: input.rollbackTank.toStatus,
+      location: input.rollbackTank.toLocation,
+      updatedAt: serverTimestamp(),
+    });
   }
 
   // 3. 監査履歴を残す

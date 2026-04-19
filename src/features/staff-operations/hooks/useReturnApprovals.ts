@@ -7,7 +7,6 @@ import { db } from "@/lib/firebase/config";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import {
   RETURN_TAG,
-  STATUS,
   resolveReturnAction,
   type ReturnTag,
 } from "@/lib/tank-rules";
@@ -85,6 +84,7 @@ export function useReturnApprovals({
       // 承認直前に tanks/{tankId} を再取得し、現在の status を使う。
       // 承認待ちの間にタンク状態が変わっている可能性があるため、STATUS.LENT 固定だと
       // validateTransition や logAction の決定が古い前提で行われてしまう。
+      // 存在しないタンクIDはここで弾く（幽霊タンク生成を防ぐ最終防衛ライン）。
       const approvedData = await Promise.all(approved.map(async (item) => {
         const appData = approvals[item.id];
         const tag: ReturnTag =
@@ -93,7 +93,10 @@ export function useReturnApprovals({
               : RETURN_TAG.NORMAL;
         const note = `[承認] 顧客: ${selectedReturnGroup.customerName} (タグ:${appData.condition})`;
         const tankSnap = await getDoc(doc(db, "tanks", item.tankId));
-        const currentStatus = String((tankSnap.data() as any)?.status ?? STATUS.LENT);
+        if (!tankSnap.exists()) {
+          throw new Error(`[${item.tankId}] タンクが存在しません`);
+        }
+        const currentStatus = String((tankSnap.data() as any)?.status ?? "");
         return { item, tag, condition: appData.condition as Condition, note, currentStatus };
       }));
 
