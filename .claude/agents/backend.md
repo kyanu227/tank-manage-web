@@ -30,7 +30,6 @@ const db = getFirestore(app);
 
 | コレクション | キー | 主要フィールド |
 |------------|------|--------------|
-| users | {uid} | role, name |
 | staff | {docId} | id, name, email, isActive, role, rank, passcode |
 | settings | adminPermissions | pages: {path: [roles]} |
 | destinations | {docId} | 顧客・貸出先情報 |
@@ -57,7 +56,6 @@ const db = getFirestore(app);
 ## 主要ファイル
 
 - `src/lib/firebase/config.ts` — Firebase 初期化
-- `src/lib/contexts/AuthContext.tsx` — 認証状態管理（React Context）
 - `src/components/AdminAuthGuard.tsx` — 管理者認証ガード
 - `src/components/StaffAuthGuard.tsx` — スタッフ認証ガード
 

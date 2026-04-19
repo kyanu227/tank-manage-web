@@ -18,7 +18,7 @@
 
 - ルート [`/`](src/app/page.tsx) は `/portal` に自動リダイレクト。
 - 各ゾーンは **別の認証ガード** で守られる（第7節）。
-- 共通レイアウト: [`src/app/layout.tsx`](src/app/layout.tsx) が AuthProvider を被せる。
+- 共通レイアウト: [`src/app/layout.tsx`](src/app/layout.tsx) は body クラスと共通ラッパーを被せる薄い殻。認証は各ゾーンのガードで完結する。
 
 ---
 
@@ -195,7 +195,6 @@ Firestore `settings/adminPermissions` を見て、ログインスタッフのロ
 | [`StaffAuthGuard`](src/components/StaffAuthGuard.tsx) | スタッフ認証ガード | staff レイアウト |
 | [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) | 管理者認証＋権限ガード | admin レイアウト |
 | [`MaintenanceTabs`](src/components/MaintenanceTabs.tsx) | damage/repair/inspection 切替 | メンテ3画面 |
-| [`layout/AppHeader`](src/components/layout/AppHeader.tsx) | ヘッダー共通部品（スケルトン） | — |
 
 > **注意**: 「ManualOperationPanel」はスタッフ操作専用なので `src/components/` ではなく
 > `src/features/staff-operations/components/` に置いている。この判断基準が今後も設計の軸。
@@ -222,7 +221,7 @@ Firestore `settings/adminPermissions` を見て、ログインスタッフのロ
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-認証コンテキスト: [`src/lib/contexts/AuthContext.tsx`](src/lib/contexts/AuthContext.tsx)（Firebase Auth の薄いラッパー）
+Firebase Auth の薄いラッパー（Context）は廃止済み。認証状態は各ガード（`StaffAuthGuard` / `AdminAuthGuard`）と localStorage で完結する。
 
 ロール:
 - `admin` — 全機能

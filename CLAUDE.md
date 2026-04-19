@@ -24,7 +24,7 @@
 ```
 src/
 ├── app/
-│   ├── layout.tsx              # ルートレイアウト（AuthProvider）
+│   ├── layout.tsx              # ルートレイアウト
 │   ├── page.tsx                # → /portal リダイレクト
 │   ├── globals.css             # CSS変数・プリセットクラス
 │   ├── admin/                  # 管理画面（AdminAuthGuard）
@@ -63,12 +63,8 @@ src/
 │   ├── AdminAuthGuard.tsx      # 管理者認証・権限ガード
 │   ├── StaffAuthGuard.tsx      # スタッフ認証ガード
 │   ├── AuthPanel.tsx           # 認証画面共通パネル
-│   ├── QuickSelect.tsx         # タッチ対応クイック選択
-│   └── layout/
-│       └── AppHeader.tsx       # 共通ヘッダー [スケルトン]
+│   └── QuickSelect.tsx         # タッチ対応クイック選択
 └── lib/
-    ├── contexts/
-    │   └── AuthContext.tsx      # Firebase認証コンテキスト
     └── firebase/
         ├── config.ts           # Firebase初期化
         └── customer-destination.ts  # 顧客・貸出先同期ヘルパー
@@ -148,7 +144,6 @@ firebase deploy      # Firebase Hosting デプロイ
 
 | コレクション | キー | 主要フィールド |
 |---|---|---|
-| users | {uid} | role, name |
 | staff | {docId} | id, name, email, isActive, role, rank, passcode |
 | customers | {docId} | uid, email, companyName, passcode, setupCompleted |
 | tanks | {docId} | status, location, staffId |
