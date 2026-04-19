@@ -1,0 +1,126 @@
+"use client";
+
+import { useCallback, useMemo, useState } from "react";
+import { collection, doc, getDocs, query, where, writeBatch } from "firebase/firestore";
+import { getStaffName } from "@/hooks/useStaffSession";
+import { db } from "@/lib/firebase/config";
+import { applyBulkTankOperations } from "@/lib/tank-operation";
+import { RETURN_TAG, STATUS, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
+import type { BulkTagType, BulkTankDoc } from "../types";
+
+type BulkTankWithTag = BulkTankDoc & { tag: BulkTagType };
+
+export interface UseBulkReturnByLocationResult {
+  bulkLoading: boolean;
+  groupedTanks: Record<string, BulkTankWithTag[]>;
+  expanded: Record<string, boolean>;
+  returning: Record<string, boolean>;
+  locationKeys: string[];
+  fetchBulkTanks: () => Promise<void>;
+  toggleExpand: (loc: string) => void;
+  updateTag: (loc: string, tankId: string, newTag: BulkTagType) => Promise<void>;
+  handleBulkReturnForLocation: (loc: string) => Promise<void>;
+}
+
+export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
+  const [bulkLoading, setBulkLoading] = useState(true);
+  const [groupedTanks, setGroupedTanks] = useState<Record<string, BulkTankWithTag[]>>({});
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [returning, setReturning] = useState<Record<string, boolean>>({});
+
+  const fetchBulkTanks = useCallback(async () => {
+    setBulkLoading(true);
+    try {
+      const q = query(collection(db, "tanks"), where("status", "in", [STATUS.LENT, STATUS.UNRETURNED]));
+      const snap = await getDocs(q);
+      const groups: Record<string, BulkTankWithTag[]> = {};
+      snap.forEach((d) => {
+        const data = d.data();
+        const loc = data.location || "不明";
+        if (!groups[loc]) groups[loc] = [];
+        let tag: BulkTagType = "normal";
+        if (data.logNote === "[TAG:unused]") tag = "unused";
+        if (data.logNote === "[TAG:defect]") tag = "defect";
+        groups[loc].push({ id: d.id, ...data, tag } as BulkTankWithTag);
+      });
+      Object.keys(groups).forEach(loc => {
+        groups[loc].sort((a, b) => a.id.localeCompare(b.id));
+      });
+      setGroupedTanks(groups);
+      const newExpanded: Record<string, boolean> = {};
+      Object.keys(groups).forEach(loc => newExpanded[loc] = true);
+      setExpanded(newExpanded);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setBulkLoading(false);
+    }
+  }, []);
+
+  const toggleExpand = useCallback((loc: string) => {
+    setExpanded(prev => ({ ...prev, [loc]: !prev[loc] }));
+  }, []);
+
+  const updateTag = useCallback(async (loc: string, tankId: string, newTag: BulkTagType) => {
+    setGroupedTanks(prev => {
+      const g = { ...prev };
+      g[loc] = g[loc].map(t => (t.id === tankId ? { ...t, tag: newTag } : t));
+      return g;
+    });
+    try {
+      let logNote = "";
+      if (newTag === "unused") logNote = "[TAG:unused]";
+      if (newTag === "defect") logNote = "[TAG:defect]";
+      const ref = doc(db, "tanks", tankId);
+      await writeBatch(db).update(ref, { logNote }).commit();
+    } catch (e) {
+      console.error("Failed to update tag", e);
+      fetchBulkTanks();
+    }
+  }, [fetchBulkTanks]);
+
+  const handleBulkReturnForLocation = useCallback(async (loc: string) => {
+    const tanksToReturn = groupedTanks[loc];
+    if (!tanksToReturn || tanksToReturn.length === 0) return;
+    if (!confirm(`${loc} の貸出中タンク全 ${tanksToReturn.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`)) return;
+
+    setReturning(prev => ({ ...prev, [loc]: true }));
+    try {
+      const staffName = getStaffName();
+
+      await applyBulkTankOperations(
+        tanksToReturn.map((tank) => {
+          const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
+          return {
+            tankId: tank.id,
+            transitionAction: resolveReturnAction(tag, tank.status),
+            currentStatus: tank.status,
+            staff: staffName,
+            location: "倉庫",
+          };
+        })
+      );
+
+      alert(`${loc} の一括返却が完了しました。`);
+      fetchBulkTanks();
+    } catch (e: any) {
+      alert("エラー: " + e.message);
+    } finally {
+      setReturning(prev => ({ ...prev, [loc]: false }));
+    }
+  }, [fetchBulkTanks, groupedTanks]);
+
+  const locationKeys = useMemo(() => Object.keys(groupedTanks).sort(), [groupedTanks]);
+
+  return {
+    bulkLoading,
+    groupedTanks,
+    expanded,
+    returning,
+    locationKeys,
+    fetchBulkTanks,
+    toggleExpand,
+    updateTag,
+    handleBulkReturnForLocation,
+  };
+}

@@ -73,22 +73,52 @@ src/
 
 ## AI組織構造（秘書ハブ型）
 
-全てのタスクは `@secretary` に依頼する。秘書が判断して最適なスペシャリストに振り分ける。
+全てのタスクは `@secretary`（さな）に依頼する。さなが設計・振り分け・品質管理を行い、実装は原則 Codex に委譲する。
 
 ```
 ユーザー
   │
   ▼
 ┌─────────────┐
-│   秘書      │  判断・振り分け・品質管理・改善提案
-│ (opus)      │  軽微タスクは直接対応
+│ さな(秘書)  │  設計・判断・振り分け・品質管理・改善提案
+│   (opus)    │  軽微タスクは直接対応
 └──────┬──────┘
        │
-       ├── @frontend (opus)   UI/UX・コンポーネント実装
-       ├── @backend  (opus)   Firebase/Auth/Firestore
-       ├── @migration (opus)  旧GAS → web移植
-       └── (秘書が必要に応じて新エージェント作成)
+       ├── Codex (既定: gpt-5.4 / effort xhigh)  実装の主担当
+       │    └─ 指定なしなら常に gpt-5.4 + xhigh で発注
+       │
+       └── 救援スペシャリスト（Codexで詰まった時のみ）
+            ├── @frontend (opus)   UI/UX
+            ├── @backend  (opus)   Firebase/Auth/Firestore
+            └── @migration (opus)  旧GAS → web移植
 ```
+
+### Codex 発注時のルール
+- モデル既定: `gpt-5.4`、effort 既定: `xhigh`
+- 発注前に、さなが要件・影響範囲・ファイル位置を整理して自己完結のプロンプトにする
+- Codexの成果物はさなが動作確認・型チェック・デプロイまで責任を持つ
+
+### Codex 発注の実行経路
+- **大規模タスク（新規ファイル多数・1000行以上の改修など）**:
+  `codex-companion.mjs task --background --write` で独立プロセスとして起動する
+  - Agent ツール経由だとサブプロセスが途中で止まる挙動を確認済み。独立プロセスなら親のターンが終わっても生存
+  - 追跡: `codex-companion.mjs status <job-id>` / 完了後 `result <job-id>` / 必要なら `cancel <job-id>`
+- **Codexへの必須指示（サイズ問わず全発注で必須）**:
+  - 「論理単位を1つ完了するたびに、リポジトリ直下の `progress.md` に3〜5行の完了記録を追記すること」
+  - 単位の定義: 1フック / 1コンポーネント / 1つの削除作業 / 1回の検証（tsc・build 等）
+  - 追記フォーマット: `## <単位名> 完了` ＋ 変更ファイル列挙 ＋ 1文で何をしたか
+  - この仕組みにより、さなは途中経過をレビュー可能になり、万一プロセスが死んでも復元ポイントが残る
+- **小規模タスク（〜200行・1〜2ファイル）**: Agent 経由で可。ただし `progress.md` 追記指示は同じく必須
+- **分割発注は原則しない**: 型や定数が絡む連鎖リファクタは途中状態で tsc/build が壊れるため、1本発注が原則
+  - 例外: 独立機能が複数ある場合のみ、機能境界で分ける
+
+## ディレクトリ階層の方針
+- `src/components/` は汎用部品のみ（`AuthPanel`, `DrumRoll`, `QuickSelect` 等）
+- 業務フロー単位の塊は `src/features/<feature-name>/` に閉じる
+  - 例: `src/features/staff-operations/`（貸出/返却/充填/受注/返却承認/一括返却）
+  - 配下は `components/` `hooks/` `types.ts` `constants.ts` の緩い規約
+- `src/app/**/page.tsx` は `features/` を呼び出す薄い殻に留める
+- バグリスク低減のため階層追加は積極的に許容する（凝集度 > フラットさ）
 
 ## コード規約
 
