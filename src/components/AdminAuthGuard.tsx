@@ -215,7 +215,7 @@ export default function AdminAuthGuard({
   // --- Render: Loading ---
   if (!authChecked || (firebaseUser && !staffChecked) || (staffUser && !permChecked)) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb" }}>
+      <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)", boxSizing: "border-box" }}>
         <div style={{ color: "#94a3b8", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <div style={{ width: 32, height: 32, border: "3px solid #e2e8f0", borderTopColor: "#6366f1", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
           <p style={{ fontSize: 14, fontWeight: 600 }}>認証を確認中…</p>
@@ -228,7 +228,7 @@ export default function AdminAuthGuard({
   // --- Render: Not logged in → Login screen ---
   if (!firebaseUser) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20 }}>
+      <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20, paddingTop: "max(20px, env(safe-area-inset-top))", paddingBottom: "max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
         <div style={{
           background: "#fff", borderRadius: 24, padding: "40px 28px", width: "100%", maxWidth: 400,
           boxShadow: "0 20px 40px rgba(0,0,0,0.06)",
@@ -344,7 +344,7 @@ export default function AdminAuthGuard({
   // --- Render: Logged in but no staff record / wrong role ---
   if (!staffUser || !["管理者", "準管理者"].includes(staffUser.role)) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20 }}>
+      <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20, paddingTop: "max(20px, env(safe-area-inset-top))", paddingBottom: "max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
         <div style={{
           background: "#fff", borderRadius: 24, padding: "40px 28px", width: "100%", maxWidth: 400,
           boxShadow: "0 20px 40px rgba(0,0,0,0.06)", textAlign: "center",
@@ -381,7 +381,7 @@ export default function AdminAuthGuard({
   // --- Render: Logged in but no permission for this page ---
   if (!hasAccess) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20 }}>
+      <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20, paddingTop: "max(20px, env(safe-area-inset-top))", paddingBottom: "max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
         <div style={{
           background: "#fff", borderRadius: 24, padding: "40px 28px", width: "100%", maxWidth: 400,
           boxShadow: "0 20px 40px rgba(0,0,0,0.06)", textAlign: "center",

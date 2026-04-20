@@ -220,7 +220,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   // --- Render: Loading ---
   if (loading) {
     return (
-      <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb" }}>
+      <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)", boxSizing: "border-box" }}>
         <div style={{ color: "#94a3b8", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
           <div style={{ width: 32, height: 32, border: "3px solid #e2e8f0", borderTopColor: "#6366f1", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
           <p style={{ fontSize: 14, fontWeight: 600 }}>認証を確認中…</p>
@@ -237,7 +237,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
   // --- Render: Login form ---
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20 }}>
+    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20, paddingTop: "max(20px, env(safe-area-inset-top))", paddingBottom: "max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
       <div style={{
         background: "#fff", borderRadius: 24, padding: "32px 24px", width: "100%", maxWidth: 380,
         boxShadow: "0 20px 40px rgba(0,0,0,0.06)",
