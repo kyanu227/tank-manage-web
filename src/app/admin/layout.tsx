@@ -84,7 +84,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       onStaffLoaded={handleStaffLoaded}
       onPermissionsLoaded={handlePermissionsLoaded}
     >
-      <div style={{ display: "flex", minHeight: "100dvh", background: "#f8f9fb" }}>
+      <div style={{ display: "flex", minHeight: "100dvh", background: "#f8f9fb", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
         {/* Sidebar - Desktop */}
       <aside
         style={{
@@ -100,6 +100,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           zIndex: 40,
           transition: "width 0.2s ease, transform 0.2s ease",
           transform: sidebarOpen ? "translateX(0)" : undefined,
+          paddingTop: "env(safe-area-inset-top)",
+          paddingBottom: "env(safe-area-inset-bottom)",
         }}
         className="admin-sidebar-desktop"
       >
@@ -283,6 +285,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           display: "flex",
           flexDirection: "column",
           borderRight: "1px solid #e8eaed",
+          paddingTop: "env(safe-area-inset-top)",
+          paddingBottom: "env(safe-area-inset-bottom)",
         }}
         className="admin-sidebar-mobile"
       >

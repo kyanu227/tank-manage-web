@@ -119,6 +119,8 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             transform: menuOpen ? "translateX(0)" : "translateX(-100%)",
             transition: "transform 0.25s ease",
             display: "flex", flexDirection: "column",
+            paddingTop: "env(safe-area-inset-top)",
+            paddingBottom: "env(safe-area-inset-bottom)",
           }}
         >
           <div style={{ padding: "20px 24px", borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "flex-end", minHeight: 56 }}>
