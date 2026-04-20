@@ -60,7 +60,10 @@ export default function LoginPage() {
       setError("4桁のパスコードを入力してください。");
       return;
     }
-    
+
+    // iOS: キーボードを閉じてから遷移しないとビューポートがズレたまま固定される
+    (document.activeElement as HTMLElement | null)?.blur?.();
+
     setLoading(true);
     setError("");
 
@@ -95,6 +98,7 @@ export default function LoginPage() {
 
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    (document.activeElement as HTMLElement | null)?.blur?.();
     setLoading(true);
     setError("");
 

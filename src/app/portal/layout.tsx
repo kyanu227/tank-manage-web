@@ -14,6 +14,11 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
 
   const isPublic = PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(p + "/"));
 
+  // iOS: 前画面のキーボードでズレたビューポートを強制リセット
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
+
   useEffect(() => {
     if (isPublic) {
       setLoading(false);

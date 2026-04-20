@@ -27,6 +27,11 @@ const OPS_PATHS = ["/staff/lend", "/staff/return", "/staff/fill"];
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+
+  // iOS: 前画面のキーボードでズレたビューポートを強制リセット（スクロールロック画面のため手動では戻せない）
+  useEffect(() => {
+    window.scrollTo(0, 0);
+  }, [pathname]);
   // 手動/受注サブタブは貸出ページでのみ表示
   const isLendPage = pathname === "/staff/lend";
   const isOpsGroup = OPS_PATHS.includes(pathname ?? "");
