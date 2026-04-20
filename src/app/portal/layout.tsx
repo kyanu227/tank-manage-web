@@ -54,7 +54,16 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
   }
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "#f8f9fb", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+    <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "#f8f9fb", paddingBottom: "env(safe-area-inset-bottom)" }}>
+      {/* Dynamic Island 等のノッチ端末でのみ高さを持つスペーサー */}
+      <div
+        aria-hidden="true"
+        style={{
+          height: "env(safe-area-inset-top, 0px)",
+          flexShrink: 0,
+          background: "#fff",
+        }}
+      />
       <header
         style={{
           height: "clamp(40px, 5dvh, 52px)", background: "#fff",

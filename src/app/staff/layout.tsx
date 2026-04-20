@@ -47,7 +47,16 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 
   return (
     <StaffAuthGuard>
-      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "#f8f9fb", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "#f8f9fb", paddingBottom: "env(safe-area-inset-bottom)" }}>
+        {/* Dynamic Island 等のノッチ端末でのみ高さを持つスペーサー。ヘッダー背景と一致させる */}
+        <div
+          aria-hidden="true"
+          style={{
+            height: "env(safe-area-inset-top, 0px)",
+            flexShrink: 0,
+            background: "rgba(255,255,255,0.9)",
+          }}
+        />
         {/* Header */}
         <header
           style={{
