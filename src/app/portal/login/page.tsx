@@ -163,11 +163,13 @@ export default function LoginPage() {
 
   return (
     <div style={{
-      minHeight: "100%",
+      minHeight: "100dvh",
       display: "flex", flexDirection: "column",
       alignItems: "center", justifyContent: "center",
       background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
       padding: 20,
+      paddingTop: "max(20px, env(safe-area-inset-top))",
+      paddingBottom: "max(20px, env(safe-area-inset-bottom))",
       boxSizing: "border-box",
     }}>
       <div style={{

@@ -97,12 +97,11 @@ export default function RegisterPage() {
 
   return (
     <div style={{
-      minHeight: "100%",
-      display: "flex", flexDirection: "column",
+      minHeight: "100dvh", 
+      display: "flex", flexDirection: "column", 
       alignItems: "center", justifyContent: "center",
       background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-      padding: 20,
-      boxSizing: "border-box",
+      padding: 20
     }}>
       <div style={{
         background: "#fff", 
