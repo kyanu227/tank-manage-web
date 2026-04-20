@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { AlertTriangle, Send, CheckCircle2, Loader2, X } from "lucide-react";
 import { ACTION } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
@@ -21,17 +21,6 @@ export default function DamageReportPage() {
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const successTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // ページ全体スクロールロック（ドラムロール用）
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-      document.documentElement.style.overflow = "";
-    };
-  }, []);
 
   const handleCommit = (tankId: string) => {
     if (queue.some((q) => q.tankId === tankId)) return;
