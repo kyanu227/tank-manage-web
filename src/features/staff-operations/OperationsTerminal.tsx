@@ -38,6 +38,17 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     return () => window.removeEventListener("opStyleChange", handler);
   }, []);
 
+  // ページ自体の縦スクロールをロック
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+      document.documentElement.style.overflow = "";
+    };
+  }, []);
+
   // 横スワイプでモード循環切替
   useOperationSwipe(mode);
 

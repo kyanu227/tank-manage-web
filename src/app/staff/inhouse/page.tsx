@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Wrench, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { doc, writeBatch } from "firebase/firestore";
@@ -32,6 +32,17 @@ export default function InHousePage() {
   const [reporting, setReporting] = useState(false);
   const [reportResult, setReportResult] = useState<{ success: boolean; message: string } | null>(null);
   const [returning, setReturning] = useState(false);
+
+  // ページ全体スクロールロック（ドラムロール用）
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    document.documentElement.style.overflow = "hidden";
+    return () => {
+      document.body.style.overflow = prev;
+      document.documentElement.style.overflow = "";
+    };
+  }, []);
 
   // 自社利用中タンク（tagOverrides を反映）
   const inHouseTanks = useMemo(() => {
