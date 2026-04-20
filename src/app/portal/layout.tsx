@@ -50,7 +50,29 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
   }
 
   if (isPublic) {
-    return <>{children}</>;
+    // 公開ページ（login/register/setup）も safe-area シェルで包む。
+    // 目的は「viewport を 100dvh + overflow:hidden でロックし、iOS で画面が
+    // 上端に吸い付いた状態を作らせない」こと。これをしないと login でズレた
+    // スクロール位置が次のページ（/portal や /staff 系）に引き継がれてしまう。
+    return (
+      <div style={{
+        display: "flex", flexDirection: "column",
+        height: "100dvh", overflow: "hidden",
+        paddingBottom: "env(safe-area-inset-bottom)",
+      }}>
+        <div
+          aria-hidden="true"
+          style={{
+            height: "env(safe-area-inset-top, 0px)",
+            flexShrink: 0,
+            background: "#fff",
+          }}
+        />
+        <div style={{ flex: 1, minHeight: 0, overflowY: "auto" }}>
+          {children}
+        </div>
+      </div>
+    );
   }
 
   return (
