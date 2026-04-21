@@ -147,7 +147,7 @@ firebase deploy      # Firebase Hosting デプロイ
 | staff | {docId} | id, name, email, isActive, role, rank, passcode |
 | customers | {docId} | uid, email, companyName, passcode, setupCompleted |
 | tanks | {docId} | status, location, staffId |
-| logs | {docId} | timestamp, action, tankId, staffId, location |
+| logs | {docId} | logStatus, rootLogId, revision, tankId, action, prev/nextTankSnapshot 等（詳細は「ログ設計」参照） |
 | transactions | {docId} | type(order/return/uncharged_report), status, items |
 | destinations | {uid} | name, companyName, email, passcode, price*, isActive |
 
@@ -166,6 +166,17 @@ firebase deploy      # Firebase Hosting デプロイ
 | monthly_stats | {docId} | 月次売上アーカイブ |
 | delete_history | {docId} | 削除監査ログ |
 | edit_history | {docId} | 編集監査ログ |
+
+## ログ設計（追記型）
+
+- ログ本文（tankId/action/status/location/staff/note 等）は直接上書きしない。編集時は旧ログを `superseded` にし、新 revision を作成する
+- 編集は transaction で `active → superseded` + 新 revision 作成 + `tanks` 更新を原子的に行う
+- 編集取消は古い内容をコピーした新 revision を作る（分岐を作らない一直線チェーン）
+- ログ状態は `logStatus` に統一：`active` / `superseded` / `voided` のみ（旧 `voided: boolean` は廃止）
+- 新規ログ作成は `appendTankOperation()` / `applyTankOperation()` 経由、編集・取消は `applyLogCorrection()` 経由（すべて `src/lib/tank-operation.ts`）
+- 編集可は対象 tankId の最新 active ログのみ。途中ログは自動編集不可
+- `editReason` は編集・取消時に必須
+- 詳細フィールドは実装時に `tank-operation.ts` のコメントに記載（重複記述を避ける）
 
 ## 認証フロー
 
