@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Users, Award, TrendingUp } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
 
 interface StaffStat { name: string; lend: number; return_: number; fill: number; total: number; }
 
@@ -14,7 +14,7 @@ export default function StaffAnalyticsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, "logs"), orderBy("timestamp", "desc")));
+        const snap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), orderBy("timestamp", "desc")));
         const staffMap: Record<string, { lend: number; return_: number; fill: number }> = {};
         snap.forEach((d) => {
           const data = d.data();

@@ -26,7 +26,7 @@ export default function PortalPage() {
         tankSnap.forEach((d) => tanks.push(d.id));
         setRentedTanks(tanks.sort());
 
-        const logSnap = await getDocs(query(collection(db, "logs"), where("location", "==", customerName), orderBy("timestamp", "desc"), limit(30)));
+        const logSnap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), where("location", "==", customerName), orderBy("timestamp", "desc"), limit(30)));
         const recentLogs: LogEntry[] = [];
         logSnap.forEach((d) => recentLogs.push(d.data() as LogEntry));
         setLogs(recentLogs);

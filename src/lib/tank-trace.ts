@@ -64,6 +64,7 @@ export async function traceUnderfilledSource(
   const logsRef = collection(db, "logs");
   const q = query(
     logsRef,
+    where("logStatus", "==", "active"),
     where("tankId", "==", triggerLog.tankId),
     where("action", "==", "充填"),
     where("timestamp", "<", triggerLog.timestamp),
@@ -117,6 +118,7 @@ export async function traceUnreturnedSource(
   const logsRef = collection(db, "logs");
   const q = query(
     logsRef,
+    where("logStatus", "==", "active"),
     where("tankId", "==", tankId),
     where("action", "==", "貸出"),
     orderBy("timestamp", "desc"),
@@ -169,6 +171,7 @@ export async function getLastOperation(
   const logsRef = collection(db, "logs");
 
   const constraints = [
+    where("logStatus", "==", "active"),
     where("tankId", "==", tankId),
     orderBy("timestamp", "desc"),
     limit(1),
@@ -217,6 +220,7 @@ export async function getTankHistory(
   const logsRef = collection(db, "logs");
   const q = query(
     logsRef,
+    where("logStatus", "==", "active"),
     where("tankId", "==", tankId),
     orderBy("timestamp", "desc"),
     limit(maxEntries)

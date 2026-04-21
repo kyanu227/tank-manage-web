@@ -1,29 +1,26 @@
 /**
  * タンク操作の一元化モジュール
  *
- * 全ページから呼ばれる唯一のタンク状態更新経路。
- * status の書き換えとログ書き込みを必ずペアで・原子的に行うことで、
- * 「ログなしの状態変更」を構造的に不可能にする。
- *
- * 使い分け:
- *   - applyTankOperation()        単一タンク・即 commit
- *   - appendTankOperation()       WriteBatch に追記（複数タンク・外部書き込みと統合）
- *   - applyBulkTankOperations()   複数タンク + 追加書き込みを原子化する便利関数
- *   - voidLog()                   ログの論理削除（物理削除はしない）
+ * タンク操作ログは追記型 revision チェーンで管理する。
+ * ログ本文は直接上書きせず、編集時は旧 revision を superseded にして
+ * 新しい active revision を作成する。
  */
 
 import {
   collection,
+  deleteField,
   doc,
+  runTransaction,
   serverTimestamp,
-  writeBatch,
-  type WriteBatch,
+  type DocumentData,
   type DocumentReference,
+  type Transaction,
 } from "firebase/firestore";
 import { db } from "./firebase/config";
 import {
-  validateTransition,
+  ACTION,
   getNextStatus,
+  validateTransition,
   type TankAction,
 } from "./tank-rules";
 
@@ -31,20 +28,24 @@ import {
    型定義
    ════════════════════════════════════════════ */
 
+export type TankSnapshot = {
+  status: string;
+  location?: string;
+  staff?: string;
+  logNote?: string;
+};
+
 export interface TankOperationInput {
   /** タンク ID */
   tankId: string;
 
-  /** 遷移ルールを決める action（OP_RULES のキー）。
-   *  例: ACTION.LEND, ACTION.RETURN, ACTION.IN_HOUSE_USE など */
+  /** 遷移ルールを決める action（OP_RULES のキー） */
   transitionAction: TankAction;
 
-  /** ログに記録する操作名。省略時は transitionAction と同じ。
-   *  例: 遷移は LEND だが、ログには "受注貸出" と記録したい場合に使う */
+  /** ログに記録する操作名。省略時は transitionAction と同じ。 */
   logAction?: string;
 
-  /** 現在のタンクステータス（バリデーション・prevStatus ログ用）。
-   *  未知の場合は空文字で OK（破損報告など allowedPrev=[] の操作）。 */
+  /** UI 側の参考値。実際の検証は transaction 内で読んだ tanks の現在値で行う。 */
   currentStatus?: string;
 
   /** 操作を行ったスタッフ名 */
@@ -76,72 +77,108 @@ export interface TankOperationResult {
   tankRef: DocumentReference;
 }
 
+export type TankOperationWriter = {
+  set: (reference: DocumentReference, data: DocumentData, options?: unknown) => unknown;
+  update: (reference: DocumentReference, data: DocumentData) => unknown;
+  delete: (reference: DocumentReference) => unknown;
+};
+
+export type StaffCorrectionRole = "管理者" | "準管理者" | "一般";
+
+export type LogCorrectionPatch = {
+  tankId?: string;
+  transitionAction?: TankAction;
+  logAction?: string;
+  location?: string;
+  staff?: string;
+  note?: string;
+  logNote?: string;
+};
+
+export interface ApplyLogCorrectionInput {
+  targetLogId: string;
+  mode: "replace" | "revert";
+  sourceLogId?: string;
+  patch?: LogCorrectionPatch;
+  reason: string;
+  editedBy: string;
+  editedByRole?: StaffCorrectionRole;
+}
+
+export interface VoidLogInput {
+  logId: string;
+  voidedBy: string;
+  voidedByRole?: StaffCorrectionRole;
+  reason: string;
+}
+
+type TankLogData = DocumentData & {
+  tankId?: unknown;
+  action?: unknown;
+  transitionAction?: unknown;
+  location?: unknown;
+  staff?: unknown;
+  note?: unknown;
+  logNote?: unknown;
+  logStatus?: unknown;
+  logKind?: unknown;
+  rootLogId?: unknown;
+  revision?: unknown;
+  supersededByLogId?: unknown;
+  originalAt?: unknown;
+  revisionCreatedAt?: unknown;
+  timestamp?: unknown;
+  prevTankSnapshot?: unknown;
+  nextTankSnapshot?: unknown;
+  previousLogIdOnSameTank?: unknown;
+};
+
+type PlannedTankOperation = {
+  input: TankOperationInput;
+  logRef: DocumentReference;
+  tankRef: DocumentReference;
+};
+
+const META_LOG_FIELDS = new Set([
+  "logStatus",
+  "logKind",
+  "rootLogId",
+  "revision",
+  "supersedesLogId",
+  "supersededByLogId",
+  "originalAt",
+  "revisionCreatedAt",
+  "timestamp",
+  "editedBy",
+  "editReason",
+  "prevTankSnapshot",
+  "nextTankSnapshot",
+  "previousLogIdOnSameTank",
+  "voidReason",
+  "voidedAt",
+  "voidedBy",
+  "voided",
+  "prevStatus",
+  "newStatus",
+]);
+
+const PRIVILEGED_CORRECTION_ROLES: StaffCorrectionRole[] = ["管理者", "準管理者"];
+const CORRECTION_LIMIT_MS = 72 * 60 * 60 * 1000;
+
 /* ════════════════════════════════════════════
-   コア: batch に積む
+   新規ログ作成
    ════════════════════════════════════════════ */
 
 /**
- * WriteBatch にタンク操作（status 更新 + ログ書き込み）を追記する。
- * commit は呼び出し側で行う。
+ * 単一タンク操作を追記型ログとして transaction で作成する。
  *
- * 用途: 複数タンクの一括処理、transactions 等の他コレクション更新と統合したい場合。
+ * 旧 batch 型の append 経路は廃止し、外部から read なしでログだけを積めないようにする。
  */
-export function appendTankOperation(
-  batch: WriteBatch,
+export async function appendTankOperation(
   input: TankOperationInput
-): TankOperationResult {
-  // バリデーション
-  if (!input.skipValidation) {
-    const currentStatus = input.currentStatus ?? "";
-    const v = validateTransition(currentStatus, input.transitionAction);
-    if (!v.ok) {
-      throw new Error(`[${input.tankId}] ${v.reason}`);
-    }
-  }
-
-  const nextStatus = getNextStatus(input.transitionAction);
-  const location = input.location ?? "倉庫";
-  const logAction = input.logAction ?? input.transitionAction;
-
-  // タンク更新（必ず既存ドキュメントのみ。存在しない tankId で呼ばれた場合は
-  // update() が commit 時にエラーを投げ、batch 全体がロールバックされる。
-  // これにより、壊れた返却申請や古い受注で幽霊タンクが生成されるのを構造的に防ぐ。
-  const tankRef = doc(db, "tanks", input.tankId);
-  batch.update(tankRef, {
-    status: nextStatus,
-    location,
-    staff: input.staff,
-    updatedAt: serverTimestamp(),
-    logNote: input.tankNote ?? "",
-    ...(input.tankExtra ?? {}),
-  });
-
-  // ログ書き込み（voided: false を必ず付与）
-  const logRef = doc(collection(db, "logs"));
-  batch.set(logRef, {
-    tankId: input.tankId,
-    action: logAction,
-    prevStatus: input.currentStatus ?? "",
-    newStatus: nextStatus,
-    location,
-    staff: input.staff,
-    note: input.logNote ?? "",
-    timestamp: serverTimestamp(),
-    voided: false,
-    ...(input.logExtra ?? {}),
-  });
-
-  return {
-    tankId: input.tankId,
-    nextStatus,
-    logRef,
-    tankRef,
-  };
+): Promise<TankOperationResult & { logId: string }> {
+  return applyTankOperation(input);
 }
-
-/* ════════════════════════════════════════════
-   単一操作
-   ════════════════════════════════════════════ */
 
 /**
  * 単一タンクの操作を原子的に実行する。
@@ -149,98 +186,490 @@ export function appendTankOperation(
 export async function applyTankOperation(
   input: TankOperationInput
 ): Promise<TankOperationResult & { logId: string }> {
-  const batch = writeBatch(db);
-  const result = appendTankOperation(batch, input);
-  await batch.commit();
-  return { ...result, logId: result.logRef.id };
-}
+  const logRef = doc(collection(db, "logs"));
+  const tankRef = doc(db, "tanks", normalizeTankId(input.tankId));
+  const planned: PlannedTankOperation = {
+    input: { ...input, tankId: normalizeTankId(input.tankId) },
+    logRef,
+    tankRef,
+  };
 
-/* ════════════════════════════════════════════
-   一括操作（追加書き込み可能）
-   ════════════════════════════════════════════ */
+  const result = await runTransaction(db, async (tx) => {
+    const [operationResult] = await commitPlannedOperations(tx, [planned]);
+    return operationResult;
+  });
+
+  return { ...result, logId: logRef.id };
+}
 
 /**
  * 複数タンクの操作を一括実行する。
- * 追加の batch 書き込み（transactions の完了記録など）を extraOps で受ける。
- *
- * 例:
- *   await applyBulkTankOperations(inputs, (batch) => {
- *     batch.update(doc(db, "transactions", orderId), { status: "completed" });
- *   });
+ * 追加書き込みは transaction writer の set/update/delete だけに寄せる。
  */
 export async function applyBulkTankOperations(
   inputs: TankOperationInput[],
-  extraOps?: (batch: WriteBatch) => void
+  extraOps?: (writer: TankOperationWriter) => void
 ): Promise<TankOperationResult[]> {
-  const batch = writeBatch(db);
-  const results = inputs.map((input) => appendTankOperation(batch, input));
-  if (extraOps) extraOps(batch);
-  await batch.commit();
+  if (inputs.length === 0) return [];
+
+  assertNoDuplicateTankIds(inputs);
+
+  const planned = inputs.map((input) => {
+    const tankId = normalizeTankId(input.tankId);
+    return {
+      input: { ...input, tankId },
+      logRef: doc(collection(db, "logs")),
+      tankRef: doc(db, "tanks", tankId),
+    };
+  });
+
+  return runTransaction(db, async (tx) => {
+    const results = await commitPlannedOperations(tx, planned);
+    if (extraOps) extraOps(tx as unknown as TankOperationWriter);
+    return results;
+  });
+}
+
+async function commitPlannedOperations(
+  tx: Transaction,
+  planned: PlannedTankOperation[]
+): Promise<TankOperationResult[]> {
+  const tankSnaps = await Promise.all(planned.map((op) => tx.get(op.tankRef)));
+
+  const results: TankOperationResult[] = [];
+
+  planned.forEach((op, index) => {
+    const tankSnap = tankSnaps[index];
+    if (!tankSnap.exists()) {
+      throw new Error(`[${op.input.tankId}] タンクが存在しません`);
+    }
+
+    const tankData = tankSnap.data();
+    const prevSnapshot = snapshotFromTankData(tankData);
+
+    if (!op.input.skipValidation) {
+      const v = validateTransition(prevSnapshot.status, op.input.transitionAction);
+      if (!v.ok) {
+        throw new Error(`[${op.input.tankId}] ${v.reason}`);
+      }
+    }
+
+    const nextStatus = getNextStatus(op.input.transitionAction);
+    const location = op.input.location ?? "倉庫";
+    const tankLogNote = op.input.tankNote ?? "";
+    const logNote = op.input.logNote ?? "";
+    const logAction = op.input.logAction ?? op.input.transitionAction;
+    const nextSnapshot: TankSnapshot = {
+      status: nextStatus,
+      location,
+      staff: op.input.staff,
+      logNote: tankLogNote,
+    };
+    const now = serverTimestamp();
+
+    tx.set(op.logRef, {
+      tankId: op.input.tankId,
+      action: logAction,
+      transitionAction: op.input.transitionAction,
+      prevStatus: prevSnapshot.status,
+      newStatus: nextStatus,
+      location,
+      staff: op.input.staff,
+      note: logNote,
+      logNote: tankLogNote,
+      timestamp: now,
+      originalAt: now,
+      revisionCreatedAt: now,
+      logStatus: "active",
+      logKind: "tank",
+      rootLogId: op.logRef.id,
+      revision: 1,
+      prevTankSnapshot: prevSnapshot,
+      nextTankSnapshot: nextSnapshot,
+      previousLogIdOnSameTank: stringOrNull(tankData.latestLogId),
+      ...(op.input.logExtra ?? {}),
+    });
+
+    tx.update(op.tankRef, {
+      ...tankUpdateFromSnapshot(nextSnapshot, op.logRef.id),
+      ...(op.input.tankExtra ?? {}),
+    });
+
+    results.push({
+      tankId: op.input.tankId,
+      nextStatus,
+      logRef: op.logRef,
+      tankRef: op.tankRef,
+    });
+  });
+
   return results;
 }
 
 /* ════════════════════════════════════════════
-   論理削除（ログの void 化）
+   編集・編集取消
    ════════════════════════════════════════════ */
 
-export interface VoidLogInput {
-  /** 論理削除対象のログ ID */
-  logId: string;
-  /** 実行者名 */
-  voidedBy: string;
-  /** 取消理由（任意） */
-  reason?: string;
-  /** タンクステータスを巻き戻す場合の設定 */
-  rollbackTank?: {
-    tankId: string;
-    toStatus: string;
-    toLocation: string;
+export async function applyLogCorrection(
+  input: ApplyLogCorrectionInput
+): Promise<{ logId: string }> {
+  const reason = input.reason.trim();
+  if (reason.length < 5) {
+    throw new Error("理由は5文字以上で入力してください");
+  }
+  if (input.mode === "revert" && !input.sourceLogId) {
+    throw new Error("復元元ログが指定されていません");
+  }
+
+  const targetRef = doc(db, "logs", input.targetLogId);
+  const newLogRef = doc(collection(db, "logs"));
+
+  await runTransaction(db, async (tx) => {
+    const targetSnap = await tx.get(targetRef);
+    if (!targetSnap.exists()) {
+      throw new Error("対象ログが存在しません");
+    }
+
+    const oldLog = targetSnap.data() as TankLogData;
+    assertActiveTankLog(oldLog);
+    if (oldLog.supersededByLogId) {
+      throw new Error("このログはすでに置換されています");
+    }
+
+    const oldTankId = requireString(oldLog.tankId, "対象ログのtankId");
+    const oldTankRef = doc(db, "tanks", oldTankId);
+    const oldTankSnap = await tx.get(oldTankRef);
+    if (!oldTankSnap.exists()) {
+      throw new Error(`[${oldTankId}] タンクが存在しません`);
+    }
+    const oldTankData = oldTankSnap.data();
+    if (stringOrNull(oldTankData.latestLogId) !== input.targetLogId) {
+      throw new Error("最新の有効ログだけ編集できます");
+    }
+
+    enforceCorrectionWindow(oldLog, input.editedByRole);
+
+    let sourceLog: TankLogData | null = null;
+    if (input.mode === "revert") {
+      const sourceRef = doc(db, "logs", input.sourceLogId!);
+      const sourceSnap = await tx.get(sourceRef);
+      if (!sourceSnap.exists()) {
+        throw new Error("復元元ログが存在しません");
+      }
+      sourceLog = sourceSnap.data() as TankLogData;
+      if (sourceLog.logKind !== "tank") {
+        throw new Error("タンク操作ログだけ復元できます");
+      }
+      if (sourceLog.logStatus === "voided") {
+        throw new Error("取消済み revision には戻せません");
+      }
+      if (requireString(sourceLog.rootLogId, "復元元ログのrootLogId") !== requireString(oldLog.rootLogId, "対象ログのrootLogId")) {
+        throw new Error("同一チェーン内のログだけ復元できます");
+      }
+    }
+
+    const content = input.mode === "revert" && sourceLog
+      ? tankLogContentFromSource(sourceLog)
+      : mergeTankLogContent(oldLog, input.patch ?? {});
+    const newTankId = normalizeTankId(content.tankId);
+    const sameTank = newTankId === oldTankId;
+
+    const newTankRef = sameTank ? oldTankRef : doc(db, "tanks", newTankId);
+    const newTankSnap = sameTank ? oldTankSnap : await tx.get(newTankRef);
+    if (!newTankSnap.exists()) {
+      throw new Error(`[${newTankId}] タンクが存在しません`);
+    }
+
+    const prevSnapshot = sameTank
+      ? requireTankSnapshot(oldLog.prevTankSnapshot, "対象ログのprevTankSnapshot")
+      : snapshotFromTankData(newTankSnap.data());
+
+    const v = validateTransition(prevSnapshot.status, content.transitionAction);
+    if (!v.ok) {
+      throw new Error(`[${newTankId}] ${v.reason}`);
+    }
+
+    const nextSnapshot = nextSnapshotFromContent(prevSnapshot, content);
+    const revision = requireNumber(oldLog.revision, "対象ログのrevision") + 1;
+    const rootLogId = requireString(oldLog.rootLogId, "対象ログのrootLogId");
+    const originalAt = oldLog.originalAt ?? oldLog.timestamp;
+    if (!originalAt) {
+      throw new Error("対象ログのoriginalAtがありません");
+    }
+    const inheritedTimestamp = oldLog.timestamp ?? oldLog.originalAt;
+    if (!inheritedTimestamp) {
+      throw new Error("対象ログのtimestampがありません");
+    }
+
+    tx.update(targetRef, {
+      logStatus: "superseded",
+      supersededByLogId: newLogRef.id,
+    });
+
+    tx.set(newLogRef, {
+      ...content.extraFields,
+      tankId: newTankId,
+      action: content.action,
+      transitionAction: content.transitionAction,
+      location: content.location,
+      staff: content.staff,
+      note: content.note,
+      logNote: content.logNote,
+      prevStatus: prevSnapshot.status,
+      newStatus: nextSnapshot.status,
+      logStatus: "active",
+      logKind: "tank",
+      rootLogId,
+      revision,
+      supersedesLogId: input.targetLogId,
+      originalAt,
+      timestamp: inheritedTimestamp,
+      revisionCreatedAt: serverTimestamp(),
+      editedBy: input.editedBy,
+      editReason: reason,
+      prevTankSnapshot: prevSnapshot,
+      nextTankSnapshot: nextSnapshot,
+      previousLogIdOnSameTank: sameTank
+        ? stringOrNull(oldLog.previousLogIdOnSameTank)
+        : stringOrNull(newTankSnap.data().latestLogId),
+    });
+
+    if (!sameTank) {
+      const oldPrevSnapshot = requireTankSnapshot(oldLog.prevTankSnapshot, "対象ログのprevTankSnapshot");
+      tx.update(oldTankRef, tankUpdateFromSnapshot(oldPrevSnapshot, stringOrNull(oldLog.previousLogIdOnSameTank)));
+    }
+    tx.update(newTankRef, tankUpdateFromSnapshot(nextSnapshot, newLogRef.id));
+  });
+
+  return { logId: newLogRef.id };
+}
+
+/* ════════════════════════════════════════════
+   取消
+   ════════════════════════════════════════════ */
+
+export async function voidLog(input: VoidLogInput): Promise<void> {
+  const reason = input.reason.trim();
+  if (reason.length < 5) {
+    throw new Error("理由は5文字以上で入力してください");
+  }
+
+  const logRef = doc(db, "logs", input.logId);
+
+  await runTransaction(db, async (tx) => {
+    const logSnap = await tx.get(logRef);
+    if (!logSnap.exists()) {
+      throw new Error("対象ログが存在しません");
+    }
+
+    const log = logSnap.data() as TankLogData;
+    assertActiveTankLog(log);
+    enforceCorrectionWindow(log, input.voidedByRole);
+
+    const tankId = requireString(log.tankId, "対象ログのtankId");
+    const tankRef = doc(db, "tanks", tankId);
+    const tankSnap = await tx.get(tankRef);
+    if (!tankSnap.exists()) {
+      throw new Error(`[${tankId}] タンクが存在しません`);
+    }
+    if (stringOrNull(tankSnap.data().latestLogId) !== input.logId) {
+      throw new Error("最新の有効ログだけ取消できます");
+    }
+
+    const prevSnapshot = requireTankSnapshot(log.prevTankSnapshot, "対象ログのprevTankSnapshot");
+    tx.update(logRef, {
+      logStatus: "voided",
+      voidReason: reason,
+      voidedAt: serverTimestamp(),
+      voidedBy: input.voidedBy,
+    });
+    tx.update(tankRef, tankUpdateFromSnapshot(prevSnapshot, stringOrNull(log.previousLogIdOnSameTank)));
+  });
+}
+
+/* ════════════════════════════════════════════
+   ヘルパー
+   ════════════════════════════════════════════ */
+
+function normalizeTankId(tankId: string): string {
+  return tankId.trim().toUpperCase();
+}
+
+function snapshotFromTankData(data: DocumentData): TankSnapshot {
+  const snapshot: TankSnapshot = {
+    status: String(data.status ?? ""),
+  };
+  if (data.location != null) snapshot.location = String(data.location);
+  if (data.staff != null) snapshot.staff = String(data.staff);
+  if (data.logNote != null) snapshot.logNote = String(data.logNote);
+  return snapshot;
+}
+
+function tankUpdateFromSnapshot(
+  snapshot: TankSnapshot,
+  latestLogId: string | null
+): DocumentData {
+  return {
+    status: snapshot.status,
+    location: snapshot.location ?? deleteField(),
+    staff: snapshot.staff ?? deleteField(),
+    logNote: snapshot.logNote ?? deleteField(),
+    latestLogId,
+    updatedAt: serverTimestamp(),
   };
 }
 
-/**
- * ログを論理削除する（物理削除はしない）。
- *
- * - logs/{id} に voided: true, voidedAt, voidedBy, voidReason を付与
- * - 必要なら tanks/{tankId} の status/location を巻き戻す
- * - delete_history に監査記録を残す
- *
- * 物理削除と違い、後から「本当に取り消されたログか・誰が取り消したか」を追える。
- */
-export async function voidLog(input: VoidLogInput): Promise<void> {
-  const batch = writeBatch(db);
+function nextSnapshotFromContent(
+  prevSnapshot: TankSnapshot,
+  content: ReturnType<typeof mergeTankLogContent>
+): TankSnapshot {
+  return {
+    ...prevSnapshot,
+    status: getNextStatus(content.transitionAction),
+    location: content.location,
+    staff: content.staff,
+    logNote: content.logNote,
+  };
+}
 
-  // 1. ログに voided フラグを立てる
-  const logRef = doc(db, "logs", input.logId);
-  batch.update(logRef, {
-    voided: true,
-    voidedAt: serverTimestamp(),
-    voidedBy: input.voidedBy,
-    voidReason: input.reason ?? "",
+function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch) {
+  const oldTransitionAction = requireTankAction(
+    oldLog.transitionAction ?? oldLog.action,
+    "対象ログのtransitionAction"
+  );
+  const transitionAction = patch.transitionAction ?? oldTransitionAction;
+  const transitionChanged = patch.transitionAction !== undefined && patch.transitionAction !== oldTransitionAction;
+  const action = patch.logAction ?? (transitionChanged ? transitionAction : stringOrDefault(oldLog.action, transitionAction));
+  const tankId = patch.tankId != null ? normalizeTankId(patch.tankId) : requireString(oldLog.tankId, "対象ログのtankId");
+
+  return {
+    tankId,
+    action,
+    transitionAction,
+    location: patch.location ?? stringOrDefault(oldLog.location, "倉庫"),
+    staff: patch.staff ?? stringOrDefault(oldLog.staff, ""),
+    note: patch.note ?? stringOrDefault(oldLog.note, ""),
+    logNote: patch.logNote ?? stringOrDefault(oldLog.logNote, ""),
+    extraFields: copyBodyExtraFields(oldLog),
+  };
+}
+
+function tankLogContentFromSource(sourceLog: TankLogData) {
+  const transitionAction = requireTankAction(
+    sourceLog.transitionAction ?? sourceLog.action,
+    "復元元ログのtransitionAction"
+  );
+  return {
+    tankId: requireString(sourceLog.tankId, "復元元ログのtankId"),
+    action: stringOrDefault(sourceLog.action, transitionAction),
+    transitionAction,
+    location: stringOrDefault(sourceLog.location, "倉庫"),
+    staff: stringOrDefault(sourceLog.staff, ""),
+    note: stringOrDefault(sourceLog.note, ""),
+    logNote: stringOrDefault(sourceLog.logNote, ""),
+    extraFields: copyBodyExtraFields(sourceLog),
+  };
+}
+
+function copyBodyExtraFields(log: TankLogData): Record<string, unknown> {
+  const extra: Record<string, unknown> = {};
+  Object.entries(log).forEach(([key, value]) => {
+    if (!META_LOG_FIELDS.has(key)) extra[key] = value;
   });
+  delete extra.tankId;
+  delete extra.action;
+  delete extra.transitionAction;
+  delete extra.location;
+  delete extra.staff;
+  delete extra.note;
+  delete extra.logNote;
+  return extra;
+}
 
-  // 2. タンクステータスを巻き戻す（指定時のみ）。
-  //    update() 固定にすることで、ログ取消の副作用で存在しないタンクが復活することを防ぐ。
-  if (input.rollbackTank) {
-    batch.update(doc(db, "tanks", input.rollbackTank.tankId), {
-      status: input.rollbackTank.toStatus,
-      location: input.rollbackTank.toLocation,
-      updatedAt: serverTimestamp(),
-    });
+function assertActiveTankLog(log: TankLogData): void {
+  if (log.logKind !== "tank") {
+    throw new Error("タンク操作ログだけ編集・取消できます");
   }
+  if (log.logStatus !== "active") {
+    throw new Error("有効なログだけ編集・取消できます");
+  }
+}
 
-  // 3. 監査履歴を残す
-  batch.set(doc(collection(db, "delete_history")), {
-    type: "void",
-    logId: input.logId,
-    tankId: input.rollbackTank?.tankId ?? null,
-    voidedBy: input.voidedBy,
-    reason: input.reason ?? "",
-    voidedAt: serverTimestamp(),
-    rolledBack: !!input.rollbackTank,
-    rollbackStatus: input.rollbackTank?.toStatus ?? null,
-    rollbackLocation: input.rollbackTank?.toLocation ?? null,
-  });
+function enforceCorrectionWindow(log: TankLogData, role: StaffCorrectionRole | undefined): void {
+  const effectiveRole = role ?? "一般";
+  if (PRIVILEGED_CORRECTION_ROLES.includes(effectiveRole)) return;
 
-  await batch.commit();
+  const createdAt = timestampToMillis(log.revisionCreatedAt);
+  if (createdAt == null) {
+    throw new Error("対象ログの作成日時を確認できません");
+  }
+  if (Date.now() - createdAt > CORRECTION_LIMIT_MS) {
+    throw new Error("一般スタッフは72時間を過ぎたログを編集・取消できません");
+  }
+}
+
+function timestampToMillis(value: unknown): number | null {
+  if (!value) return null;
+  if (typeof value === "number") return value;
+  if (value instanceof Date) return value.getTime();
+  if (typeof (value as { toMillis?: unknown }).toMillis === "function") {
+    return (value as { toMillis: () => number }).toMillis();
+  }
+  if (typeof (value as { toDate?: unknown }).toDate === "function") {
+    return (value as { toDate: () => Date }).toDate().getTime();
+  }
+  return null;
+}
+
+function requireTankSnapshot(value: unknown, label: string): TankSnapshot {
+  if (!value || typeof value !== "object") {
+    throw new Error(`${label}がありません`);
+  }
+  const raw = value as Record<string, unknown>;
+  return {
+    status: requireString(raw.status, `${label}.status`),
+    ...(raw.location != null ? { location: String(raw.location) } : {}),
+    ...(raw.staff != null ? { staff: String(raw.staff) } : {}),
+    ...(raw.logNote != null ? { logNote: String(raw.logNote) } : {}),
+  };
+}
+
+function requireString(value: unknown, label: string): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${label}がありません`);
+  }
+  return value;
+}
+
+function requireNumber(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label}がありません`);
+  }
+  return value;
+}
+
+function stringOrDefault(value: unknown, fallback: string): string {
+  return typeof value === "string" ? value : fallback;
+}
+
+function stringOrNull(value: unknown): string | null {
+  return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function requireTankAction(value: unknown, label: string): TankAction {
+  if (typeof value !== "string" || !Object.values(ACTION).includes(value as TankAction)) {
+    throw new Error(`${label}が不正です`);
+  }
+  return value as TankAction;
+}
+
+function assertNoDuplicateTankIds(inputs: TankOperationInput[]): void {
+  const seen = new Set<string>();
+  for (const input of inputs) {
+    const tankId = normalizeTankId(input.tankId);
+    if (seen.has(tankId)) {
+      throw new Error(`[${tankId}] 同一タンクへの複数操作は一括処理できません`);
+    }
+    seen.add(tankId);
+  }
 }

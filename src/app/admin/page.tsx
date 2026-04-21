@@ -36,7 +36,7 @@ export default function AdminDashboardPage() {
         const [logsSnap, tanksSnap, txSnap] = await Promise.all([
           // 本日のログ → 操作件数 + ユニークスタッフ数
           getDocs(
-            query(collection(db, "logs"), where("timestamp", ">=", todayTimestamp))
+            query(collection(db, "logs"), where("logStatus", "==", "active"), where("timestamp", ">=", todayTimestamp))
           ),
           // 貸出中タンク数
           getDocs(

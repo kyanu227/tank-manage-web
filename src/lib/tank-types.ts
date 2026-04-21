@@ -12,6 +12,7 @@ export interface TankDoc {
   note?: string;
   logNote?: string;
   updatedAt?: any;
+  latestLogId?: string | null;
   /** 次回耐圧検査期限（旧GAS互換で "YYYY/MM/DD" 文字列。Timestamp/Date も可） */
   nextMaintenanceDate?: any;
 }

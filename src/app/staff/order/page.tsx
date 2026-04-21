@@ -61,6 +61,8 @@ export default function OrderPage() {
         tankId: "-", action: "資材発注", newStatus: "-",
         location: "-", staff: "スタッフ",
         note: cart.map((c) => `${c.name}×${c.count}`).join(", "),
+        logStatus: "active",
+        logKind: "order",
         timestamp: serverTimestamp(),
       });
       await batch.commit();

@@ -3,7 +3,7 @@
 import { useState, useEffect, useMemo } from "react";
 import { BarChart3, TrendingUp, Calendar, Archive } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, limit, where } from "firebase/firestore";
 
 interface DailyStat { date: string; lend: number; return_: number; fill: number; total: number; }
 interface MonthlyStat { id: string; month: string; location: string; lends: number; returns: number; unused: number; defaults: number; }
@@ -24,7 +24,7 @@ export default function SalesPage() {
     (async () => {
       try {
         // Only fetch a reasonable amount of recent logs for daily stats
-        const snap = await getDocs(query(collection(db, "logs"), orderBy("timestamp", "desc"), limit(3000)));
+        const snap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), orderBy("timestamp", "desc"), limit(3000)));
         const dateMap: Record<string, { lend: number; return_: number; fill: number }> = {};
         snap.forEach((d) => {
           const data = d.data();

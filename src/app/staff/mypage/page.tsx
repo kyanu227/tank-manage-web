@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { User, TrendingUp, Award, Clock } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, orderBy, limit } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, limit, where } from "firebase/firestore";
 
 interface LogEntry {
   tankId: string;
@@ -20,7 +20,7 @@ export default function MyPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, "logs"), orderBy("timestamp", "desc"), limit(100)));
+        const snap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), orderBy("timestamp", "desc"), limit(100)));
         const entries: LogEntry[] = [];
         const counts = { lend: 0, return: 0, fill: 0, other: 0 };
         snap.forEach((d) => {

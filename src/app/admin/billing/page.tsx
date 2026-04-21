@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { FileText, Printer, Calendar } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
 
 interface BillItem { customer: string; count: number; total10: number; total12: number; totalPrice: number; }
 
@@ -19,7 +19,7 @@ export default function BillingPage() {
     (async () => {
       try {
         // Get log data to aggregate by customer
-        const logSnap = await getDocs(query(collection(db, "logs"), orderBy("timestamp", "desc")));
+        const logSnap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), orderBy("timestamp", "desc")));
         // Get customer pricing
         const custSnap = await getDocs(collection(db, "customers"));
         const priceMap: Record<string, { price10: number; price12: number }> = {};
