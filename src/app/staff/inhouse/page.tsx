@@ -33,7 +33,7 @@ export default function InHousePage() {
   const [reportResult, setReportResult] = useState<{ success: boolean; message: string } | null>(null);
   const [returning, setReturning] = useState(false);
 
-  // ページ全体スクロールロック（ドラムロール用）
+  // DrumRoll 操作中にページ全体へスクロールが逃げないよう、操作画面中だけロックする。
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";

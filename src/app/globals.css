@@ -59,6 +59,7 @@
 }
 
 html, body {
+  min-height: 100%;
   background-color: var(--bg-primary);
   /* Added a subtle background texture/gradient for depth */
   background-image: 
@@ -69,9 +70,16 @@ html, body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   line-height: 1.6;
-  min-height: 100vh;
   overflow-x: hidden;
-  background-attachment: fixed;
+  background-attachment: scroll;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+.page-wrapper {
+  min-height: 100dvh;
 }
 
 /* Base Styles */

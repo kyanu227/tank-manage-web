@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { auth, db } from "@/lib/firebase/config";
 import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
-import { collection, query, where, getDocs, doc, getDoc, setDoc } from "firebase/firestore";
+import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
 import { KeyRound, Mail, Lock, UserCheck, ArrowRight } from "lucide-react";
 
 export default function LoginPage() {
@@ -118,6 +118,7 @@ export default function LoginPage() {
   };
 
   const handleGoogleLogin = async () => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
     setLoading(true);
     setError("");
     const provider = new GoogleAuthProvider();
@@ -163,22 +164,32 @@ export default function LoginPage() {
 
   return (
     <div style={{
-      minHeight: "100dvh",
+      width: "100%",
+      height: "100dvh",
+      overflow: "hidden",
       display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
       background: "linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%)",
-      padding: 20,
-      paddingTop: "max(20px, env(safe-area-inset-top))",
-      paddingBottom: "max(20px, env(safe-area-inset-bottom))",
-      boxSizing: "border-box",
     }}>
+      <div aria-hidden="true" style={{ height: "env(safe-area-inset-top, 0px)", flexShrink: 0 }} />
+      <div style={{
+        flex: 1,
+        minHeight: 0,
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
+        overscrollBehavior: "contain",
+        display: "flex",
+        flexDirection: "column",
+        padding: 20,
+        boxSizing: "border-box",
+      }}>
       <div style={{
         background: "#fff", 
         padding: "40px 32px", 
         borderRadius: 24, 
         boxShadow: "0 20px 40px rgba(0,0,0,0.08)",
         width: "100%", maxWidth: 400,
-        display: "flex", flexDirection: "column", gap: 24
+        display: "flex", flexDirection: "column", gap: 24,
+        margin: "auto",
       }}>
         <div style={{ textAlign: "center", marginBottom: 8 }}>
           <div style={{ 
@@ -361,6 +372,8 @@ export default function LoginPage() {
           </button>
         </div>
       </div>
+      </div>
+      <div aria-hidden="true" style={{ height: "env(safe-area-inset-bottom, 0px)", flexShrink: 0 }} />
     </div>
   );
 }

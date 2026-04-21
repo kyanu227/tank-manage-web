@@ -22,7 +22,7 @@ export default function DamageReportPage() {
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const successTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // ページ全体スクロールロック（ドラムロール用）
+  // DrumRoll 操作中にページ全体へスクロールが逃げないよう、操作画面中だけロックする。
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";

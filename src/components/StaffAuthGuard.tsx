@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { Lock, CheckCircle2, AlertCircle, Mail, KeyRound, LogIn } from "lucide-react";
 import { auth, db } from "@/lib/firebase/config";
 import {
@@ -25,6 +25,7 @@ interface StaffUser {
 }
 
 export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuardProps) {
+  const authScreenRef = useRef<HTMLDivElement>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -39,6 +40,27 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   // Firebase Auth state
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [firebaseAuthChecked, setFirebaseAuthChecked] = useState(false);
+
+  const resetViewportAfterInput = useCallback(() => {
+    (document.activeElement as HTMLElement | null)?.blur?.();
+
+    const resetScroll = () => {
+      authScreenRef.current?.scrollTo({ top: 0, left: 0, behavior: "auto" });
+      window.scrollTo(0, 0);
+      document.documentElement.scrollTop = 0;
+      document.body.scrollTop = 0;
+    };
+
+    resetScroll();
+    requestAnimationFrame(resetScroll);
+    window.setTimeout(resetScroll, 80);
+    window.setTimeout(resetScroll, 250);
+  }, []);
+
+  // iOS: 入力でズレた viewport を遷移前後でリセットする。body/html はロックしない。
+  useEffect(() => {
+    resetViewportAfterInput();
+  }, [isAuthenticated, resetViewportAfterInput]);
 
   // Helper: look up staff by email, set session, authenticate
   const authenticateByEmail = useCallback(async (userEmail: string) => {
@@ -136,6 +158,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     e.preventDefault();
     if (!passcode) return;
 
+    resetViewportAfterInput();
     setChecking(true);
     setError("");
     try {
@@ -181,6 +204,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
   // --- Google login handler ---
   const handleGoogleLogin = async () => {
+    resetViewportAfterInput();
     setChecking(true);
     setError("");
     try {
@@ -202,6 +226,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   const handleEmailLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!email || !password) return;
+    resetViewportAfterInput();
     setChecking(true);
     setError("");
     try {
@@ -220,11 +245,15 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   // --- Render: Loading ---
   if (loading) {
     return (
-      <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)", boxSizing: "border-box" }}>
-        <div style={{ color: "#94a3b8", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
-          <div style={{ width: 32, height: 32, border: "3px solid #e2e8f0", borderTopColor: "#6366f1", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
-          <p style={{ fontSize: 14, fontWeight: 600 }}>認証を確認中…</p>
+      <div style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
+        <div aria-hidden="true" style={{ height: "env(safe-area-inset-top, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
+        <div ref={authScreenRef} style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, boxSizing: "border-box" }}>
+          <div style={{ color: "#94a3b8", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
+            <div style={{ width: 32, height: 32, border: "3px solid #e2e8f0", borderTopColor: "#6366f1", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
+            <p style={{ fontSize: 14, fontWeight: 600 }}>認証を確認中…</p>
+          </div>
         </div>
+        <div aria-hidden="true" style={{ height: "env(safe-area-inset-bottom, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
         <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
       </div>
     );
@@ -237,11 +266,13 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
   // --- Render: Login form ---
   return (
-    <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20, paddingTop: "max(20px, env(safe-area-inset-top))", paddingBottom: "max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
-      <div style={{
-        background: "#fff", borderRadius: 24, padding: "32px 24px", width: "100%", maxWidth: 380,
-        boxShadow: "0 20px 40px rgba(0,0,0,0.06)",
-      }}>
+    <div style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
+      <div aria-hidden="true" style={{ height: "env(safe-area-inset-top, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
+      <div ref={authScreenRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", display: "flex", flexDirection: "column", padding: 20, boxSizing: "border-box" }}>
+        <div style={{
+          background: "#fff", borderRadius: 24, padding: "32px 24px", width: "100%", maxWidth: 380,
+          boxShadow: "0 20px 40px rgba(0,0,0,0.06)", margin: "auto",
+        }}>
         {/* Header */}
         <div style={{ display: "flex", flexDirection: "column", alignItems: "center", marginBottom: 28 }}>
           <div style={{
@@ -328,7 +359,6 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
               value={passcode}
               onChange={(e) => setPasscode(e.target.value)}
               placeholder="••••"
-              autoFocus
               style={{
                 width: "100%", padding: "14px", fontSize: 24, fontWeight: 700,
                 border: "2px solid #e2e8f0", borderRadius: 12, outline: "none", color: "#0f172a",
@@ -370,7 +400,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
                 style={{
                   width: "100%", padding: "12px 12px 12px 42px",
                   borderRadius: 12, border: "2px solid #e2e8f0",
-                  fontSize: 15, outline: "none", transition: "border-color 0.2s",
+                  fontSize: 16, outline: "none", transition: "border-color 0.2s",
                 }}
                 onFocus={(e) => e.target.style.borderColor = "#6366f1"}
                 onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
@@ -387,7 +417,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
                 style={{
                   width: "100%", padding: "12px 12px 12px 42px",
                   borderRadius: 12, border: "2px solid #e2e8f0",
-                  fontSize: 15, outline: "none", transition: "border-color 0.2s",
+                  fontSize: 16, outline: "none", transition: "border-color 0.2s",
                 }}
                 onFocus={(e) => e.target.style.borderColor = "#6366f1"}
                 onBlur={(e) => e.target.style.borderColor = "#e2e8f0"}
@@ -413,7 +443,9 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
             </button>
           </form>
         )}
+        </div>
       </div>
+      <div aria-hidden="true" style={{ height: "env(safe-area-inset-bottom, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
 
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>

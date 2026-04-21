@@ -38,7 +38,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     return () => window.removeEventListener("opStyleChange", handler);
   }, []);
 
-  // ページ自体の縦スクロールをロック
+  // DrumRoll 操作中にページ全体へスクロールが逃げないよう、操作画面中だけロックする。
   useEffect(() => {
     const prev = document.body.style.overflow;
     document.body.style.overflow = "hidden";
