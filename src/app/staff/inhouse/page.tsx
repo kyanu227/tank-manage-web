@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Wrench, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { doc, writeBatch } from "firebase/firestore";
 import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
@@ -88,8 +88,8 @@ export default function InHousePage() {
   // TankIdInput からの commit: その場で事後報告実行
   const handleCommit = async (tankId: string) => {
     if (reporting) return;
-    if (!/^[A-Z]+-\d{2}$/.test(tankId)) {
-      setReportResult({ success: false, message: "ID形式が正しくありません (例: A-01)" });
+    if (!/^[A-Z]+-(\d{2}|OK)$/.test(tankId)) {
+      setReportResult({ success: false, message: "ID形式が正しくありません (例: A-01 / A-OK)" });
       return;
     }
     setReporting(true);
@@ -119,8 +119,8 @@ export default function InHousePage() {
       setReportResult({ success: true, message: `${tankId} の事後報告を完了しました` });
       setTagOverrides({});
       refetch();
-    } catch (e: any) {
-      setReportResult({ success: false, message: "エラー: " + e.message });
+    } catch (e: unknown) {
+      setReportResult({ success: false, message: "エラー: " + errorMessage(e) });
     } finally {
       setReporting(false);
     }
@@ -147,8 +147,8 @@ export default function InHousePage() {
       alert("一括返却が完了しました。");
       setTagOverrides({});
       refetch();
-    } catch (e: any) {
-      alert("エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("エラー: " + errorMessage(e));
     } finally {
       setReturning(false);
     }
@@ -166,19 +166,6 @@ export default function InHousePage() {
         accentColor={ACCENT}
         confirmLabel={reporting ? "送信中…" : "事後報告"}
         lastAdded={lastAdded}
-        headerSlot={
-          <div style={{ padding: "10px 16px 0", flexShrink: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#eef2ff", borderRadius: 12, border: "1px solid #c7d2fe" }}>
-              <div style={{ width: 28, height: 28, borderRadius: 8, background: ACCENT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <Wrench size={14} color="#fff" />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <h1 style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", margin: 0 }}>自社管理</h1>
-                <p style={{ fontSize: 11, color: "#64748b", margin: 0 }}>事後報告（利用開始）／利用中の返却確定</p>
-              </div>
-            </div>
-          </div>
-        }
         beforeConfirm={
           <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
             {/* フィードバック */}
@@ -283,4 +270,8 @@ export default function InHousePage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

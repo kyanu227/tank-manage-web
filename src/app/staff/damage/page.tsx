@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
-import { AlertTriangle, Send, CheckCircle2, Loader2, X } from "lucide-react";
+import { Send, CheckCircle2, Loader2, X } from "lucide-react";
 import { ACTION } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import TankIdInput from "@/components/TankIdInput";
@@ -63,8 +63,8 @@ export default function DamageReportPage() {
       setResult({ success: true, message: `${queue.length}本の破損報告を完了しました` });
       setQueue([]);
       setNote("");
-    } catch (e: any) {
-      setResult({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setResult({ success: false, message: errorMessage(e) });
     } finally {
       setSubmitting(false);
     }
@@ -82,19 +82,6 @@ export default function DamageReportPage() {
         onCommit={handleCommit}
         accentColor={ACCENT}
         lastAdded={lastAdded}
-        headerSlot={
-          <div style={{ padding: "10px 16px 0", flexShrink: 0 }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 12px", background: "#fef2f2", borderRadius: 12, border: "1px solid #fecaca" }}>
-              <div style={{ width: 28, height: 28, borderRadius: 8, background: ACCENT, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <AlertTriangle size={14} color="#fff" />
-              </div>
-              <div style={{ minWidth: 0 }}>
-                <h1 style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", margin: 0 }}>破損報告</h1>
-                <p style={{ fontSize: 11, color: "#64748b", margin: 0 }}>ステータスを「破損」に変更</p>
-              </div>
-            </div>
-          </div>
-        }
         beforeConfirm={
           <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
@@ -183,4 +170,8 @@ export default function DamageReportPage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

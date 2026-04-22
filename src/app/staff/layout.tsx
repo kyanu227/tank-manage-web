@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -27,15 +27,24 @@ const OPS_PATHS = ["/staff/lend", "/staff/return", "/staff/fill"];
 export default function StaffLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
+  const mainRef = useRef<HTMLElement | null>(null);
 
   // iOS: 前画面のキーボードでズレたビューポートを強制リセット（スクロールロック画面のため手動では戻せない）
   useEffect(() => {
     window.scrollTo(0, 0);
+    mainRef.current?.scrollTo({ top: 0, left: 0 });
   }, [pathname]);
   // 手動/受注サブタブは貸出ページでのみ表示
   const isLendPage = pathname === "/staff/lend";
   const isOpsGroup = OPS_PATHS.includes(pathname ?? "");
   const isInhousePage = pathname === "/staff/inhouse";
+  const isInternalScrollPage = [
+    "/staff/inhouse",
+    "/staff/damage",
+    "/staff/repair",
+    "/staff/inspection",
+    ...OPS_PATHS,
+  ].includes(pathname ?? "");
 
   // 操作スタイル: 手動 / 受注（操作ページでのみ表示）
   const [opStyle, setOpStyle] = useState<"manual" | "order">("manual");
@@ -178,7 +187,18 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
         </div>
 
         {/* Main content */}
-        <main style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <main
+          ref={mainRef}
+          style={{
+            flex: 1,
+            minHeight: 0,
+            display: "flex",
+            flexDirection: "column",
+            overflow: isInternalScrollPage ? "hidden" : "auto",
+            WebkitOverflowScrolling: "touch",
+            overscrollBehavior: "contain",
+          }}
+        >
           {children}
         </main>
       </div>
