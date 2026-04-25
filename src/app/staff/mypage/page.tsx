@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { User, TrendingUp, Award, Clock } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, orderBy, limit, where } from "firebase/firestore";
+import { logsRepository } from "@/lib/firebase/repositories";
 
 interface LogEntry {
   tankId: string;
@@ -20,15 +19,20 @@ export default function MyPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), orderBy("timestamp", "desc"), limit(100)));
+        const fetched = await logsRepository.getActiveLogs({ limit: 100 });
         const entries: LogEntry[] = [];
         const counts = { lend: 0, return: 0, fill: 0, other: 0 };
-        snap.forEach((d) => {
-          const data = d.data() as LogEntry;
-          entries.push(data);
-          if (data.action === "貸出") counts.lend++;
-          else if (data.action === "返却" || data.action?.includes("返却")) counts.return++;
-          else if (data.action === "充填") counts.fill++;
+        fetched.forEach((log) => {
+          const action = log.action ?? "";
+          entries.push({
+            tankId: log.tankId ?? "",
+            action,
+            timestamp: log.timestamp,
+            location: log.location ?? "",
+          });
+          if (action === "貸出") counts.lend++;
+          else if (action === "返却" || action.includes("返却")) counts.return++;
+          else if (action === "充填") counts.fill++;
           else counts.other++;
         });
         setLogs(entries);

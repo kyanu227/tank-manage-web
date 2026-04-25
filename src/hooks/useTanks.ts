@@ -1,8 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { collection, getDocs } from "firebase/firestore";
-import { db } from "@/lib/firebase/config";
+import { tanksRepository } from "@/lib/firebase/repositories";
 import type { TankDoc } from "@/lib/tank-types";
 
 export interface UseTanksResult {
@@ -15,7 +14,7 @@ export interface UseTanksResult {
 
 /**
  * tanks コレクション全件を取得する共通フック。
- * - tanks: ID昇順ソート済みの配列
+ * - tanks: ID昇順ソート済みの配列（ソートは tanksRepository.getTanks 側で実施）
  * - tankMap: id -> TankDoc の辞書
  * - prefixes: タンクIDの先頭アルファベット（A-Zソート済）
  * - loading: 初回ロード/再取得中フラグ
@@ -32,29 +31,16 @@ export function useTanks(): UseTanksResult {
   const refetch = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDocs(collection(db, "tanks"));
-      const list: TankDoc[] = [];
+      // ソート・正規化済みの一覧を取得
+      const list = await tanksRepository.getTanks();
+      // 派生値（tankMap / prefixes）はフック側で構築する
       const map: Record<string, TankDoc> = {};
       const pSet = new Set<string>();
-      snap.forEach((d) => {
-        const raw = d.data() as any;
-        const t: TankDoc = {
-          id: d.id,
-          status: String(raw.status ?? ""),
-          location: raw.location != null ? String(raw.location) : undefined,
-          staff: raw.staff != null ? String(raw.staff) : undefined,
-          type: raw.type != null ? String(raw.type) : undefined,
-          note: raw.note != null ? String(raw.note) : undefined,
-          logNote: raw.logNote != null ? String(raw.logNote) : undefined,
-          updatedAt: raw.updatedAt,
-          nextMaintenanceDate: raw.nextMaintenanceDate,
-        };
-        list.push(t);
-        map[d.id] = t;
-        const m = d.id.match(/^([A-Z]+)/i);
+      list.forEach((t) => {
+        map[t.id] = t;
+        const m = t.id.match(/^([A-Z]+)/i);
         if (m) pSet.add(m[1].toUpperCase());
       });
-      list.sort((a, b) => a.id.localeCompare(b.id));
       setTanks(list);
       setTankMap(map);
       setPrefixes(Array.from(pSet).sort());

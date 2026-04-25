@@ -51,3 +51,9 @@
 ## build 通過 完了
 - 変更ファイル: なし
 - 内容: npm run build が成功し、全 32 route の静的生成が完了した。
+
+## Phase 2-B-6 portal tanks 重複クエリ統一 完了
+- 変更ファイル: src/app/portal/page.tsx, src/app/portal/return/page.tsx, src/app/portal/unfilled/page.tsx, docs/data-layer-migration-plan.md
+- 内容: 3画面で重複していた tanks(location==customerName, status=="貸出中") の直接クエリを `tanksRepository.getTanks({ location, status: STATUS.LENT })` に統一した。"貸出中" 文字列リテラルは STATUS.LENT へ置換、未使用となった getDocs/query/where を import から除去。
+- 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
+- メモ: location 文字列マッチ依存の改善案（customerId 参照化）を data-layer-migration-plan.md に追記。

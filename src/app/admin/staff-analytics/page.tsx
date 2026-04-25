@@ -2,8 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { Users, Award, TrendingUp } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, orderBy, where } from "firebase/firestore";
+import { logsRepository } from "@/lib/firebase/repositories";
 
 interface StaffStat { name: string; lend: number; return_: number; fill: number; total: number; }
 
@@ -14,15 +13,14 @@ export default function StaffAnalyticsPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), orderBy("timestamp", "desc")));
+        const logs = await logsRepository.getActiveLogs();
         const staffMap: Record<string, { lend: number; return_: number; fill: number }> = {};
-        snap.forEach((d) => {
-          const data = d.data();
-          const name = data.staff || "不明";
+        logs.forEach((log) => {
+          const name = log.staff || "不明";
           if (!staffMap[name]) staffMap[name] = { lend: 0, return_: 0, fill: 0 };
-          if (data.action === "貸出") staffMap[name].lend++;
-          else if (data.action?.includes("返却")) staffMap[name].return_++;
-          else if (data.action === "充填") staffMap[name].fill++;
+          if (log.action === "貸出") staffMap[name].lend++;
+          else if (log.action?.includes("返却")) staffMap[name].return_++;
+          else if (log.action === "充填") staffMap[name].fill++;
         });
         const sorted = Object.entries(staffMap)
           .map(([name, v]) => ({ name, ...v, total: v.lend + v.return_ + v.fill }))

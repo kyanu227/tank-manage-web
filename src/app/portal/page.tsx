@@ -5,6 +5,8 @@ import { Package, Clock, Activity, ShoppingCart, RotateCcw, AlertTriangle } from
 import Link from "next/link";
 import { db } from "@/lib/firebase/config";
 import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
+import { tanksRepository } from "@/lib/firebase/repositories";
+import { STATUS } from "@/lib/tank-rules";
 
 interface LogEntry { action: string; timestamp: any; tankId: string; staff: string; }
 
@@ -21,9 +23,8 @@ export default function PortalPage() {
 
     const fetchData = async () => {
       try {
-        const tankSnap = await getDocs(query(collection(db, "tanks"), where("location", "==", customerName), where("status", "==", "貸出中")));
-        const tanks: string[] = [];
-        tankSnap.forEach((d) => tanks.push(d.id));
+        const tankDocs = await tanksRepository.getTanks({ location: customerName, status: STATUS.LENT });
+        const tanks: string[] = tankDocs.map((t) => t.id);
         setRentedTanks(tanks.sort());
 
         const logSnap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), where("location", "==", customerName), orderBy("timestamp", "desc"), limit(30)));

@@ -5,8 +5,10 @@ import { ArrowLeft, Send, CheckCircle2, Clock, RotateCcw, AlertCircle } from "lu
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase/config";
 import {
-  collection, query, where, getDocs, addDoc, doc, getDoc, serverTimestamp,
+  collection, addDoc, doc, getDoc, serverTimestamp,
 } from "firebase/firestore";
+import { tanksRepository } from "@/lib/firebase/repositories";
+import { STATUS } from "@/lib/tank-rules";
 
 type Condition = "normal" | "unused" | "keep";
 
@@ -38,27 +40,22 @@ export default function CustomerReturnPage() {
 
   const sessionStr = typeof window !== "undefined" ? localStorage.getItem("customerSession") : null;
   const session = sessionStr ? JSON.parse(sessionStr) : {};
-  const customerId: string = session.uid || "";
+  const customerUserUid: string = session.customerUserUid || "";
+  const customerId: string = session.customerId || session.uid || "";
   const customerName: string = session.name || "";
 
   // Fetch rented tanks + schedule
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
-      const [tankSnap, settingsDoc] = await Promise.all([
-        getDocs(query(
-          collection(db, "tanks"),
-          where("location", "==", customerName),
-          where("status", "==", "貸出中"),
-        )),
+      const [tankDocs, settingsDoc] = await Promise.all([
+        tanksRepository.getTanks({ location: customerName, status: STATUS.LENT }),
         getDoc(doc(db, "settings", "portal")),
       ]);
 
-      const items: TankItem[] = [];
-      tankSnap.forEach((d) => {
-        const data = d.data();
-        const lentAt = data.updatedAt?.toDate?.() ?? null;
-        items.push({ id: d.id, lentAt, condition: "normal" });
+      const items: TankItem[] = tankDocs.map((t) => {
+        const lentAt = (t.updatedAt as any)?.toDate?.() ?? null;
+        return { id: t.id, lentAt, condition: "normal" };
       });
       // Sort by lent date ascending (oldest first)
       items.sort((a, b) => (a.lentAt?.getTime() ?? 0) - (b.lentAt?.getTime() ?? 0));
@@ -123,6 +120,7 @@ export default function CustomerReturnPage() {
             condition: tank.condition === "unused" ? "unused" : "normal",
             customerId,
             customerName,
+            createdByUid: customerUserUid || session.uid || customerId,
             createdAt: serverTimestamp(),
             source: auto ? "auto_schedule" : "customer_portal",
           })

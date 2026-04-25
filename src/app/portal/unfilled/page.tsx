@@ -4,7 +4,9 @@ import { useState, useEffect } from "react";
 import { ArrowLeft, Send, CheckCircle2, Delete, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase/config";
-import { collection, addDoc, getDocs, query, where, serverTimestamp } from "firebase/firestore";
+import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { tanksRepository } from "@/lib/firebase/repositories";
+import { STATUS } from "@/lib/tank-rules";
 
 interface TankItem {
   id: string;
@@ -15,6 +17,8 @@ export default function UnfilledReportPage() {
   const router = useRouter();
   const sessionStr = typeof window !== "undefined" ? localStorage.getItem("customerSession") : null;
   const session = sessionStr ? JSON.parse(sessionStr) : {};
+  const customerUserUid: string = session.customerUserUid || "";
+  const customerId: string = session.customerId || session.uid || "";
   const customerName: string = session.name || "";
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
@@ -36,14 +40,8 @@ export default function UnfilledReportPage() {
 
     const fetchLentTanks = async () => {
       try {
-        const tankSnap = await getDocs(query(
-          collection(db, "tanks"),
-          where("location", "==", customerName),
-          where("status", "==", "貸出中"),
-        ));
-
-        const tankIds: string[] = [];
-        tankSnap.forEach((d) => tankIds.push(d.id));
+        const tankDocs = await tanksRepository.getTanks({ location: customerName, status: STATUS.LENT });
+        const tankIds: string[] = tankDocs.map((t) => t.id);
         setLentTanks(tankIds);
 
         const prefixes = new Set<string>();
@@ -112,6 +110,9 @@ export default function UnfilledReportPage() {
             type: "uncharged_report",
             status: "completed",
             tankId: tank.tankId,
+            customerId,
+            customerName,
+            createdByUid: customerUserUid || session.uid || customerId,
             createdAt: serverTimestamp(),
             source: "customer_app",
           })
