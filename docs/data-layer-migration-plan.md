@@ -110,7 +110,13 @@
     - 「タンクが存在しません」エラーメッセージとフォーマット（`[${tankId}] タンクが存在しません`）は完全維持。`currentStatus` の値も `String(raw.status ?? "")` 経由で生成されるため従来と同値。
     - 書き込み処理（`applyBulkTankOperations` 呼び出しと `batch.update(doc(db, "transactions", ...))`）には一切触らず。`doc` / `serverTimestamp` import はその書き込みで必要なため据え置き。`getDoc` import は未使用となったため除去。
     - 検証: `npx tsc --noEmit --pretty false` が EXIT=0 で完了。
-- **Phase 2-B-9**: `src/app/admin/page.tsx` — 3コレクション同時。`getPendingTransactions()` 候補の発注を兼ねる
+- **Phase 2-B-9**: `src/app/admin/page.tsx` — 3コレクション同時。`getPendingTransactions()` 候補の発注を兼ねる ✅ 完了
+  - `transactionsRepository.getPendingTransactions({ statuses })` を新規実装した（type 横断 + `where("status","in", statuses)` のみ）。`type` フィルタは付けていない（type 横断クエリが本関数の存在意義）。既定 statuses は `["pending", "pending_approval"]`、`orderBy` / `limit` / `since` は付与なし。戻り値は `TransactionDoc[]`（`{ id, ...data }` キャストのみ。`PendingOrder` / `PendingReturn` への正規化はしない）。
+  - 既存条件3つは完全維持: ①logs `where("logStatus","==","active")` + `where("timestamp",">=",todayStart)` → `logsRepository.getActiveLogs({ from: todayStart })`、②tanks `where("status","==","貸出中")` → `tanksRepository.getTanks({ status: STATUS.LENT })`、③transactions `where("status","in",["pending","pending_approval"])` → `transactionsRepository.getPendingTransactions({ statuses: ["pending","pending_approval"] })`。`Promise.all` の3並列構造も維持。
+  - KPI 集計（`staffSet` Set 構築、`logs.length` / `tanks.length` / `pendingTxs.length` の件数算出、`setValues` への代入）は呼び出し側に残し、repository 側に count / aggregation を持ち込まない方針を維持。
+  - `getOrders` / `getReturns` の仕様は不変。`queryByType` のような共通化はしていない。
+  - `db` / `collection` / `getDocs` / `query` / `where` / `Timestamp` の直接 import を全て除去。代わりに `logsRepository` / `tanksRepository` / `transactionsRepository` / `STATUS` を import。
+  - 検証: `npx tsc --noEmit` 0エラー。
 - **Phase 2-B-10**: `src/app/staff/dashboard/page.tsx` — 大きい画面、logs/transactions 複数
 - **Phase 2-B-11**: `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` (L34) — `statusIn` 拡張が実際に必要になるタイミング
 - **Phase 2-B-12**: `src/app/admin/settings/page.tsx` (L524) — `findPendingLinksByUid()` 特殊条件、最後
@@ -165,6 +171,14 @@
 - **将来候補（portal の貸出中タンク取得）**: portal の貸出中タンク取得は `location` 文字列マッチ（`tanks.location == customerName`）に依存している。
   destinations と顧客名の整合がズレると取りこぼしが発生するため、将来的には `customerId` 参照（tanks 側に customerId を持たせる、もしくは destinations 経由で名寄せする）への移行を検討する。
   Phase 2-B-6 では既存挙動維持のため location 文字列マッチをそのままリポジトリ呼び出しに移植した。
+- **将来候補（書き込み系の repository 化）**: `useReturnApprovals.fulfillReturns` などが `batch.update(doc(db, "transactions", ...))` で transactions の `status` / `fulfilledAt` / `fulfilledBy` を直接更新している。
+  `transactionsRepository.updateTransactionInBatch` を本実装してこれを寄せる候補があるが、Phase 2-B は読み取り経路のみのスコープなので**別フェーズで扱う**。
+- **将来候補（since オプションの統一実装）**: `getOrders` / `getReturns` の `GetOrdersOptions.since` / `GetReturnsOptions.since` は現状未対応のままコメントだけ残してある。
+  「`createdAt` / `updatedAt` / `timestamp` のどれを境界にするか」を含めて、既存クエリ置換フェーズが終わってから一括検討する。
+- **将来候補（tanks 単一取得のバッチ化）**: `useReturnApprovals.fulfillReturns` の N 件並列 `getTank` は、`tanksRepository.getTanksByIds` を本実装すれば 1〜数回の `documentId() in [...]` クエリに集約できる。
+  ただし「存在しない tankId をエラーで弾く」既存挙動の維持には差分集合チェックが要るため、Phase 2-B-11（`statusIn` 実機運用）または読み取り最適化フェーズで再検討する。
+- **将来候補（`getPendingTransactions({ statuses })` のガード）**: 現状の `getPendingTransactions` は呼び出し元（admin ダッシュボード）が `["pending","pending_approval"]` の2件固定なので問題ないが、将来別の呼び出し元が `statuses: []`（空配列）や 10 件超の配列を渡すと Firestore の `in` 句仕様でエラーになる。
+  再利用が増えるタイミングで「空配列の早期 return」「10件超の分割クエリ」のガードを入れる検討が必要。今回は呼び出しが固定なので未対応のまま。
 
 ---
 

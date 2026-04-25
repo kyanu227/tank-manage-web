@@ -75,3 +75,9 @@
 - 内容: `tanksRepository.getTank(tankId)` を本実装（getDoc → 不在なら null → 存在すれば TankDoc 変換）。TankDoc 変換は getTanks と共有するため `toTankDoc(snap)` ヘルパに切り出し（getTanks 既存挙動は完全維持）。`useReturnApprovals.fulfillReturns` 内で承認直前に行っていた `getDoc(doc(db,"tanks",item.tankId))` を `tanksRepository.getTank(item.tankId)` へ置換し、Promise.all による N 件並列取得構造と「タンクが存在しません」エラーメッセージを完全維持。書き込み処理（applyBulkTankOperations 呼び出し / batch.update(doc(db,"transactions",...))）には一切触らず。未使用となった getDoc import を除去、doc / serverTimestamp は書き込みで使用継続のため据え置き。
 - 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
 - メモ: 1件ずつの並列取得を `getTanksByIds` での一括取得に置き換える案は今回見送り（既存挙動・例外メッセージ維持を優先）→ 将来検討候補として進行表に記録。
+
+## Phase 2-B-9 admin/page.tsx 3コレクション読取の repository 化 / getPendingTransactions 本実装 完了
+- 変更ファイル: src/lib/firebase/repositories/transactions.ts, src/app/admin/page.tsx, docs/data-layer-migration-plan.md
+- 内容: `transactionsRepository.getPendingTransactions({ statuses })` を新規実装（type 横断、`where("status","in", statuses)` のみ。type フィルタは付けない、orderBy/limit/since も付けない、戻り値は TransactionDoc[] の生キャスト）。`admin/page.tsx` の3直接クエリ（logs: logStatus=="active"+timestamp>=todayStart / tanks: status=="貸出中" / transactions: status in ["pending","pending_approval"]）を `logsRepository.getActiveLogs({ from: todayStart })` / `tanksRepository.getTanks({ status: STATUS.LENT })` / `transactionsRepository.getPendingTransactions({ statuses: [...] })` に置換。Promise.all 3並列構造、staffSet 集計、length ベースの件数算出、setValues、loading state、CARD_DEFS / JSX は無変更。db/collection/getDocs/query/where/Timestamp の直接 import を全て除去。書き込み処理は追加なし。`getOrders` / `getReturns` の仕様は不変。
+- 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
+- メモ: `getPendingTransactions` の `since` は未実装、Phase 後半で検討する。

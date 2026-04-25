@@ -2,8 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { BarChart3, Truck, Users, AlertTriangle } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, where, Timestamp } from "firebase/firestore";
+import {
+  logsRepository,
+  tanksRepository,
+  transactionsRepository,
+} from "@/lib/firebase/repositories";
+import { STATUS } from "@/lib/tank-rules";
 
 // カード定義（アイコン・色のみ。値はstateで管理）
 const CARD_DEFS = [
@@ -30,41 +34,32 @@ export default function AdminDashboardPage() {
         // 今日の0時（ローカルタイム）
         const now = new Date();
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
-        const todayTimestamp = Timestamp.fromDate(todayStart);
 
         // 3つのクエリを並列実行
-        const [logsSnap, tanksSnap, txSnap] = await Promise.all([
+        const [logs, tanks, pendingTxs] = await Promise.all([
           // 本日のログ → 操作件数 + ユニークスタッフ数
-          getDocs(
-            query(collection(db, "logs"), where("logStatus", "==", "active"), where("timestamp", ">=", todayTimestamp))
-          ),
+          logsRepository.getActiveLogs({ from: todayStart }),
           // 貸出中タンク数
-          getDocs(
-            query(collection(db, "tanks"), where("status", "==", "貸出中"))
-          ),
+          tanksRepository.getTanks({ status: STATUS.LENT }),
           // 要対応トランザクション（pending / pending_approval）
-          getDocs(
-            query(
-              collection(db, "transactions"),
-              where("status", "in", ["pending", "pending_approval"])
-            )
-          ),
+          transactionsRepository.getPendingTransactions({
+            statuses: ["pending", "pending_approval"],
+          }),
         ]);
 
         // ログからユニークスタッフ数を集計
         const staffSet = new Set<string>();
-        logsSnap.docs.forEach((doc) => {
-          const data = doc.data();
-          if (data.staff) {
-            staffSet.add(data.staff);
+        logs.forEach((log) => {
+          if (log.staff) {
+            staffSet.add(log.staff);
           }
         });
 
         setValues({
-          todayOps: logsSnap.size,
-          renting: tanksSnap.size,
+          todayOps: logs.length,
+          renting: tanks.length,
           activeStaff: staffSet.size,
-          pending: txSnap.size,
+          pending: pendingTxs.length,
         });
       } catch (err) {
         console.error("ダッシュボードデータ取得エラー:", err);
