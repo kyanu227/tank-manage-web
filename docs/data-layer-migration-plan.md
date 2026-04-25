@@ -97,6 +97,19 @@
   - 書き込み処理（`approveOrder` / `fulfillOrder` の `updateDoc` / `batch.update`）は据え置き。
   - 検証: `npx tsc --noEmit` 0エラー。
 - **Phase 2-B-8**: `src/features/staff-operations/hooks/useReturnApprovals.ts` (L44, L95) — `transactionsRepository.getReturns({ status })` + `tanksRepository.getTank()`
+  - **8a 完了**: `fetchApprovals` の transactions 読み取りを `transactionsRepository.getReturns({ status: "pending_approval" })` に置換した。
+    - 既存条件 `where("type","==","return")` + `where("status","==","pending_approval")` は repository 内部に閉じ込めた形で完全維持（`type=="return"` は必須付与、`status` は options 経由）。
+    - `PendingReturn` への正規化は repository に持ち込まず、呼び出し側で `as unknown as PendingReturn[]` のキャストにより吸収（features 層の型を repository に持ち込まない方針）。
+    - グルーピング・ソート処理（customerId 単位の Map 集約、createdAt desc ソート）は一切変更していない。
+    - `since` オプションは未対応。Phase 後半で対応する旨を repository コメントに明記。
+    - 未使用となった `collection / getDocs / query / where` を import から除去。`doc / getDoc / serverTimestamp` は fulfillReturns（8b 範囲）で必要なため据え置き。
+    - 検証: `npx tsc --noEmit --pretty false` が EXIT=0 で完了。
+  - **8b 完了**: 同ファイル `fulfillReturns` 内（旧 L94-98）の `getDoc(doc(db, "tanks", item.tankId))` を `tanksRepository.getTank(item.tankId)` に置換した。
+    - `tanksRepository.getTank` を本実装（`getDoc` → 不在なら `null` → 存在すれば TankDoc 変換）。TankDoc 変換は `getTanks` と DRY にするため `toTankDoc(snap)` ヘルパへ切り出し、両者で共有（既存 `getTanks` の挙動は完全維持）。
+    - 既存の `Promise.all`（承認対象 N 件を 1件ずつ並列で tanks/{id} 取得する構造）は維持。`getTanksByIds` での一括取得は今回見送り（既存挙動・例外メッセージ維持を優先）→ 将来検討候補。
+    - 「タンクが存在しません」エラーメッセージとフォーマット（`[${tankId}] タンクが存在しません`）は完全維持。`currentStatus` の値も `String(raw.status ?? "")` 経由で生成されるため従来と同値。
+    - 書き込み処理（`applyBulkTankOperations` 呼び出しと `batch.update(doc(db, "transactions", ...))`）には一切触らず。`doc` / `serverTimestamp` import はその書き込みで必要なため据え置き。`getDoc` import は未使用となったため除去。
+    - 検証: `npx tsc --noEmit --pretty false` が EXIT=0 で完了。
 - **Phase 2-B-9**: `src/app/admin/page.tsx` — 3コレクション同時。`getPendingTransactions()` 候補の発注を兼ねる
 - **Phase 2-B-10**: `src/app/staff/dashboard/page.tsx` — 大きい画面、logs/transactions 複数
 - **Phase 2-B-11**: `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` (L34) — `statusIn` 拡張が実際に必要になるタイミング

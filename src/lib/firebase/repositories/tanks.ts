@@ -3,13 +3,39 @@
 
 import {
   collection,
+  doc,
+  getDoc,
   getDocs,
   query,
   where,
+  type DocumentSnapshot,
   type QueryConstraint,
+  type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import type { TankDoc, RepositoryWriter } from "./types";
+
+/**
+ * Firestore のタンクドキュメントを TankDoc に正規化する。
+ * getTank / getTanks の双方で同一変換を行うため、ここに集約する。
+ * status / location / staff / type / note / logNote は String 化、
+ * updatedAt / latestLogId / nextMaintenanceDate はそのまま透過する。
+ */
+function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
+  const raw = snap.data() as any;
+  return {
+    id: snap.id,
+    status: String(raw.status ?? ""),
+    location: raw.location != null ? String(raw.location) : undefined,
+    staff: raw.staff != null ? String(raw.staff) : undefined,
+    type: raw.type != null ? String(raw.type) : undefined,
+    note: raw.note != null ? String(raw.note) : undefined,
+    logNote: raw.logNote != null ? String(raw.logNote) : undefined,
+    updatedAt: raw.updatedAt,
+    latestLogId: raw.latestLogId ?? undefined,
+    nextMaintenanceDate: raw.nextMaintenanceDate,
+  };
+}
 
 /** タンクのフィルタ条件（Phase 2 以降で拡張） */
 export interface GetTanksOptions {
@@ -31,8 +57,10 @@ export type TankFieldsPatch = Partial<
 export type Unsubscribe = () => void;
 
 /** 1件取得。存在しなければ null。 */
-export async function getTank(_tankId: string): Promise<TankDoc | null> {
-  throw new Error("not implemented in Phase 1");
+export async function getTank(tankId: string): Promise<TankDoc | null> {
+  const snap = await getDoc(doc(db, "tanks", tankId));
+  if (!snap.exists()) return null;
+  return toTankDoc(snap);
 }
 
 /**
@@ -62,20 +90,7 @@ export async function getTanks(options?: GetTanksOptions): Promise<TankDoc[]> {
 
   const list: TankDoc[] = [];
   snap.forEach((d) => {
-    const raw = d.data() as any;
-    const t: TankDoc = {
-      id: d.id,
-      status: String(raw.status ?? ""),
-      location: raw.location != null ? String(raw.location) : undefined,
-      staff: raw.staff != null ? String(raw.staff) : undefined,
-      type: raw.type != null ? String(raw.type) : undefined,
-      note: raw.note != null ? String(raw.note) : undefined,
-      logNote: raw.logNote != null ? String(raw.logNote) : undefined,
-      updatedAt: raw.updatedAt,
-      latestLogId: raw.latestLogId ?? undefined,
-      nextMaintenanceDate: raw.nextMaintenanceDate,
-    };
-    list.push(t);
+    list.push(toTankDoc(d));
   });
 
   // prefix はクライアント側 filter（Firestore のクエリで先頭一致を表現しづらいため）

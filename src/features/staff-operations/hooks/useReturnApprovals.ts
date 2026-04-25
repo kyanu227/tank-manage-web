@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { collection, doc, getDoc, getDocs, query, serverTimestamp, where } from "firebase/firestore";
+import { doc, serverTimestamp } from "firebase/firestore";
 import { getStaffName } from "@/hooks/useStaffSession";
 import { db } from "@/lib/firebase/config";
+import { tanksRepository, transactionsRepository } from "@/lib/firebase/repositories";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import {
   RETURN_TAG,
@@ -41,10 +42,8 @@ export function useReturnApprovals({
   const fetchApprovals = useCallback(async () => {
     setApprovalsLoading(true);
     try {
-      const q = query(collection(db, "transactions"), where("type", "==", "return"), where("status", "==", "pending_approval"));
-      const snap = await getDocs(q);
-      const items: PendingReturn[] = [];
-      snap.forEach((d) => items.push({ id: d.id, ...d.data() } as PendingReturn));
+      const docs = await transactionsRepository.getReturns({ status: "pending_approval" });
+      const items = docs as unknown as PendingReturn[];
       const groupMap = new Map<string, ReturnGroup>();
       items.forEach((item) => {
         if (!groupMap.has(item.customerId)) groupMap.set(item.customerId, { customerId: item.customerId, customerName: item.customerName, items: [] });
@@ -92,11 +91,11 @@ export function useReturnApprovals({
             : appData.condition === "uncharged" ? RETURN_TAG.DEFECT
               : RETURN_TAG.NORMAL;
         const note = `[承認] 顧客: ${selectedReturnGroup.customerName} (タグ:${appData.condition})`;
-        const tankSnap = await getDoc(doc(db, "tanks", item.tankId));
-        if (!tankSnap.exists()) {
+        const tank = await tanksRepository.getTank(item.tankId);
+        if (!tank) {
           throw new Error(`[${item.tankId}] タンクが存在しません`);
         }
-        const currentStatus = String((tankSnap.data() as any)?.status ?? "");
+        const currentStatus = tank.status ?? "";
         return { item, tag, condition: appData.condition as Condition, note, currentStatus };
       }));
 

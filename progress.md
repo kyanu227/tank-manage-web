@@ -63,3 +63,15 @@
 - 内容: `transactionsRepository.getOrders({ status, customerId })` を `where("type","==","order")` 必須付きで本実装し、normalizeOrderDoc を repository 内部に閉じ込めた。`useOrderFulfillment.fetchOrders` は3 status の Promise.all 構造を維持したまま `getOrders({ status })` 呼び出しへ置換、未使用の collection/getDocs/query/where 及び normalizeOrderDoc import を除去。書き込み処理（approveOrder / fulfillOrder）は据え置き。
 - 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
 - メモ: `getOrders` の `since` は未実装、Phase 後半で対応する旨を repository コメントに残した。
+
+## Phase 2-B-8a transactionsRepository.getReturns 本実装 / useReturnApprovals.fetchApprovals 置換 完了
+- 変更ファイル: src/lib/firebase/repositories/transactions.ts, src/features/staff-operations/hooks/useReturnApprovals.ts, docs/data-layer-migration-plan.md
+- 内容: `transactionsRepository.getReturns({ status, customerId })` を `where("type","==","return")` 必須付きで本実装。`useReturnApprovals.fetchApprovals` の直接クエリを `getReturns({ status: "pending_approval" })` に置換し、`PendingReturn` 化はフック側の `as unknown as PendingReturn[]` キャストで吸収（正規化は features 層の責任を維持）。グルーピング・ソート処理は無変更。fulfillReturns（tanks 読取・transactions 更新含む）は 8b 範囲のため未着手。未使用となった collection/getDocs/query/where を import から除去、doc/getDoc/serverTimestamp は fulfillReturns で使用継続のため据え置き。
+- 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
+- メモ: `getReturns` の `since` は未実装、Phase 後半で対応する旨を repository コメントに残した。
+
+## Phase 2-B-8b tanksRepository.getTank 本実装 / useReturnApprovals.fulfillReturns の tanks 読取置換 完了
+- 変更ファイル: src/lib/firebase/repositories/tanks.ts, src/features/staff-operations/hooks/useReturnApprovals.ts, docs/data-layer-migration-plan.md
+- 内容: `tanksRepository.getTank(tankId)` を本実装（getDoc → 不在なら null → 存在すれば TankDoc 変換）。TankDoc 変換は getTanks と共有するため `toTankDoc(snap)` ヘルパに切り出し（getTanks 既存挙動は完全維持）。`useReturnApprovals.fulfillReturns` 内で承認直前に行っていた `getDoc(doc(db,"tanks",item.tankId))` を `tanksRepository.getTank(item.tankId)` へ置換し、Promise.all による N 件並列取得構造と「タンクが存在しません」エラーメッセージを完全維持。書き込み処理（applyBulkTankOperations 呼び出し / batch.update(doc(db,"transactions",...))）には一切触らず。未使用となった getDoc import を除去、doc / serverTimestamp は書き込みで使用継続のため据え置き。
+- 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
+- メモ: 1件ずつの並列取得を `getTanksByIds` での一括取得に置き換える案は今回見送り（既存挙動・例外メッセージ維持を優先）→ 将来検討候補として進行表に記録。

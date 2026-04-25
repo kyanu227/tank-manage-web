@@ -113,11 +113,34 @@ export async function getOrders(
   return list;
 }
 
-/** type == "return" のクエリ。 */
+/**
+ * type == "return" のクエリ。
+ * - `type == "return"` を必須条件として常に付与する
+ * - options?.status / options?.customerId は指定されたぶんだけ where を追加
+ * - orderBy は付けない（呼び出し側でソートする方針）
+ * - 戻り値は生ドキュメントを TransactionDoc にキャストしたもの
+ *   （PendingReturn など features 層特有の正規化は呼び出し側に委ねる）
+ *
+ * NOTE: options?.since は Phase 後半で since 対応する（現状未対応）。
+ */
 export async function getReturns(
-  _options?: GetReturnsOptions,
+  options?: GetReturnsOptions,
 ): Promise<TransactionDoc[]> {
-  throw new Error("not implemented in Phase 1");
+  const constraints: QueryConstraint[] = [where("type", "==", "return")];
+  if (options?.status !== undefined) {
+    constraints.push(where("status", "==", options.status));
+  }
+  if (options?.customerId !== undefined) {
+    constraints.push(where("customerId", "==", options.customerId));
+  }
+  // Phase 後半で since 対応（timestamp/createdAt の境界値クエリを追加予定）
+
+  const snap = await getDocs(query(collection(db, "transactions"), ...constraints));
+  const list: TransactionDoc[] = [];
+  snap.forEach((d) => {
+    list.push({ id: d.id, ...d.data() } as TransactionDoc);
+  });
+  return list;
 }
 
 /** type == "uncharged_report" のクエリ。 */
