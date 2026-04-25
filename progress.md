@@ -57,3 +57,9 @@
 - 内容: 3画面で重複していた tanks(location==customerName, status=="貸出中") の直接クエリを `tanksRepository.getTanks({ location, status: STATUS.LENT })` に統一した。"貸出中" 文字列リテラルは STATUS.LENT へ置換、未使用となった getDocs/query/where を import から除去。
 - 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
 - メモ: location 文字列マッチ依存の改善案（customerId 参照化）を data-layer-migration-plan.md に追記。
+
+## Phase 2-B-7 transactionsRepository.getOrders 本実装 / useOrderFulfillment 置換 完了
+- 変更ファイル: src/lib/firebase/repositories/transactions.ts, src/features/staff-operations/hooks/useOrderFulfillment.ts, docs/data-layer-migration-plan.md
+- 内容: `transactionsRepository.getOrders({ status, customerId })` を `where("type","==","order")` 必須付きで本実装し、normalizeOrderDoc を repository 内部に閉じ込めた。`useOrderFulfillment.fetchOrders` は3 status の Promise.all 構造を維持したまま `getOrders({ status })` 呼び出しへ置換、未使用の collection/getDocs/query/where 及び normalizeOrderDoc import を除去。書き込み処理（approveOrder / fulfillOrder）は据え置き。
+- 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
+- メモ: `getOrders` の `since` は未実装、Phase 後半で対応する旨を repository コメントに残した。

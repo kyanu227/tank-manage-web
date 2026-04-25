@@ -89,7 +89,13 @@
 
 ### 後半（transactions 系・残りの logs / 複合画面）
 
-- **Phase 2-B-7**: `src/features/staff-operations/hooks/useOrderFulfillment.ts` (L67のみ) — `transactionsRepository.getOrders({ status })` 本実装
+- **Phase 2-B-7**: `src/features/staff-operations/hooks/useOrderFulfillment.ts` (L67のみ) — `transactionsRepository.getOrders({ status })` 本実装 ✅ 完了
+  - 当初想定では「L67 の単一 status クエリ」を対象としていたが、着手時点の現状コードは既に `["pending", "pending_approval", "approved"]` を `Promise.all` で並列取得する3並列構造に変わっていた。
+  - 既存条件（`type=="order"` × `status==X` の3並列）を変えない方針に従い、Promise.all 構造を維持したまま各要素を `transactionsRepository.getOrders({ status })` 呼び出しへ置換した。
+  - `normalizeOrderDoc` の呼び出しはフックから外し、repository 内部に閉じ込めた（「正規化は境界で吸収する」設計書方針に合致）。
+  - `getOrders` の `since` は今回未対応。Phase 後半で対応する旨を repository 側のコメントに残した。
+  - 書き込み処理（`approveOrder` / `fulfillOrder` の `updateDoc` / `batch.update`）は据え置き。
+  - 検証: `npx tsc --noEmit` 0エラー。
 - **Phase 2-B-8**: `src/features/staff-operations/hooks/useReturnApprovals.ts` (L44, L95) — `transactionsRepository.getReturns({ status })` + `tanksRepository.getTank()`
 - **Phase 2-B-9**: `src/app/admin/page.tsx` — 3コレクション同時。`getPendingTransactions()` 候補の発注を兼ねる
 - **Phase 2-B-10**: `src/app/staff/dashboard/page.tsx` — 大きい画面、logs/transactions 複数

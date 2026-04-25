@@ -2,12 +2,12 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
-import { collection, doc, getDocs, query, serverTimestamp, where } from "firebase/firestore";
+import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { getStaffName } from "@/hooks/useStaffSession";
 import { db } from "@/lib/firebase/config";
+import { transactionsRepository } from "@/lib/firebase/repositories";
 import {
   findMatchingItem,
-  normalizeOrderDoc,
   totalOrderQuantity,
   type PendingOrder,
 } from "@/lib/order-types";
@@ -31,7 +31,9 @@ export interface UseOrderFulfillmentResult {
   orderInputRef: RefObject<HTMLInputElement | null>;
   orderLastAdded: string | null;
   orderSubmitting: boolean;
+  approvingOrderId: string | null;
   fetchOrders: () => Promise<void>;
+  approveOrder: (order: PendingOrder) => Promise<void>;
   openFulfillment: (order: PendingOrder) => void;
   closeFulfillment: () => void;
   orderFocusInput: (prefix: string) => void;
@@ -55,15 +57,19 @@ export function useOrderFulfillment({
   const [orderLastAdded, setOrderLastAdded] = useState<string | null>(null);
   const orderSuccessTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const [orderSubmitting, setOrderSubmitting] = useState(false);
+  const [approvingOrderId, setApprovingOrderId] = useState<string | null>(null);
 
   const fetchOrders = useCallback(async () => {
     setOrdersLoading(true);
     try {
-      const q = query(collection(db, "transactions"), where("type", "==", "order"), where("status", "==", "pending"));
-      const snap = await getDocs(q);
-      const ordersData: PendingOrder[] = [];
-      // normalizeOrderDoc を通して旧スキーマ(tankType/quantityスカラー)にも対応
-      snap.forEach((d) => ordersData.push(normalizeOrderDoc(d.id, d.data())));
+      // 既存挙動を維持: 3 status を並列取得し、呼び出し側でソートする。
+      // 正規化（旧スキーマ tankType/quantity 吸収）は repository 境界で行うため、
+      // ここでは normalizeOrderDoc は呼ばない。
+      const statuses = ["pending", "pending_approval", "approved"] as const;
+      const results = await Promise.all(
+        statuses.map((status) => transactionsRepository.getOrders({ status }))
+      );
+      const ordersData: PendingOrder[] = results.flat();
       ordersData.sort((a, b) => (b.createdAt?.toMillis() || 0) - (a.createdAt?.toMillis() || 0));
       setPendingOrders(ordersData);
     } catch (err) {
@@ -86,6 +92,30 @@ export function useOrderFulfillment({
     setOrderActivePrefix(null);
     setOrderInputValue("");
   }, []);
+
+  const approveOrder = useCallback(async (order: PendingOrder) => {
+    if (!order.customerId) {
+      alert("顧客に紐付いていない受注は承認できません。管理画面で紐付けてください。");
+      return;
+    }
+    if (!confirm(`${order.customerName} の受注を承認しますか？`)) return;
+
+    setApprovingOrderId(order.id);
+    try {
+      const staffName = getStaffName();
+      await updateDoc(doc(db, "transactions", order.id), {
+        status: "approved",
+        approvedAt: serverTimestamp(),
+        approvedBy: staffName,
+        updatedAt: serverTimestamp(),
+      });
+      await fetchOrders();
+    } catch (err: any) {
+      alert("承認エラー: " + err.message);
+    } finally {
+      setApprovingOrderId(null);
+    }
+  }, [fetchOrders]);
 
   const orderFocusInput = useCallback((prefix: string) => {
     setOrderActivePrefix(prefix);
@@ -219,6 +249,7 @@ export function useOrderFulfillment({
             status: "completed",
             fulfilledAt: serverTimestamp(),
             fulfilledBy: staffName,
+            updatedAt: serverTimestamp(),
           });
         }
       );
@@ -245,7 +276,9 @@ export function useOrderFulfillment({
     orderInputRef,
     orderLastAdded,
     orderSubmitting,
+    approvingOrderId,
     fetchOrders,
+    approveOrder,
     openFulfillment,
     closeFulfillment,
     orderFocusInput,

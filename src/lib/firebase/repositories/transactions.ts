@@ -1,7 +1,16 @@
-// Phase 1 骨組み。実装は Phase 2 以降。
+// Phase 1 骨組み + Phase 2-B-7 で getOrders のみ本実装。
 // transactions コレクションの作成・読み取り・更新を担う薄いラッパ。
 // 旧スキーマ互換は repository 境界で正規化する。
 
+import {
+  collection,
+  getDocs,
+  query,
+  where,
+  type QueryConstraint,
+} from "firebase/firestore";
+import { db } from "@/lib/firebase/config";
+import { normalizeOrderDoc } from "@/lib/order-types";
 import type {
   PendingOrder,
   RepositoryWriter,
@@ -74,11 +83,34 @@ export async function getTransaction(
   throw new Error("not implemented in Phase 1");
 }
 
-/** type == "order" のクエリ。正規化済み PendingOrder を返す。 */
+/**
+ * type == "order" のクエリ。正規化済み PendingOrder を返す。
+ * - `type == "order"` を必須条件として常に付与する
+ * - options?.status / options?.customerId は指定されたぶんだけ where を追加
+ * - orderBy は付けない（呼び出し側でソートする方針）
+ * - 戻り値は normalizeOrderDoc を通した PendingOrder[]
+ *   （旧スキーマ tankType/quantity スカラーも吸収）
+ *
+ * NOTE: options?.since は Phase 後半で since 対応する（現状未対応）。
+ */
 export async function getOrders(
-  _options?: GetOrdersOptions,
+  options?: GetOrdersOptions,
 ): Promise<PendingOrder[]> {
-  throw new Error("not implemented in Phase 1");
+  const constraints: QueryConstraint[] = [where("type", "==", "order")];
+  if (options?.status !== undefined) {
+    constraints.push(where("status", "==", options.status));
+  }
+  if (options?.customerId !== undefined) {
+    constraints.push(where("customerId", "==", options.customerId));
+  }
+  // Phase 後半で since 対応（timestamp/createdAt の境界値クエリを追加予定）
+
+  const snap = await getDocs(query(collection(db, "transactions"), ...constraints));
+  const list: PendingOrder[] = [];
+  snap.forEach((d) => {
+    list.push(normalizeOrderDoc(d.id, d.data()));
+  });
+  return list;
 }
 
 /** type == "return" のクエリ。 */
