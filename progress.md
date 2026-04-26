@@ -92,3 +92,9 @@
 - 変更ファイル: src/lib/firebase/repositories/logs.ts, src/app/staff/dashboard/page.tsx, docs/data-layer-migration-plan.md
 - 内容: `getLogsByRoot(rootLogId)` を `where("rootLogId","==",rootLogId)` のみのシンプル本実装（orderBy/limit なし、`toLogDoc` 経由）。`staff/dashboard/page.tsx` の `toggleHistory` 内で行っていた直接クエリを `logsRepository.getLogsByRoot(rootId)` に置換し、`as unknown as LogEntry[]` キャストで型を吸収。`expandedRootId` の早期 return、`historyByRoot` キャッシュ、`historyLoadingRoot` ローディング状態、"履歴取得エラー: " エラーメッセージ、`revision` 昇順ソートは完全維持。10a で残置していた `query` / `where` import を除去（`collection` / `getDocs` は customers 読取で必要なため残置）。書き込み処理（applyLogCorrection / voidLog / handleBulkLocationChange / handleBulkVoid）・customers 読取・useMemo/useEffect 群・JSX には一切触らず。
 - 検証: npx tsc --noEmit --pretty false が EXIT=0 で完了。
+
+## Phase 2-B-11 useBulkReturnByLocation fetchBulkTanks の tanks 読取置換 完了
+- 変更ファイル: src/features/staff-operations/hooks/useBulkReturnByLocation.ts, docs/data-layer-migration-plan.md
+- 内容: `fetchBulkTanks` の直接クエリ（`status in [LENT, UNRETURNED]`）を `tanksRepository.getTanks({ statusIn: [STATUS.LENT, STATUS.UNRETURNED] })` に置換。既存 `statusIn` 実装を利用し、新規 repository 関数追加なし。TankDoc → BulkTankWithTag は呼び出し側の `as unknown as` キャストで吸収し、tag 推定・location グルーピング・id ソート・expanded 初期化は維持。
+- メモ: `updateTag` / `handleBulkReturnForLocation` / `applyBulkTankOperations` には触らず、`getTanksByIds` も本実装していない。
+- 検証: npx tsc --noEmit が EXIT=0 で完了。

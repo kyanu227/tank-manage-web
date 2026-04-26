@@ -136,7 +136,11 @@
     - 10a で toggleHistory のために据え置いていた `query` / `where` の `firebase/firestore` import を除去。`collection` / `getDocs` は customers 読取で必要なため残置。
     - 書き込み処理（applyLogCorrection / voidLog / handleBulkLocationChange / handleBulkVoid）・customers 読取・useMemo/useEffect 群・JSX には一切触らず。
     - 検証: `npx tsc --noEmit --pretty false` が EXIT=0 で完了。
-- **Phase 2-B-11**: `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` (L34) — `statusIn` 拡張が実際に必要になるタイミング
+- **Phase 2-B-11**: `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` (L34) — `statusIn` 拡張が実際に必要になるタイミング ✅ 完了
+  - `fetchBulkTanks` 内の tanks 直接読み取りを `tanksRepository.getTanks({ statusIn: [STATUS.LENT, STATUS.UNRETURNED] })` に置換した。
+  - 既存条件 `where("status","in",[STATUS.LENT, STATUS.UNRETURNED])` は `statusIn` によって完全維持。`statusIn` は Phase 1/2-B-1 の既存実装がそのまま機能し、新規 repository 関数の追加なしで完了した。
+  - TankDoc → BulkTankWithTag は呼び出し側で `{ ...tank, tag } as unknown as BulkTankWithTag` キャストにより吸収し、tag 推定（`logNote` の `[TAG:unused]` / `[TAG:defect]` 判定）・location グルーピング・id 昇順ソート・`expanded` 初期化は呼び出し側に維持した。
+  - 書き込み処理（`updateTag` の `writeBatch(db).update(...)`、`handleBulkReturnForLocation` の `applyBulkTankOperations` 呼び出し）には触っていない。`getTanksByIds` の本実装も行っていない。
 - **Phase 2-B-12**: `src/app/admin/settings/page.tsx` (L524) — `findPendingLinksByUid()` 特殊条件、最後
 
 ### Phase 2-B-1 のスコープ（厳守）

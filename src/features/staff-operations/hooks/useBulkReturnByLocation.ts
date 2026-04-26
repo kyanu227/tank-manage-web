@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { collection, doc, getDocs, query, where, writeBatch } from "firebase/firestore";
+import { doc, writeBatch } from "firebase/firestore";
 import { getStaffName } from "@/hooks/useStaffSession";
 import { db } from "@/lib/firebase/config";
+import { tanksRepository } from "@/lib/firebase/repositories";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { RETURN_TAG, STATUS, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
 import type { BulkTagType, BulkTankDoc } from "../types";
@@ -31,17 +32,17 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   const fetchBulkTanks = useCallback(async () => {
     setBulkLoading(true);
     try {
-      const q = query(collection(db, "tanks"), where("status", "in", [STATUS.LENT, STATUS.UNRETURNED]));
-      const snap = await getDocs(q);
+      const tanks = await tanksRepository.getTanks({
+        statusIn: [STATUS.LENT, STATUS.UNRETURNED],
+      });
       const groups: Record<string, BulkTankWithTag[]> = {};
-      snap.forEach((d) => {
-        const data = d.data();
-        const loc = data.location || "不明";
+      tanks.forEach((tank) => {
+        const loc = tank.location || "不明";
         if (!groups[loc]) groups[loc] = [];
         let tag: BulkTagType = "normal";
-        if (data.logNote === "[TAG:unused]") tag = "unused";
-        if (data.logNote === "[TAG:defect]") tag = "defect";
-        groups[loc].push({ id: d.id, ...data, tag } as BulkTankWithTag);
+        if (tank.logNote === "[TAG:unused]") tag = "unused";
+        if (tank.logNote === "[TAG:defect]") tag = "defect";
+        groups[loc].push({ ...tank, tag } as unknown as BulkTankWithTag);
       });
       Object.keys(groups).forEach(loc => {
         groups[loc].sort((a, b) => a.id.localeCompare(b.id));
