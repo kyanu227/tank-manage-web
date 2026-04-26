@@ -18,6 +18,7 @@ interface UseManualTankOperationParams {
   config: ModeConfigItem;
   allTanks: TankMap;
   selectedDest: string;
+  selectedCustomerId?: string | null;
   fetchData: () => Promise<void>;
 }
 
@@ -45,6 +46,7 @@ export function useManualTankOperation({
   config,
   allTanks,
   selectedDest,
+  selectedCustomerId,
   fetchData,
 }: UseManualTankOperationParams): UseManualTankOperationResult {
   const [returnTag, setReturnTag] = useState<TagType>("normal");
@@ -177,6 +179,9 @@ export function useManualTankOperation({
             location: finalLocation,
             tankNote: finalNote,
             logNote: finalNote,
+            ...(mode === "lend" && selectedCustomerId
+              ? { logExtra: { customerId: selectedCustomerId } }
+              : {}),
           };
         })
       );
@@ -189,7 +194,7 @@ export function useManualTankOperation({
     } finally {
       setSubmitting(false);
     }
-  }, [config.action, config.label, fetchData, mode, opQueue, selectedDest]);
+  }, [config.action, config.label, fetchData, mode, opQueue, selectedCustomerId, selectedDest]);
 
   const validCount = useMemo(() => opQueue.filter(q => q.valid).length, [opQueue]);
 

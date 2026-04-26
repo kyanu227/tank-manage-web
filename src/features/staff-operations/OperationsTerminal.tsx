@@ -77,6 +77,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     config,
     allTanks,
     selectedDest: destinations.selectedDest,
+    selectedCustomerId: destinations.selectedCustomerId,
     fetchData,
   });
 
