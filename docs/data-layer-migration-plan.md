@@ -142,6 +142,65 @@
   - TankDoc → BulkTankWithTag は呼び出し側で `{ ...tank, tag } as unknown as BulkTankWithTag` キャストにより吸収し、tag 推定（`logNote` の `[TAG:unused]` / `[TAG:defect]` 判定）・location グルーピング・id 昇順ソート・`expanded` 初期化は呼び出し側に維持した。
   - 書き込み処理（`updateTag` の `writeBatch(db).update(...)`、`handleBulkReturnForLocation` の `applyBulkTankOperations` 呼び出し）には触っていない。`getTanksByIds` の本実装も行っていない。
 - **Phase 2-B-12**: `src/app/admin/settings/page.tsx` (L524) — `findPendingLinksByUid()` 特殊条件、最後
+  - ✅ 完了。`transactionsRepository.findPendingLinksByUid(uid)` を新規実装し、`saveCustomerUsers` 内の `pending_link` transactions 直接読み取りを repository 経由に置換した。
+  - 既存条件 `where("createdByUid","==",u.uid)` + `where("status","==","pending_link")` は repository 内部にそのまま移した。`type` フィルタ、`orderBy`、`limit` は追加していない。
+  - `pendingSnap.forEach((d) => batch.update(d.ref, ...))` は `pendingItems.forEach((item) => batch.update(doc(db, "transactions", item.id), ...))` に変更した。これは repository 戻り値が `TransactionDoc[]` で `DocumentReference` を持たないための参照先変更のみ。
+  - 書き込み payload（`customerId` / `customerName` / `status: "pending_approval"` / `linkedAt` / `updatedAt`）は完全維持。`batch.commit()` 構造、`customerUsers` 更新処理、staff / destinations / customers / orderMaster / settings の読み書き、UI、Security Rules、`tank-operation.ts` / `tank-trace.ts` には触れていない。
+  - `getOrders` / `getReturns` / `getPendingTransactions` の仕様は不変。
+  - 検証: `npx tsc --noEmit --pretty false` が EXIT=0 で完了。
+
+## Phase 2-B 完了確認（2026-04-26）
+
+`src/app` / `src/features` / `src/hooks` / `src/lib` 配下で `firebase/firestore` import と `tanks` / `logs` / `transactions` への直接アクセスを再検索した。
+
+### Phase 2-B で完了した置き換え
+
+- `tanks`
+  - `src/hooks/useTanks.ts` → `tanksRepository.getTanks()`
+  - `src/app/portal/page.tsx` / `src/app/portal/return/page.tsx` / `src/app/portal/unfilled/page.tsx` の貸出中 tanks 読み取り → `tanksRepository.getTanks({ location, status: STATUS.LENT })`
+  - `src/app/admin/page.tsx` の貸出中 tanks 件数 → `tanksRepository.getTanks({ status: STATUS.LENT })`
+  - `src/features/staff-operations/hooks/useReturnApprovals.ts` の tanks 1件確認 → `tanksRepository.getTank(tankId)`
+  - `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` の一括返却対象 tanks 読み取り → `tanksRepository.getTanks({ statusIn: [...] })`
+- `logs`
+  - `src/app/admin/billing/page.tsx` / `src/app/admin/sales/page.tsx` / `src/app/staff/mypage/page.tsx` / `src/app/admin/staff-analytics/page.tsx` の active logs 読み取り → `logsRepository.getActiveLogs(...)`
+  - `src/app/admin/page.tsx` の本日 active logs 件数 → `logsRepository.getActiveLogs({ from: todayStart })`
+  - `src/app/portal/page.tsx` の顧客向け履歴 logs 読み取り → `logsRepository.getActiveLogs({ location: customerName, limit: 30 })`
+  - `src/app/staff/dashboard/page.tsx` の active logs 一覧 → `logsRepository.getActiveLogs()`
+  - `src/app/staff/dashboard/page.tsx` の履歴展開 rootLogId 読み取り → `logsRepository.getLogsByRoot(rootId)`
+- `transactions`
+  - `src/features/staff-operations/hooks/useOrderFulfillment.ts` の orders 読み取り → `transactionsRepository.getOrders({ status })`
+  - `src/features/staff-operations/hooks/useReturnApprovals.ts` の returns 読み取り → `transactionsRepository.getReturns({ status: "pending_approval" })`
+  - `src/app/admin/page.tsx` の pending / pending_approval 横断件数 → `transactionsRepository.getPendingTransactions({ statuses: [...] })`
+  - `src/app/staff/dashboard/page.tsx` の pending orders / returns 件数 → `transactionsRepository.getOrders(...)` / `transactionsRepository.getReturns(...)`
+  - `src/app/admin/settings/page.tsx` の `pending_link` 検索 → `transactionsRepository.findPendingLinksByUid(uid)`
+
+### 直接読み取りの残件
+
+- `src/lib/tank-trace.ts`
+  - logs 読み取り 4箇所が残っている。設計上、追跡・集計 service 層として独立維持し、repository 吸収は後回しにする方針。
+
+### 意図的に残す直接アクセス
+
+- `src/lib/firebase/repositories/*`
+  - repository 内部の Firestore SDK 使用。今回の集約先なので残す。
+- `src/lib/tank-operation.ts`
+  - 業務ハブ。`runTransaction` で logs / tanks の整合性を保つ書き込み経路なので Phase 2-B 対象外。
+- `src/features/procurement/lib/submitTankEntryBatch.ts`
+  - タンク登録 / 購入の業務バッチ。Phase 2-B 対象外。
+- 書き込み系
+  - `src/app/portal/order/page.tsx` / `src/app/portal/return/page.tsx` / `src/app/portal/unfilled/page.tsx` の `transactions` 作成。
+  - `src/features/staff-operations/hooks/useOrderFulfillment.ts` / `useReturnApprovals.ts` / `src/app/admin/settings/page.tsx` の `transactions` 更新。
+  - `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` / `src/app/staff/inhouse/page.tsx` の `tanks` メタ情報更新。
+  - `src/app/staff/order/page.tsx` の非タンク order log 書き込み。
+  - これらは Phase 3 以降で `transactionsRepository.updateTransaction(InBatch)` などに寄せる候補。
+- 対象外コレクション
+  - `staff` / `destinations` / `customers` / `customerUsers` / `orderMaster` / `settings` / `notifySettings` / `lineConfigs` / `monthly_stats` / `priceMaster` / `rankMaster` などの読み書きは Phase 2-B 対象外として残す。
+
+### 判定
+
+- `tanks` / `transactions` の Phase 2-B 対象読み取りは repository 化済み。
+- `logs` は Phase 2-A 棚卸しの L1-L8（画面・hooks 側の対象読み取り）を repository 化済み。
+- Phase 2-B はここで完了とする。残る直接アクセスは repository 内部、業務ハブ、業務バッチ、書き込み系、対象外コレクション、または後回し方針の `tank-trace.ts` に限定される。
 
 ### Phase 2-B-1 のスコープ（厳守）
 

@@ -3,9 +3,7 @@
 import { useState, useEffect } from "react";
 import { Package, Clock, Activity, ShoppingCart, RotateCcw, AlertTriangle } from "lucide-react";
 import Link from "next/link";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, where, orderBy, limit } from "firebase/firestore";
-import { tanksRepository } from "@/lib/firebase/repositories";
+import { logsRepository, tanksRepository } from "@/lib/firebase/repositories";
 import { STATUS } from "@/lib/tank-rules";
 
 interface LogEntry { action: string; timestamp: any; tankId: string; staff: string; }
@@ -27,9 +25,7 @@ export default function PortalPage() {
         const tanks: string[] = tankDocs.map((t) => t.id);
         setRentedTanks(tanks.sort());
 
-        const logSnap = await getDocs(query(collection(db, "logs"), where("logStatus", "==", "active"), where("location", "==", customerName), orderBy("timestamp", "desc"), limit(30)));
-        const recentLogs: LogEntry[] = [];
-        logSnap.forEach((d) => recentLogs.push(d.data() as LogEntry));
+        const recentLogs = await logsRepository.getActiveLogs({ location: customerName, limit: 30 }) as unknown as LogEntry[];
         setLogs(recentLogs);
       } catch (e) {
         console.error("Portal fetch error", e);
