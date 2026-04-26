@@ -86,6 +86,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [staffName, setStaffName] = useState("管理者");
   const [staffRole, setStaffRole] = useState("");
   const [allowedPaths, setAllowedPaths] = useState<string[]>([]);
+  const staffInitial = staffName.trim().charAt(0) || "管";
+  const staffRoleLabel = staffRole || "権限確認中";
 
   const handleStaffLoaded = useCallback((staff: { name: string; role: string }) => {
     setStaffName(staff.name);
@@ -151,34 +153,70 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         }}
         className="admin-sidebar-desktop"
       >
-        {/* Brand */}
+        {/* User */}
         <div
           style={{
-            padding: collapsed ? "20px 0" : "20px 24px",
+            padding: collapsed ? "14px 0" : "16px 16px",
             borderBottom: "1px solid #e8eaed",
             display: "flex",
+            flexDirection: collapsed ? "column" : "row",
             alignItems: "center",
             justifyContent: collapsed ? "center" : "space-between",
-            minHeight: 64,
+            gap: collapsed ? 8 : 10,
+            minHeight: 76,
           }}
         >
-          {!collapsed && (
-            <span
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              minWidth: 0,
+              justifyContent: collapsed ? "center" : "flex-start",
+            }}
+          >
+            <div
               style={{
-                fontSize: 15,
-                fontWeight: 800,
-                color: "#1a1a2e",
-                letterSpacing: "-0.02em",
+                width: 36,
+                height: 36,
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 700,
+                flexShrink: 0,
               }}
             >
-              管理画面
-            </span>
-          )}
+              {staffInitial}
+            </div>
+            {!collapsed && (
+              <div style={{ minWidth: 0 }}>
+                <div
+                  style={{
+                    fontSize: 14,
+                    fontWeight: 700,
+                    color: "#1e293b",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {staffName}
+                </div>
+                <div style={{ marginTop: 2, fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>
+                  {staffRoleLabel}
+                </div>
+              </div>
+            )}
+          </div>
           <button
             onClick={() => setCollapsed(!collapsed)}
             style={{
-              width: 32,
-              height: 32,
+              width: 30,
+              height: 30,
               borderRadius: 8,
               border: "1px solid #e8eaed",
               background: "#fff",
@@ -189,7 +227,9 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               color: "#94a3b8",
               transition: "all 0.15s",
               flexShrink: 0,
+              marginLeft: collapsed ? 0 : "auto",
             }}
+            title={collapsed ? "サイドバーを開く" : "サイドバーを閉じる"}
           >
             <ChevronLeft
               size={16}
@@ -252,72 +292,82 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </div>
         </nav>
 
-        {/* External links */}
+        {/* Sidebar actions */}
         <div
           style={{
             padding: "12px 8px",
             borderTop: "1px solid #e8eaed",
             display: "flex",
             flexDirection: "column",
-            gap: 2,
+            gap: 4,
           }}
         >
           {!collapsed && (
-            <div style={{ padding: "4px 16px 6px", fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              他画面
+            <div style={{ padding: "4px 16px 4px", fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+              アプリ切替
             </div>
           )}
           <Link
             href="/staff"
             target="_blank"
             style={{
-              display: "flex", alignItems: "center", gap: 12,
-              padding: collapsed ? "10px 0" : "10px 16px",
+              display: "flex", alignItems: "center", gap: 10,
+              padding: collapsed ? "8px 0" : "8px 16px",
               justifyContent: collapsed ? "center" : "flex-start",
-              borderRadius: 10, textDecoration: "none",
-              fontSize: 14, fontWeight: 500, color: "#64748b",
+              borderRadius: 8, textDecoration: "none",
+              fontSize: 12, fontWeight: 500, color: "#64748b",
               transition: "all 0.15s",
             }}
+            title="現場アプリ"
           >
-            <HardHat size={18} style={{ flexShrink: 0 }} />
+            <HardHat size={16} style={{ flexShrink: 0, color: "#94a3b8" }} />
             {!collapsed && (
-              <span style={{ flex: 1 }}>現場用</span>
+              <span style={{ flex: 1 }}>現場アプリ</span>
             )}
-            {!collapsed && <ExternalLink size={12} style={{ color: "#cbd5e1" }} />}
+            {!collapsed && <ExternalLink size={11} style={{ color: "#cbd5e1" }} />}
           </Link>
           <Link
             href="/portal"
             target="_blank"
             style={{
-              display: "flex", alignItems: "center", gap: 12,
-              padding: collapsed ? "10px 0" : "10px 16px",
+              display: "flex", alignItems: "center", gap: 10,
+              padding: collapsed ? "8px 0" : "8px 16px",
               justifyContent: collapsed ? "center" : "flex-start",
-              borderRadius: 10, textDecoration: "none",
-              fontSize: 14, fontWeight: 500, color: "#64748b",
+              borderRadius: 8, textDecoration: "none",
+              fontSize: 12, fontWeight: 500, color: "#64748b",
               transition: "all 0.15s",
             }}
+            title="顧客アプリ"
           >
-            <Building2 size={18} style={{ flexShrink: 0 }} />
+            <Building2 size={16} style={{ flexShrink: 0, color: "#94a3b8" }} />
             {!collapsed && (
-              <span style={{ flex: 1 }}>顧客ポータル</span>
+              <span style={{ flex: 1 }}>顧客アプリ</span>
             )}
-            {!collapsed && <ExternalLink size={12} style={{ color: "#cbd5e1" }} />}
+            {!collapsed && <ExternalLink size={11} style={{ color: "#cbd5e1" }} />}
           </Link>
-        </div>
-
-        {/* Footer */}
-        {!collapsed && (
-          <div
+          <button
+            onClick={handleLogout}
             style={{
-              padding: "16px 24px",
-              borderTop: "1px solid #e8eaed",
-              fontSize: 11,
-              color: "#94a3b8",
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              padding: collapsed ? "9px 0" : "9px 16px",
+              justifyContent: collapsed ? "center" : "flex-start",
+              borderRadius: 8,
+              border: "none",
+              background: "transparent",
+              color: "#64748b",
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: "pointer",
+              transition: "all 0.15s",
             }}
+            title="ログアウト"
           >
-            © 2026 Tank Management System
-          </div>
-        )}
+            <LogOut size={16} style={{ flexShrink: 0, color: "#94a3b8" }} />
+            {!collapsed && <span>ログアウト</span>}
+          </button>
+        </div>
       </aside>
 
       {/* Mobile overlay */}
@@ -356,17 +406,51 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       >
         <div
           style={{
-            padding: "20px 24px",
+            padding: "16px 20px",
             borderBottom: "1px solid #e8eaed",
             display: "flex",
             alignItems: "center",
             justifyContent: "space-between",
-            minHeight: 64,
+            gap: 12,
+            minHeight: 76,
           }}
         >
-          <span style={{ fontSize: 15, fontWeight: 800, color: "#1a1a2e" }}>
-            管理画面
-          </span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}>
+            <div
+              style={{
+                width: 36,
+                height: 36,
+                borderRadius: "50%",
+                background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: "#fff",
+                fontSize: 14,
+                fontWeight: 700,
+                flexShrink: 0,
+              }}
+            >
+              {staffInitial}
+            </div>
+            <div style={{ minWidth: 0 }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 700,
+                  color: "#1e293b",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {staffName}
+              </div>
+              <div style={{ marginTop: 2, fontSize: 11, fontWeight: 600, color: "#94a3b8" }}>
+                {staffRoleLabel}
+              </div>
+            </div>
+          </div>
           <button
             onClick={() => setSidebarOpen(false)}
             style={{
@@ -418,40 +502,52 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </div>
             ))}
           </div>
-          <div style={{ marginTop: 12, borderTop: "1px solid #e8eaed", paddingTop: 12 }}>
-            <div style={{ padding: "4px 16px 6px", fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase" }}>
-              他画面
-            </div>
-            <Link
-              href="/staff"
-              target="_blank"
-              onClick={() => setSidebarOpen(false)}
-              style={{
-                display: "flex", alignItems: "center", gap: 12,
-                padding: "10px 16px", borderRadius: 10, textDecoration: "none",
-                fontSize: 14, fontWeight: 500, color: "#64748b",
-              }}
-            >
-              <HardHat size={18} />
-              <span style={{ flex: 1 }}>現場用</span>
-              <ExternalLink size={12} style={{ color: "#cbd5e1" }} />
-            </Link>
-            <Link
-              href="/portal"
-              target="_blank"
-              onClick={() => setSidebarOpen(false)}
-              style={{
-                display: "flex", alignItems: "center", gap: 12,
-                padding: "10px 16px", borderRadius: 10, textDecoration: "none",
-                fontSize: 14, fontWeight: 500, color: "#64748b",
-              }}
-            >
-              <Building2 size={18} />
-              <span style={{ flex: 1 }}>顧客ポータル</span>
-              <ExternalLink size={12} style={{ color: "#cbd5e1" }} />
-            </Link>
-          </div>
         </nav>
+        <div style={{ borderTop: "1px solid #e8eaed", padding: "12px 8px", display: "flex", flexDirection: "column", gap: 4 }}>
+          <div style={{ padding: "4px 16px 4px", fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase" }}>
+            アプリ切替
+          </div>
+          <Link
+            href="/staff"
+            target="_blank"
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 16px", borderRadius: 8, textDecoration: "none",
+              fontSize: 12, fontWeight: 500, color: "#64748b",
+            }}
+          >
+            <HardHat size={16} style={{ color: "#94a3b8" }} />
+            <span style={{ flex: 1 }}>現場アプリ</span>
+            <ExternalLink size={11} style={{ color: "#cbd5e1" }} />
+          </Link>
+          <Link
+            href="/portal"
+            target="_blank"
+            onClick={() => setSidebarOpen(false)}
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "8px 16px", borderRadius: 8, textDecoration: "none",
+              fontSize: 12, fontWeight: 500, color: "#64748b",
+            }}
+          >
+            <Building2 size={16} style={{ color: "#94a3b8" }} />
+            <span style={{ flex: 1 }}>顧客アプリ</span>
+            <ExternalLink size={11} style={{ color: "#cbd5e1" }} />
+          </Link>
+          <button
+            onClick={handleLogout}
+            style={{
+              display: "flex", alignItems: "center", gap: 10,
+              padding: "9px 16px", borderRadius: 8, border: "none",
+              background: "transparent", color: "#64748b", fontSize: 12,
+              fontWeight: 600, cursor: "pointer",
+            }}
+          >
+            <LogOut size={16} style={{ color: "#94a3b8" }} />
+            <span>ログアウト</span>
+          </button>
+        </div>
       </div>
 
       {/* Main content */}
@@ -466,73 +562,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         }}
         className="admin-main-area"
       >
-        {/* Top bar */}
-        <header
-          style={{
-            height: 64,
-            background: "rgba(255,255,255,0.85)",
-            backdropFilter: "blur(12px)",
-            WebkitBackdropFilter: "blur(12px)",
-            borderBottom: "1px solid #e8eaed",
-            display: "flex",
-            alignItems: "center",
-            padding: "0 24px",
-            position: "sticky",
-            top: 0,
-            zIndex: 20,
-          }}
-        >
+        {/* Page content */}
+        <main style={{ flex: 1, padding: 24 }}>
           <button
             onClick={() => setSidebarOpen(true)}
             style={{
               width: 36, height: 36, borderRadius: 8, border: "1px solid #e8eaed",
               background: "#fff", display: "flex", alignItems: "center",
               justifyContent: "center", cursor: "pointer", color: "#64748b",
-              marginRight: 16,
+              marginBottom: 16,
             }}
             className="admin-mobile-menu-btn"
+            aria-label="管理メニューを開く"
           >
             <Menu size={18} />
           </button>
-          <div style={{ flex: 1 }} />
-          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            <div
-              style={{
-                display: "flex", alignItems: "center", gap: 8,
-                background: "#f1f5f9", borderRadius: 10, padding: "6px 14px",
-              }}
-            >
-              <div
-                style={{
-                  width: 28, height: 28, borderRadius: "50%",
-                  background: "linear-gradient(135deg, #6366f1, #8b5cf6)",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  color: "#fff", fontSize: 12, fontWeight: 700,
-                }}
-              >
-                {staffName.charAt(0)}
-              </div>
-              <span style={{ fontSize: 13, fontWeight: 600, color: "#334155" }}>
-                {staffName}
-              </span>
-            </div>
-            <button
-              onClick={handleLogout}
-              style={{
-                width: 36, height: 36, borderRadius: 8, border: "1px solid #e2e8f0",
-                background: "#fff", display: "flex", alignItems: "center",
-                justifyContent: "center", cursor: "pointer", color: "#94a3b8",
-                transition: "all 0.15s",
-              }}
-              title="ログアウト"
-            >
-              <LogOut size={16} />
-            </button>
-          </div>
-        </header>
-
-        {/* Page content */}
-        <main style={{ flex: 1, padding: 24 }}>
           {children}
         </main>
       </div>

@@ -107,3 +107,10 @@
 - 影響範囲: dashboard のみ。他の `getActiveLogs` 呼び出し（admin/billing, staff/mypage, admin/sales, admin/staff-analytics, admin/page, portal/page）は引数を変えていないので既定の `orderBy("timestamp", "desc")` が維持され、挙動変更なし。
 - 触らず: タグ付き返却処理、tank-operation.ts、tank-trace.ts、書き込み系。
 - 検証: npx tsc --noEmit が EXIT=0 で完了。本番再デプロイ後の最終確認はユーザー実施予定。
+
+## admin layout ヘッダー削除 / サイドバー整理 完了
+- 変更ファイル: src/app/admin/layout.tsx, progress.md
+- 内容: admin 画面の上部 sticky header を削除し、ログイン中スタッフのアバター・staffName・staffRole を desktop / mobile sidebar 上部へ移動。ログアウトボタンを sidebar 下部へ移動し、desktop collapsed 時はアイコンのみ表示にした。mobile は main content 左上の小さな menu ボタンから sidebar を開く構造に変更。
+- 外部リンク: 「現場用」「顧客ポータル」を「現場アプリ」「顧客アプリ」に変更し、アプリ切替の補助リンクとして小さめの padding / font / icon / slate 系カラーへ調整。
+- 触らず: ADMIN_NAV_GROUPS / visibleNavGroups / allowedPaths / adminOnly / staffRole 判定、AdminAuthGuard の既存ロジック、admin 各ページ本体、staff / portal 画面、Firestore 関連、tank-operation.ts、Security Rules。
+- 検証: npx tsc --noEmit が EXIT=0。npm run build は通常実行では Google Fonts 取得のネットワーク制限で失敗、ネットワーク許可付き再実行で EXIT=0（37 route 静的生成完了）。
