@@ -32,7 +32,12 @@ export interface GetActiveLogsOptions {
 function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
   const data = snap.data() as Record<string, unknown>;
   const status = (data.logStatus as LogDoc["logStatus"]) ?? "active";
+  // Firestore ドキュメントが持つ追加フィールド（originalAt, prevTankSnapshot,
+  // nextTankSnapshot, transitionAction, logNote, editedBy, voidedBy 等）を
+  // 呼び出し側で利用可能にするため、生データをスプレッドで保持したうえで
+  // LogDoc 必須フィールドを明示変換で上書きする。
   return {
+    ...(data as Partial<LogDoc>),
     id: snap.id,
     logStatus: status,
     logKind: (data.logKind as string) ?? "",

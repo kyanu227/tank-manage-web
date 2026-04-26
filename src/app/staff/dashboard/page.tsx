@@ -6,6 +6,7 @@ import {
   AlertTriangle,
   Building2,
   CheckCircle2,
+  CheckSquare,
   ChevronDown,
   ChevronUp,
   ClipboardList,
@@ -17,9 +18,9 @@ import {
   Loader2,
   PackageCheck,
   PackageX,
-  RotateCcw,
   ShieldAlert,
   ShieldCheck,
+  Square,
   Timer,
   Truck,
   Undo2,
@@ -32,6 +33,10 @@ import {
   query,
   where,
 } from "firebase/firestore";
+import {
+  logsRepository,
+  transactionsRepository,
+} from "@/lib/firebase/repositories";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
 import { getStaffName, useStaffSession } from "@/hooks/useStaffSession";
 import { useInspectionSettings } from "@/hooks/useInspectionSettings";
@@ -48,7 +53,6 @@ import {
   ACTION,
   STATUS,
   STATUS_COLORS,
-  getNextStatus,
   type TankAction,
 } from "@/lib/tank-rules";
 
@@ -86,16 +90,10 @@ interface LogEntry {
 
 interface EditForm {
   tankId: string | null;
-  transitionAction: TankAction;
-  location: string;
-  staff: string;
-  note: string;
-  logNote: string;
   reason: string;
 }
-
-const ACTION_OPTIONS = Object.values(ACTION) as TankAction[];
 const LIMIT_MS = 72 * 60 * 60 * 1000;
+const ACTION_OPTIONS = Object.values(ACTION) as TankAction[];
 
 export default function StaffDashboard() {
   const session = useStaffSession();
@@ -108,9 +106,12 @@ export default function StaffDashboard() {
   const tankIds = useMemo(() => tanks.map((t) => t.id), [tanks]);
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [customerDestinations, setCustomerDestinations] = useState<string[]>([]);
   const [pendingOrders, setPendingOrders] = useState(0);
   const [pendingReturns, setPendingReturns] = useState(0);
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [isEditMode, setIsEditMode] = useState(false);
+  const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
 
   const [editingLog, setEditingLog] = useState<LogEntry | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
@@ -120,47 +121,52 @@ export default function StaffDashboard() {
   const [voidReason, setVoidReason] = useState("");
   const [savingVoid, setSavingVoid] = useState(false);
 
+  const [bulkLocationModalOpen, setBulkLocationModalOpen] = useState(false);
+  const [bulkLocationValue, setBulkLocationValue] = useState("");
+  const [bulkLocationReason, setBulkLocationReason] = useState("");
+  const [savingBulkLocation, setSavingBulkLocation] = useState(false);
+
+  const [bulkVoidModalOpen, setBulkVoidModalOpen] = useState(false);
+  const [bulkVoidReason, setBulkVoidReason] = useState("");
+  const [savingBulkVoid, setSavingBulkVoid] = useState(false);
+
   const [expandedRootId, setExpandedRootId] = useState<string | null>(null);
   const [historyByRoot, setHistoryByRoot] = useState<Record<string, LogEntry[]>>({});
   const [historyLoadingRoot, setHistoryLoadingRoot] = useState<string | null>(null);
-  const [revertingId, setRevertingId] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setDashboardLoading(true);
     try {
-      const [logSnap, orderSnap, returnSnap] = await Promise.all([
-        getDocs(
-          query(
-            collection(db, "logs"),
-            where("logStatus", "==", "active")
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, "transactions"),
-            where("type", "==", "order"),
-            where("status", "==", "pending")
-          )
-        ),
-        getDocs(
-          query(
-            collection(db, "transactions"),
-            where("type", "==", "return"),
-            where("status", "==", "pending_approval")
-          )
-        ),
+      const [logs, orders, returns, customerSnap] = await Promise.all([
+        logsRepository.getActiveLogs(),
+        transactionsRepository.getOrders({ status: "pending" }),
+        transactionsRepository.getReturns({ status: "pending_approval" }),
+        getDocs(collection(db, "customers")),
       ]);
 
-      const entries: LogEntry[] = [];
-      logSnap.forEach((d) => entries.push({ id: d.id, ...d.data() } as LogEntry));
+      const entries = logs as unknown as LogEntry[];
       entries.sort((a, b) => {
         const aTime = timestampToMillis(a.originalAt ?? a.timestamp) ?? 0;
         const bTime = timestampToMillis(b.originalAt ?? b.timestamp) ?? 0;
         return bTime - aTime;
       });
       setLogs(entries.slice(0, 50));
-      setPendingOrders(orderSnap.size);
-      setPendingReturns(returnSnap.size);
+
+      const destinationSet = new Set<string>(["倉庫", "自社"]);
+      customerSnap.forEach((d) => {
+        const data = d.data();
+        if (data.isActive === false) return;
+        const name = String(data.name || data.companyName || "").trim();
+        if (name) destinationSet.add(name);
+      });
+      entries.forEach((entry) => {
+        const location = String(entry.location || "").trim();
+        if (location) destinationSet.add(location);
+      });
+      setCustomerDestinations(Array.from(destinationSet).sort((a, b) => a.localeCompare(b)));
+
+      setPendingOrders(orders.length);
+      setPendingReturns(returns.length);
     } catch (e) {
       console.error(e);
     } finally {
@@ -171,6 +177,10 @@ export default function StaffDashboard() {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  useEffect(() => {
+    setSelectedLogIds((prev) => prev.filter((id) => logs.some((log) => log.id === id)));
+  }, [logs]);
 
   const summary = useMemo<TankSummary>(() => {
     const counts: TankSummary = {};
@@ -253,20 +263,44 @@ export default function StaffDashboard() {
     await Promise.all([fetchData(), refetchTanks()]);
   };
 
-  const openEdit = (log: LogEntry) => {
-    const transitionAction = toTankAction(log.transitionAction ?? log.action);
-    if (!transitionAction) {
-      alert("このログの操作種別を判定できません");
-      return;
+  const selectedLogs = useMemo(
+    () => logs.filter((log) => selectedLogIds.includes(log.id)),
+    [logs, selectedLogIds]
+  );
+
+  const allSelectableLogIds = useMemo(
+    () =>
+      logs
+        .filter((log) => log.logKind === "tank" && canModifyLog(log, correctionRole))
+        .map((log) => log.id),
+    [logs, correctionRole]
+  );
+
+  const bulkLocationMode = useMemo(() => {
+    if (selectedLogs.length === 0) return null;
+    const actions = selectedLogs.map((log) => toTankAction(log.transitionAction ?? log.action));
+    if (actions.some((action) => action == null)) return null;
+    if (actions.every((action) => action === ACTION.LEND)) return "lend";
+    if (actions.every((action) => action === ACTION.IN_HOUSE_USE || action === ACTION.IN_HOUSE_USE_RETRO)) {
+      return "inhouse";
     }
+    return null;
+  }, [selectedLogs]);
+
+  const bulkLocationOptions = useMemo(() => {
+    if (bulkLocationMode === "lend") {
+      return customerDestinations.filter((location) => location !== "倉庫" && location !== "自社");
+    }
+    if (bulkLocationMode === "inhouse") {
+      return ["自社"];
+    }
+    return [];
+  }, [bulkLocationMode, customerDestinations]);
+
+  const openEdit = (log: LogEntry) => {
     setEditingLog(log);
     setEditForm({
       tankId: log.tankId,
-      transitionAction,
-      location: log.location ?? "",
-      staff: log.staff ?? "",
-      note: log.note ?? "",
-      logNote: log.logNote ?? "",
       reason: "",
     });
   };
@@ -279,11 +313,6 @@ export default function StaffDashboard() {
     try {
       const patch: LogCorrectionPatch = {
         tankId: editForm.tankId,
-        transitionAction: editForm.transitionAction,
-        location: editForm.location,
-        staff: editForm.staff,
-        note: editForm.note,
-        logNote: editForm.logNote,
       };
       await applyLogCorrection({
         targetLogId: editingLog.id,
@@ -328,6 +357,114 @@ export default function StaffDashboard() {
     }
   };
 
+  const toggleEditMode = () => {
+    setIsEditMode((prev) => {
+      const next = !prev;
+      if (!next) {
+        setSelectedLogIds([]);
+        setExpandedRootId(null);
+      }
+      return next;
+    });
+  };
+
+  const toggleLogSelection = (logId: string) => {
+    setSelectedLogIds((prev) =>
+      prev.includes(logId) ? prev.filter((id) => id !== logId) : [...prev, logId]
+    );
+  };
+
+  const selectAllLogs = () => {
+    setSelectedLogIds(allSelectableLogIds);
+  };
+
+  const clearSelectedLogs = () => {
+    setSelectedLogIds([]);
+  };
+
+  const openBulkLocationModal = () => {
+    if (bulkLocationOptions.length === 0) return;
+    setBulkLocationValue((prev) => {
+      if (prev && bulkLocationOptions.includes(prev)) return prev;
+      return bulkLocationOptions[0] ?? "";
+    });
+    setBulkLocationReason("");
+    setBulkLocationModalOpen(true);
+  };
+
+  const handleBulkLocationChange = async () => {
+    if (!bulkLocationValue || bulkLocationReason.trim().length < 5 || selectedLogs.length === 0) return;
+
+    setSavingBulkLocation(true);
+    try {
+      const failures: string[] = [];
+      for (const log of selectedLogs) {
+        try {
+          await applyLogCorrection({
+            targetLogId: log.id,
+            mode: "replace",
+            patch: { location: bulkLocationValue },
+            reason: bulkLocationReason,
+            editedBy: getStaffName(),
+            editedByRole: correctionRole,
+          });
+        } catch (e: unknown) {
+          failures.push(`${log.tankId}: ${errorMessage(e)}`);
+        }
+      }
+
+      setBulkLocationModalOpen(false);
+      setSelectedLogIds([]);
+      setExpandedRootId(null);
+      setHistoryByRoot({});
+      await refreshAfterCorrection();
+
+      if (failures.length > 0) {
+        alert(`貸出先変更は一部失敗しました。\n${failures.join("\n")}`);
+        return;
+      }
+      alert(`${selectedLogs.length}件の貸出先を更新しました。`);
+    } finally {
+      setSavingBulkLocation(false);
+    }
+  };
+
+  const handleBulkVoid = async () => {
+    if (bulkVoidReason.trim().length < 5 || selectedLogs.length === 0) return;
+
+    setSavingBulkVoid(true);
+    try {
+      const failures: string[] = [];
+      for (const log of selectedLogs) {
+        try {
+          await voidLog({
+            logId: log.id,
+            voidedBy: getStaffName(),
+            voidedByRole: correctionRole,
+            reason: bulkVoidReason,
+          });
+        } catch (e: unknown) {
+          failures.push(`${log.tankId}: ${errorMessage(e)}`);
+        }
+      }
+
+      setBulkVoidModalOpen(false);
+      setBulkVoidReason("");
+      setSelectedLogIds([]);
+      setExpandedRootId(null);
+      setHistoryByRoot({});
+      await refreshAfterCorrection();
+
+      if (failures.length > 0) {
+        alert(`一括取消は一部失敗しました。\n${failures.join("\n")}`);
+        return;
+      }
+      alert(`${selectedLogs.length}件を取り消しました。`);
+    } finally {
+      setSavingBulkVoid(false);
+    }
+  };
+
   const toggleHistory = async (log: LogEntry) => {
     const rootId = log.rootLogId ?? log.id;
     if (expandedRootId === rootId) {
@@ -353,34 +490,6 @@ export default function StaffDashboard() {
       alert("履歴取得エラー: " + errorMessage(e));
     } finally {
       setHistoryLoadingRoot(null);
-    }
-  };
-
-  const handleRevert = async (activeLog: LogEntry, sourceLog: LogEntry) => {
-    const reason = prompt(`v${sourceLog.revision ?? "-"} の状態に戻す理由を入力してください（5文字以上）`, "");
-    if (reason === null) return;
-    if (reason.trim().length < 5) {
-      alert("理由は5文字以上で入力してください");
-      return;
-    }
-
-    setRevertingId(sourceLog.id);
-    try {
-      await applyLogCorrection({
-        targetLogId: activeLog.id,
-        mode: "revert",
-        sourceLogId: sourceLog.id,
-        reason,
-        editedBy: getStaffName(),
-        editedByRole: correctionRole,
-      });
-      setHistoryByRoot({});
-      setExpandedRootId(null);
-      await refreshAfterCorrection();
-    } catch (e: unknown) {
-      alert("復元エラー: " + errorMessage(e));
-    } finally {
-      setRevertingId(null);
     }
   };
 
@@ -669,8 +778,78 @@ export default function StaffDashboard() {
                 <span style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.04em", flex: 1 }}>
                   直近 {logs.length} 件（active）
                 </span>
-                <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8" }}>権限: {correctionRole}</span>
+                <button
+                  type="button"
+                  onClick={toggleEditMode}
+                  style={{
+                    border: "1px solid #dbeafe",
+                    background: isEditMode ? "#eff6ff" : "#fff",
+                    color: "#2563eb",
+                    borderRadius: 8,
+                    padding: "7px 11px",
+                    fontSize: 11,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {isEditMode ? <CheckSquare size={13} /> : <Edit2 size={13} />}
+                  {isEditMode ? "完了" : "編集"}
+                </button>
               </div>
+
+              {isEditMode && (
+                <div
+                  style={{
+                    display: "flex",
+                    flexWrap: "wrap",
+                    gap: 8,
+                    alignItems: "center",
+                    marginBottom: 12,
+                    padding: "10px 12px",
+                    borderRadius: 10,
+                    background: "#f8fafc",
+                    border: "1px solid #e2e8f0",
+                  }}
+                >
+                  <span style={{ fontSize: 12, fontWeight: 800, color: "#334155", marginRight: 4 }}>
+                    選択 {selectedLogIds.length} 件
+                  </span>
+                  <button type="button" onClick={selectAllLogs} style={miniActionButtonStyle()}>
+                    全選択
+                  </button>
+                  <button type="button" onClick={clearSelectedLogs} style={miniActionButtonStyle()}>
+                    選択解除
+                  </button>
+                  <button
+                    type="button"
+                    onClick={openBulkLocationModal}
+                    disabled={selectedLogIds.length === 0 || bulkLocationOptions.length === 0}
+                    style={miniActionButtonStyle(selectedLogIds.length === 0 || bulkLocationOptions.length === 0)}
+                  >
+                    貸出先変更
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setBulkVoidReason("");
+                      setBulkVoidModalOpen(true);
+                    }}
+                    disabled={selectedLogIds.length === 0}
+                    style={dangerMiniButtonStyle(selectedLogIds.length === 0)}
+                  >
+                    一括取消
+                  </button>
+                  {selectedLogIds.length > 0 && bulkLocationOptions.length === 0 && (
+                    <span style={{ fontSize: 11, color: "#94a3b8" }}>
+                      貸出先変更は貸出ログまたは自社利用ログだけ選択してください
+                    </span>
+                  )}
+                </div>
+              )}
 
               {logs.length === 0 ? (
                 <p style={{ fontSize: 13, color: "#cbd5e1", textAlign: "center", padding: 20 }}>ログがありません</p>
@@ -686,8 +865,32 @@ export default function StaffDashboard() {
 
                     return (
                       <div key={log.id} style={{ border: "1px solid #eef2f7", borderRadius: 10, background: "#f8fafc", overflow: "hidden" }}>
-                        <div className="dashboard-log-row">
+                        <div className={`dashboard-log-row${isEditMode ? " dashboard-log-row--editing" : ""}`}>
+                          {isEditMode ? (
+                            <button
+                              type="button"
+                              onClick={() => toggleLogSelection(log.id)}
+                              disabled={!canModify}
+                              title={canModify ? "選択" : "期限外または対象外"}
+                              className="dashboard-log-checkbox"
+                              style={{
+                                border: "none",
+                                background: "transparent",
+                                color: canModify
+                                  ? (selectedLogIds.includes(log.id) ? "#2563eb" : "#94a3b8")
+                                  : "#cbd5e1",
+                                padding: 0,
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: canModify ? "pointer" : "not-allowed",
+                              }}
+                            >
+                              {selectedLogIds.includes(log.id) ? <CheckSquare size={16} /> : <Square size={16} />}
+                            </button>
+                          ) : null}
                           <span
+                            className="dashboard-log-id"
                             style={{
                               fontFamily: "ui-monospace, SFMono-Regular, monospace",
                               fontSize: 13,
@@ -699,6 +902,7 @@ export default function StaffDashboard() {
                             {log.tankId}
                           </span>
                           <span
+                            className="dashboard-log-action"
                             style={{
                               fontSize: 11,
                               fontWeight: 800,
@@ -711,7 +915,7 @@ export default function StaffDashboard() {
                           >
                             {log.action}
                           </span>
-                          <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
+                          <div className="dashboard-log-body" style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
                             <span
                               style={{
                                 fontSize: 12,
@@ -729,6 +933,7 @@ export default function StaffDashboard() {
                             </span>
                           </div>
                           <span
+                            className="dashboard-log-time"
                             style={{
                               fontSize: 11,
                               color: "#94a3b8",
@@ -738,9 +943,9 @@ export default function StaffDashboard() {
                           >
                             {formatTime(log.originalAt ?? log.timestamp)}
                           </span>
-                          {isTankLog ? (
-                            <div style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              <IconTextButton label="編集" icon={<Edit2 size={13} />} disabled={!canModify} onClick={() => openEdit(log)} />
+                          {isTankLog && isEditMode ? (
+                            <div className="dashboard-log-actions" style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
+                              <IconTextButton label="ID変更" icon={<Edit2 size={13} />} disabled={!canModify} onClick={() => openEdit(log)} />
                               <IconTextButton
                                 label="取消"
                                 icon={<Undo2 size={13} />}
@@ -756,14 +961,14 @@ export default function StaffDashboard() {
                                 onClick={() => toggleHistory(log)}
                               />
                             </div>
-                          ) : (
+                          ) : !isTankLog ? (
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", padding: "2px 6px", borderRadius: 4, background: "#fff", border: "1px solid #e2e8f0" }}>
                               {log.logKind || "-"}
                             </span>
-                          )}
+                          ) : null}
                         </div>
 
-                        {isExpanded && (
+                        {isEditMode && isExpanded && (
                           <div style={{ borderTop: "1px solid #e2e8f0", background: "#fff", padding: 12 }}>
                             {historyLoading ? (
                               <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#94a3b8", fontSize: 12 }}>
@@ -774,13 +979,12 @@ export default function StaffDashboard() {
                             ) : (
                               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                                 {history.map((rev) => {
-                                  const canRevert = canModify && rev.id !== log.id && rev.logKind === "tank" && rev.logStatus !== "voided";
                                   return (
                                     <div
                                       key={rev.id}
                                       style={{
                                         display: "grid",
-                                        gridTemplateColumns: "52px 1fr auto",
+                                        gridTemplateColumns: "52px 1fr",
                                         gap: 10,
                                         alignItems: "center",
                                         padding: 10,
@@ -807,27 +1011,6 @@ export default function StaffDashboard() {
                                           </div>
                                         )}
                                       </div>
-                                      <button
-                                        type="button"
-                                        onClick={() => handleRevert(log, rev)}
-                                        disabled={!canRevert || revertingId === rev.id}
-                                        style={{
-                                          border: "1px solid #dbeafe",
-                                          background: canRevert ? "#eff6ff" : "#f8fafc",
-                                          color: canRevert ? "#2563eb" : "#cbd5e1",
-                                          borderRadius: 8,
-                                          padding: "7px 10px",
-                                          fontSize: 11,
-                                          fontWeight: 800,
-                                          cursor: canRevert ? "pointer" : "not-allowed",
-                                          display: "flex",
-                                          alignItems: "center",
-                                          gap: 5,
-                                        }}
-                                      >
-                                        {revertingId === rev.id ? <Loader2 size={13} style={{ animation: "spin 1s linear infinite" }} /> : <RotateCcw size={13} />}
-                                        戻す
-                                      </button>
                                     </div>
                                   );
                                 })}
@@ -848,7 +1031,7 @@ export default function StaffDashboard() {
       {editingLog && editForm && (
         <Modal onClose={() => !savingEdit && setEditingLog(null)}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>ログ編集</h2>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>タンクID変更</h2>
             <button type="button" onClick={() => setEditingLog(null)} style={iconButtonStyle} disabled={savingEdit}>
               <X size={20} />
             </button>
@@ -862,65 +1045,9 @@ export default function StaffDashboard() {
               onChange={(tankId) => setEditForm((prev) => (prev ? { ...prev, tankId } : prev))}
               accentColor="#2563eb"
             />
-
-            <label style={labelStyle}>
-              操作種別
-              <select
-                value={editForm.transitionAction}
-                onChange={(e) =>
-                  setEditForm((prev) => (prev ? { ...prev, transitionAction: e.target.value as TankAction } : prev))
-                }
-                style={inputStyle}
-              >
-                {ACTION_OPTIONS.map((action) => (
-                  <option key={action} value={action}>
-                    {action}
-                  </option>
-                ))}
-              </select>
-            </label>
-
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "9px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0" }}>
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>算出ステータス</span>
-              <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>{getNextStatus(editForm.transitionAction)}</span>
+            <div style={{ padding: "9px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>
+              タンクIDだけを変更します。操作種別・貸出先・メモなどは変更しません。
             </div>
-
-            <label style={labelStyle}>
-              場所 / 貸出先
-              <input
-                value={editForm.location}
-                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, location: e.target.value } : prev))}
-                style={inputStyle}
-              />
-            </label>
-
-            <label style={labelStyle}>
-              スタッフ
-              <input
-                value={editForm.staff}
-                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, staff: e.target.value } : prev))}
-                style={inputStyle}
-              />
-            </label>
-
-            <label style={labelStyle}>
-              メモ
-              <textarea
-                value={editForm.note}
-                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, note: e.target.value } : prev))}
-                rows={2}
-                style={{ ...inputStyle, resize: "vertical", minHeight: 68 }}
-              />
-            </label>
-
-            <label style={labelStyle}>
-              タンクタグ
-              <input
-                value={editForm.logNote}
-                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, logNote: e.target.value } : prev))}
-                style={inputStyle}
-              />
-            </label>
 
             <label style={labelStyle}>
               編集理由
@@ -935,11 +1062,11 @@ export default function StaffDashboard() {
             <button
               type="button"
               onClick={handleSaveEdit}
-              disabled={savingEdit || !editForm.tankId || editForm.reason.trim().length < 5}
-              style={primaryButtonStyle(savingEdit || !editForm.tankId || editForm.reason.trim().length < 5)}
+              disabled={savingEdit || !editForm.tankId || editForm.tankId === editingLog.tankId || editForm.reason.trim().length < 5}
+              style={primaryButtonStyle(savingEdit || !editForm.tankId || editForm.tankId === editingLog.tankId || editForm.reason.trim().length < 5)}
             >
               {savingEdit ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={18} />}
-              {savingEdit ? "保存中..." : "保存"}
+              {savingEdit ? "保存中..." : "ID変更"}
             </button>
           </div>
         </Modal>
@@ -980,6 +1107,88 @@ export default function StaffDashboard() {
         </Modal>
       )}
 
+      {bulkLocationModalOpen && (
+        <Modal onClose={() => !savingBulkLocation && setBulkLocationModalOpen(false)}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>貸出先変更</h2>
+            <button type="button" onClick={() => setBulkLocationModalOpen(false)} style={iconButtonStyle} disabled={savingBulkLocation}>
+              <X size={20} />
+            </button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ padding: "10px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
+              選択中 {selectedLogs.length} 件の貸出先をまとめて変更します。
+            </div>
+            <label style={labelStyle}>
+              貸出先
+              <select
+                value={bulkLocationValue}
+                onChange={(e) => setBulkLocationValue(e.target.value)}
+                style={inputStyle}
+              >
+                {bulkLocationOptions.map((location) => (
+                  <option key={location} value={location}>
+                    {location}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label style={labelStyle}>
+              変更理由
+              <textarea
+                value={bulkLocationReason}
+                onChange={(e) => setBulkLocationReason(e.target.value)}
+                rows={4}
+                style={{ ...inputStyle, resize: "vertical", minHeight: 96 }}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleBulkLocationChange}
+              disabled={savingBulkLocation || !bulkLocationValue || bulkLocationReason.trim().length < 5}
+              style={primaryButtonStyle(savingBulkLocation || !bulkLocationValue || bulkLocationReason.trim().length < 5)}
+            >
+              {savingBulkLocation ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <Building2 size={18} />}
+              {savingBulkLocation ? "更新中..." : "貸出先変更"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
+      {bulkVoidModalOpen && (
+        <Modal onClose={() => !savingBulkVoid && setBulkVoidModalOpen(false)}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>一括取消</h2>
+            <button type="button" onClick={() => setBulkVoidModalOpen(false)} style={iconButtonStyle} disabled={savingBulkVoid}>
+              <X size={20} />
+            </button>
+          </div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            <div style={{ padding: "10px 12px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#991b1b", lineHeight: 1.6 }}>
+              選択中 {selectedLogs.length} 件のログを取り消します。
+            </div>
+            <label style={labelStyle}>
+              取消理由
+              <textarea
+                value={bulkVoidReason}
+                onChange={(e) => setBulkVoidReason(e.target.value)}
+                rows={4}
+                style={{ ...inputStyle, resize: "vertical", minHeight: 96 }}
+              />
+            </label>
+            <button
+              type="button"
+              onClick={handleBulkVoid}
+              disabled={savingBulkVoid || bulkVoidReason.trim().length < 5}
+              style={dangerButtonStyle(savingBulkVoid || bulkVoidReason.trim().length < 5)}
+            >
+              {savingBulkVoid ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <Undo2 size={18} />}
+              {savingBulkVoid ? "取消中..." : "一括取消"}
+            </button>
+          </div>
+        </Modal>
+      )}
+
       <style>{`
         @keyframes spin {
           from { transform: rotate(0deg); }
@@ -988,22 +1197,32 @@ export default function StaffDashboard() {
 
         .dashboard-log-row {
           display: grid;
-          grid-template-columns: auto auto 1fr auto auto;
+          grid-template-columns: auto auto 1fr auto;
           gap: 8px;
           align-items: center;
           padding: 9px 10px;
+        }
+
+        .dashboard-log-row--editing {
+          grid-template-columns: 20px auto auto 1fr auto auto;
         }
 
         @media (max-width: 720px) {
           .dashboard-log-row {
             grid-template-columns: auto auto 1fr;
           }
-          .dashboard-log-row > span:nth-child(4),
-          .dashboard-log-row > div:nth-child(5),
-          .dashboard-log-row > span:nth-child(5) {
+          .dashboard-log-row--editing {
+            grid-template-columns: 20px auto auto 1fr;
+          }
+          .dashboard-log-time,
+          .dashboard-log-actions {
             grid-column: 1 / -1;
           }
-          .dashboard-log-row > div:nth-child(5) {
+          .dashboard-log-row--editing .dashboard-log-time,
+          .dashboard-log-row--editing .dashboard-log-actions {
+            grid-column: 2 / -1;
+          }
+          .dashboard-log-actions {
             justify-content: flex-start !important;
           }
         }
@@ -1496,5 +1715,30 @@ function dangerButtonStyle(disabled: boolean): React.CSSProperties {
   return {
     ...primaryButtonStyle(disabled),
     background: disabled ? "#e2e8f0" : "#dc2626",
+  };
+}
+
+function miniActionButtonStyle(disabled = false): React.CSSProperties {
+  return {
+    border: "1px solid #dbeafe",
+    background: disabled ? "#f8fafc" : "#fff",
+    color: disabled ? "#cbd5e1" : "#2563eb",
+    borderRadius: 8,
+    padding: "7px 10px",
+    fontSize: 11,
+    fontWeight: 800,
+    cursor: disabled ? "not-allowed" : "pointer",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    whiteSpace: "nowrap",
+  };
+}
+
+function dangerMiniButtonStyle(disabled = false): React.CSSProperties {
+  return {
+    ...miniActionButtonStyle(disabled),
+    border: `1px solid ${disabled ? "#e2e8f0" : "#fecaca"}`,
+    color: disabled ? "#cbd5e1" : "#dc2626",
   };
 }

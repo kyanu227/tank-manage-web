@@ -118,6 +118,17 @@
   - `db` / `collection` / `getDocs` / `query` / `where` / `Timestamp` の直接 import を全て除去。代わりに `logsRepository` / `tanksRepository` / `transactionsRepository` / `STATUS` を import。
   - 検証: `npx tsc --noEmit` 0エラー。
 - **Phase 2-B-10**: `src/app/staff/dashboard/page.tsx` — 大きい画面、logs/transactions 複数
+  - **10a 完了**: `fetchData`（旧 L133-189）内の 3 直接クエリを repository 経由に統一した。
+    - logs: `where("logStatus","==","active")` → `logsRepository.getActiveLogs()`（`logStatus=="active"` は repository 内部で必須付与、`orderBy("timestamp","desc")` も内部で付く）。
+    - orders: `where("type","==","order")` + `where("status","==","pending")` → `transactionsRepository.getOrders({ status: "pending" })`（`type=="order"` は repository 内部で必須付与）。
+    - returns: `where("type","==","return")` + `where("status","==","pending_approval")` → `transactionsRepository.getReturns({ status: "pending_approval" })`（`type=="return"` は repository 内部で必須付与）。
+    - customers 読取（`getDocs(collection(db, "customers"))`）は Phase 2-B 全体のスコープ外コレクションのため未変更で残置。`Promise.all` の 4 並列構造（logs / orders / returns / customers）は維持。
+    - `LogDoc` → `LogEntry` 変換は呼び出し側で `as unknown as LogEntry[]` キャストで吸収（dashboard 固有の `LogEntry` を repository に持ち込まない方針、Phase 2-B-8a の `PendingReturn` と同パターン）。
+    - 並び順（`originalAt ?? timestamp` 降順）と `slice(0, 50)`、`customerDestinations` 集約（"倉庫"/"自社" + customers + entries.location）、`setPendingOrders` / `setPendingReturns` の代入は呼び出し側に残した。`.size` → `.length` のみ変更（意味等価）。
+    - `src/lib/firebase/repositories/logs.ts` の `toLogDoc` を「生データを `Partial<LogDoc>` でスプレッド + LogDoc 必須フィールドを明示変換で上書き」する形に修正。これにより Firestore ドキュメントが持つ追加フィールド（`originalAt` / `prevTankSnapshot` / `nextTankSnapshot` / `transitionAction` / `logNote` / `editedBy` / `voidedBy` / `voidReason` / `voidedAt` 等）が捨てられず、dashboard の `originalAt` ベースのソートが repository 経由でも従来通り機能する。既存呼び出し元（admin/billing, staff/mypage, admin/sales, admin/staff-analytics, admin/page）は LogDoc 宣言フィールドのみ参照しているため追加フィールドが残っても影響なし。
+    - toggleHistory（旧 L482-508 の `rootLogId==X` ロード）は **10b で別作業**として置き換える予定。`query` / `where` import は toggleHistory のために据え置き。
+    - 書き込み処理（applyLogCorrection / voidLog / handleBulkLocationChange / handleBulkVoid）には一切触らず。LogEntry 型・JSX・useMemo/useEffect 群・`useTanks` / `useInspectionSettings` / `useStaffSession` も未変更。
+    - 検証: `npx tsc --noEmit --pretty false` が EXIT=0 で完了。
 - **Phase 2-B-11**: `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` (L34) — `statusIn` 拡張が実際に必要になるタイミング
 - **Phase 2-B-12**: `src/app/admin/settings/page.tsx` (L524) — `findPendingLinksByUid()` 特殊条件、最後
 
