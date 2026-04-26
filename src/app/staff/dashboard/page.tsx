@@ -136,7 +136,10 @@ export default function StaffDashboard() {
     setDashboardLoading(true);
     try {
       const [logs, orders, returns, customerSnap] = await Promise.all([
-        logsRepository.getActiveLogs(),
+        // orderBy: null は Firestore 側で timestamp desc を付けない指定。
+        // dashboard はクライアントで originalAt ?? timestamp で再ソートするため、
+        // timestamp フィールドを持たない revision ログ等の取りこぼしを防ぐ。
+        logsRepository.getActiveLogs({ orderBy: null }),
         transactionsRepository.getOrders({ status: "pending" }),
         transactionsRepository.getReturns({ status: "pending_approval" }),
         getDocs(collection(db, "customers")),

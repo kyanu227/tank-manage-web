@@ -26,6 +26,17 @@ export interface GetActiveLogsOptions {
   to?: Date;
   limit?: number;
   location?: string;
+  /**
+   * orderBy 指定。
+   * - 未指定 or "timestamp" → `orderBy("timestamp", "desc")` を付与（既定挙動）
+   * - null → `orderBy` を付けない（timestamp フィールドを持たないログも取得対象になる）
+   *
+   * Firestore 仕様: `orderBy(field)` を指定すると、その field が存在しない
+   * ドキュメントは結果から除外される。staff/dashboard のようにクライアント側で
+   * `originalAt ?? timestamp` で再ソートする画面は、Firestore 側でソートする
+   * 必要がないため null を指定して取りこぼしを防ぐ。
+   */
+  orderBy?: "timestamp" | null;
 }
 
 /** Firestore ドキュメント → LogDoc に正規化する。 */
@@ -97,7 +108,11 @@ export async function getActiveLogs(
   if (options?.location) {
     constraints.push(where("location", "==", options.location));
   }
-  constraints.push(orderBy("timestamp", "desc"));
+  // orderBy: undefined（既定）or "timestamp" → timestamp desc で並べる
+  // orderBy: null → orderBy を付けない（timestamp 無しログの取りこぼし防止）
+  if (options?.orderBy !== null) {
+    constraints.push(orderBy("timestamp", "desc"));
+  }
   if (options?.limit !== undefined) {
     constraints.push(fsLimit(options.limit));
   }

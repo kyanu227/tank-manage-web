@@ -98,3 +98,12 @@
 - 内容: `fetchBulkTanks` の直接クエリ（`status in [LENT, UNRETURNED]`）を `tanksRepository.getTanks({ statusIn: [STATUS.LENT, STATUS.UNRETURNED] })` に置換。既存 `statusIn` 実装を利用し、新規 repository 関数追加なし。TankDoc → BulkTankWithTag は呼び出し側の `as unknown as` キャストで吸収し、tag 推定・location グルーピング・id ソート・expanded 初期化は維持。
 - メモ: `updateTag` / `handleBulkReturnForLocation` / `applyBulkTankOperations` には触らず、`getTanksByIds` も本実装していない。
 - 検証: npx tsc --noEmit が EXIT=0 で完了。
+
+## Phase 2-B-10a リグレッション修正 staff/dashboard ログ取りこぼし 完了
+- 変更ファイル: src/lib/firebase/repositories/logs.ts, src/app/staff/dashboard/page.tsx, docs/phase-2-b-verification.md
+- 症状: 本番デプロイ後、staff/dashboard のログ一覧に一部のログが表示されない（特に `originalAt` を主軸に持つ revision ログ）。
+- 原因: Phase 2-B-10a で導入した `logsRepository.getActiveLogs()` が `orderBy("timestamp", "desc")` を必須付与しており、Firestore 仕様（orderBy 指定フィールドが存在しないドキュメントは結果から除外）により、`timestamp` を持たない active ログが取得対象から漏れていた。元の dashboard コードは orderBy なし全件取得 → クライアント側で `originalAt ?? timestamp` で再ソートしていた。
+- 修正: `GetActiveLogsOptions` に `orderBy?: "timestamp" | null` を追加し、`null` 指定時のみ `orderBy` を付与しないように変更。`staff/dashboard.fetchData` の呼び出しを `getActiveLogs({ orderBy: null })` に変えて元挙動を復元。
+- 影響範囲: dashboard のみ。他の `getActiveLogs` 呼び出し（admin/billing, staff/mypage, admin/sales, admin/staff-analytics, admin/page, portal/page）は引数を変えていないので既定の `orderBy("timestamp", "desc")` が維持され、挙動変更なし。
+- 触らず: タグ付き返却処理、tank-operation.ts、tank-trace.ts、書き込み系。
+- 検証: npx tsc --noEmit が EXIT=0 で完了。本番再デプロイ後の最終確認はユーザー実施予定。

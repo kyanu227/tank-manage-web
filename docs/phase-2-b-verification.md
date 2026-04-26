@@ -4,18 +4,46 @@
 2026-04-26
 
 ## 確認画面
-- staff/dashboard:
-- staff/orders:
-- portal:
-- admin:
-- admin/billing:
-- admin/sales:
+- staff/dashboard: ⚠️ ログ取得に取りこぼし（修正済み）
+- staff/orders: 未確認
+- portal: 未確認
+- admin: 未確認
+- admin/billing: 未確認
+- admin/sales: 未確認
 
 ## 見つかった問題
-- なし / あり
+
+### 問題1: staff/dashboard のログ一覧に一部のログが表示されない
+- 症状: Phase 2-B-10a で `staff/dashboard.fetchData` が `logsRepository.getActiveLogs()` 経由になったが、本番反映後に「ダッシュボードのログ取得がうまくいっていない」報告
+- 原因: `getActiveLogs()` が `orderBy("timestamp", "desc")` を必須付与していた。Firestore 仕様上、orderBy で指定したフィールドが存在しないドキュメントは結果から除外される。元コードは orderBy なしで全件取得 → クライアント側で `originalAt ?? timestamp` で再ソートしていたため、`originalAt` だけ持って `timestamp` を持たない revision ログが Firestore 段階で消えていた。
+- 影響範囲: dashboard のみ（他の `getActiveLogs` 呼び出しは元から timestamp 必須運用なので影響なし）
+
+### 問題2: タグ付き返却（通常/未使用/未充填）の処理が怪しい可能性
+- 症状: ユーザー報告「うまくいってない可能性がある」、具体的な再現手順は未特定
+- 暫定調査: `getReturns` は `{ id, ...d.data() }` で生スプレッドし `condition` フィールドは保持。書き込みロジック（`condition` → `RETURN_TAG.UNUSED/DEFECT/NORMAL` 変換、`fulfillReturns` の処理）は Phase 2-B で触っていない（書き込みスコープ外）
+- 結論: Phase 2-B 起因の可能性は低い。**今は触らない**。具体的な症状が分かってから別件として調査
 
 ## 対応方針
--
+
+### 問題1
+- `getActiveLogs` の `orderBy` をオプション化（`orderBy?: "timestamp" | null`）
+- 既定は `"timestamp"` で挙動互換維持
+- `null` 指定時のみ orderBy を付与しない
+- `staff/dashboard.fetchData` だけ `getActiveLogs({ orderBy: null })` に変更
+- 既存挙動（全 active logs 取得 → `originalAt ?? timestamp` クライアント側ソート → `slice(0, 50)`）を完全復元
+
+修正対象:
+- `src/lib/firebase/repositories/logs.ts`（`GetActiveLogsOptions` 拡張、`orderBy` 条件分岐）
+- `src/app/staff/dashboard/page.tsx`（`getActiveLogs({ orderBy: null })` に変更）
+
+触らない:
+- 他の `getActiveLogs` 呼び出し画面（admin/billing, staff/mypage, admin/sales, admin/staff-analytics, admin/page, portal/page）
+- タグ付き返却処理
+- `tank-operation.ts` / `tank-trace.ts`
+- 書き込み系
+
+### 問題2
+- 今回は触らない。具体的な再現手順がユーザー側で特定されてから別件で調査
 
 ---
 
