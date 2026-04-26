@@ -129,6 +129,13 @@
     - toggleHistory（旧 L482-508 の `rootLogId==X` ロード）は **10b で別作業**として置き換える予定。`query` / `where` import は toggleHistory のために据え置き。
     - 書き込み処理（applyLogCorrection / voidLog / handleBulkLocationChange / handleBulkVoid）には一切触らず。LogEntry 型・JSX・useMemo/useEffect 群・`useTanks` / `useInspectionSettings` / `useStaffSession` も未変更。
     - 検証: `npx tsc --noEmit --pretty false` が EXIT=0 で完了。
+  - **10b 完了**: `toggleHistory`（L479-486）の `rootLogId==rootId` 直接クエリを `logsRepository.getLogsByRoot(rootId)` 経由に統一した。
+    - 既存条件 `where("rootLogId","==",rootId)` は repository 内部にそのまま閉じ込めて完全維持（`orderBy` / `limit` は付けない、呼び出し側で `revision` 昇順ソート）。
+    - `getLogsByRoot` は `getDocs(query(collection(db, "logs"), where("rootLogId","==",rootLogId)))` → `snap.docs.map(toLogDoc)` のシンプル本実装。`toLogDoc` は 10a で生データ保持化済みのため `revision` などの宣言フィールドも追加フィールド（`originalAt` 等）も問題なく保持される。
+    - 呼び出し側は `(await logsRepository.getLogsByRoot(rootId)) as unknown as LogEntry[]` で型を吸収（`PendingReturn` / 10a と同パターン）。`expandedRootId` の早期 return、`historyByRoot[rootId]` キャッシュ、`historyLoadingRoot` ローディング、`alert("履歴取得エラー: ...")` のエラーハンドリングは完全維持。
+    - 10a で toggleHistory のために据え置いていた `query` / `where` の `firebase/firestore` import を除去。`collection` / `getDocs` は customers 読取で必要なため残置。
+    - 書き込み処理（applyLogCorrection / voidLog / handleBulkLocationChange / handleBulkVoid）・customers 読取・useMemo/useEffect 群・JSX には一切触らず。
+    - 検証: `npx tsc --noEmit --pretty false` が EXIT=0 で完了。
 - **Phase 2-B-11**: `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` (L34) — `statusIn` 拡張が実際に必要になるタイミング
 - **Phase 2-B-12**: `src/app/admin/settings/page.tsx` (L524) — `findPendingLinksByUid()` 特殊条件、最後
 

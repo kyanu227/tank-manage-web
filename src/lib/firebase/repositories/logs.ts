@@ -134,8 +134,11 @@ export async function getLatestActiveLogForTank(
 }
 
 /** revision チェーン取得。 */
-export async function getLogsByRoot(_rootLogId: string): Promise<LogDoc[]> {
-  throw new Error("not implemented in Phase 1");
+export async function getLogsByRoot(rootLogId: string): Promise<LogDoc[]> {
+  const snap = await getDocs(
+    query(collection(db, "logs"), where("rootLogId", "==", rootLogId)),
+  );
+  return snap.docs.map(toLogDoc);
 }
 
 /** action 指定の履歴（売上集計・trace の内部用）。 */

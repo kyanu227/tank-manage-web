@@ -30,8 +30,6 @@ import {
 import {
   collection,
   getDocs,
-  query,
-  where,
 } from "firebase/firestore";
 import {
   logsRepository,
@@ -476,14 +474,7 @@ export default function StaffDashboard() {
 
     setHistoryLoadingRoot(rootId);
     try {
-      const snap = await getDocs(
-        query(
-          collection(db, "logs"),
-          where("rootLogId", "==", rootId)
-        )
-      );
-      const entries: LogEntry[] = [];
-      snap.forEach((d) => entries.push({ id: d.id, ...d.data() } as LogEntry));
+      const entries = (await logsRepository.getLogsByRoot(rootId)) as unknown as LogEntry[];
       entries.sort((a, b) => (a.revision ?? 0) - (b.revision ?? 0));
       setHistoryByRoot((prev) => ({ ...prev, [rootId]: entries }));
     } catch (e: unknown) {
