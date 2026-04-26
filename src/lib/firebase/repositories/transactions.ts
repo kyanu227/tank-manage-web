@@ -173,6 +173,25 @@ export async function getPendingTransactions(
   return list;
 }
 
+/**
+ * ポータル利用者の顧客紐付け確定時に、紐付け待ち transactions を取得する。
+ * type は横断し、createdByUid と pending_link status だけで絞り込む。
+ */
+export async function findPendingLinksByUid(uid: string): Promise<TransactionDoc[]> {
+  const snap = await getDocs(
+    query(
+      collection(db, "transactions"),
+      where("createdByUid", "==", uid),
+      where("status", "==", "pending_link"),
+    ),
+  );
+  const list: TransactionDoc[] = [];
+  snap.forEach((d) => {
+    list.push({ id: d.id, ...d.data() } as TransactionDoc);
+  });
+  return list;
+}
+
 /** type == "uncharged_report" のクエリ。 */
 export async function getUnchargedReports(
   _options?: GetUnchargedReportsOptions,

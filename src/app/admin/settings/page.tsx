@@ -7,9 +7,16 @@ import {
 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import {
-  collection, getDocs, doc, setDoc, getDoc, deleteDoc,
+  collection, getDocs, doc, setDoc, getDoc,
   serverTimestamp, writeBatch,
 } from "firebase/firestore";
+import { transactionsRepository } from "@/lib/firebase/repositories";
+import {
+  deleteStaffAuthMirrorInBatch,
+  setStaffAuthMirrorInBatch,
+  staffEmailKey,
+} from "@/lib/firebase/staff-auth";
+import { assertNotChangedSinceLoad, createDocId, hasFieldChanges, isNewDocId } from "@/lib/firebase/diff-write";
 
 /* ─── Types ─── */
 interface StaffMember {
@@ -28,8 +35,6 @@ interface Destination {
   formalName: string;
   price10: number;
   price12: number;
-  loginId: string;
-  passcode: string;
   isActive: boolean;
 }
 
@@ -43,13 +48,28 @@ interface OrderItem {
 
 interface Customer {
   id: string; // matches auth UID
-  email: string;
-  passcode: string;
-  role: string;
-  setupCompleted: boolean;
+  name?: string;
+  email?: string;
+  role?: string;
+  setupCompleted?: boolean;
   companyName?: string;
   lineName?: string;
   linkedLocation?: string; // Links to a destination ID
+  isActive?: boolean;
+}
+
+interface CustomerUser {
+  id: string;
+  uid: string;
+  email: string;
+  displayName: string;
+  selfCompanyName: string;
+  selfName: string;
+  lineName?: string;
+  customerId?: string | null;
+  customerName?: string;
+  status: "pending_setup" | "pending" | "active" | "disabled";
+  setupCompleted: boolean;
 }
 
 type TabId = "staff" | "dest" | "customer" | "order" | "portal" | "inspection";
@@ -103,16 +123,22 @@ export default function SettingsPage() {
 
   // Staff
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
+  const [dirtyStaffIds, setDirtyStaffIds] = useState<string[]>([]);
   const [showPasscodes, setShowPasscodes] = useState<Set<string>>(new Set());
 
   // Destinations
   const [destList, setDestList] = useState<Destination[]>([]);
+  const [dirtyDestIds, setDirtyDestIds] = useState<string[]>([]);
 
   // Customers (Portal Users)
   const [customerList, setCustomerList] = useState<Customer[]>([]);
+  const [customerUserList, setCustomerUserList] = useState<CustomerUser[]>([]);
+  const [dirtyCustomerUserIds, setDirtyCustomerUserIds] = useState<string[]>([]);
 
   // Order Master
   const [orderList, setOrderList] = useState<OrderItem[]>([]);
+  const [dirtyOrderIds, setDirtyOrderIds] = useState<string[]>([]);
+  const [deletedOrderIds, setDeletedOrderIds] = useState<string[]>([]);
 
   // Portal settings
   const [autoReturnHour, setAutoReturnHour] = useState<number>(17);
@@ -133,12 +159,14 @@ export default function SettingsPage() {
       const staff: StaffMember[] = [];
       staffSnap.forEach((d) => staff.push({ id: d.id, ...d.data() } as StaffMember));
       setStaffList(staff.length > 0 ? staff : []);
+      setDirtyStaffIds([]);
 
       // Destinations
       const destSnap = await getDocs(collection(db, "destinations"));
       const dests: Destination[] = [];
       destSnap.forEach((d) => dests.push({ id: d.id, ...d.data() } as Destination));
       setDestList(dests.length > 0 ? dests : []);
+      setDirtyDestIds([]);
 
       // Customers
       const custSnap = await getDocs(collection(db, "customers"));
@@ -146,11 +174,35 @@ export default function SettingsPage() {
       custSnap.forEach((c) => custs.push({ id: c.id, ...c.data() } as Customer));
       setCustomerList(custs.length > 0 ? custs : []);
 
+      // Customer users
+      const customerUserSnap = await getDocs(collection(db, "customerUsers"));
+      const customerUsers: CustomerUser[] = [];
+      customerUserSnap.forEach((u) => {
+        const data = u.data() as Partial<CustomerUser>;
+        customerUsers.push({
+          id: u.id,
+          uid: data.uid || u.id,
+          email: data.email || "",
+          displayName: data.displayName || "",
+          selfCompanyName: data.selfCompanyName || "",
+          selfName: data.selfName || "",
+          lineName: data.lineName || "",
+          customerId: data.customerId || "",
+          customerName: data.customerName || "",
+          status: data.status || "pending_setup",
+          setupCompleted: Boolean(data.setupCompleted),
+        });
+      });
+      setCustomerUserList(customerUsers);
+      setDirtyCustomerUserIds([]);
+
       // Orders
       const orderSnap = await getDocs(collection(db, "orderMaster"));
       const orders: OrderItem[] = [];
       orderSnap.forEach((d) => orders.push({ id: d.id, ...d.data() } as OrderItem));
       setOrderList(orders.length > 0 ? orders : []);
+      setDirtyOrderIds([]);
+      setDeletedOrderIds([]);
 
       // Portal settings
       const portalSnap = await getDoc(doc(db, "settings", "portal"));
@@ -189,6 +241,7 @@ export default function SettingsPage() {
   };
 
   const updateStaff = (id: string, field: keyof StaffMember, value: any) => {
+    setDirtyStaffIds((prev) => prev.includes(id) ? prev : [...prev, id]);
     setStaffList((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
   };
 
@@ -205,20 +258,60 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       const batch = writeBatch(db);
-      
-      // Delete old documents
-      const oldSnap = await getDocs(collection(db, "staff"));
-      oldSnap.forEach((d) => batch.delete(d.ref));
 
-      // Write new ones
+      const staffSnap = await getDocs(collection(db, "staff"));
+      const currentStaff = new Map(staffSnap.docs.map((d) => [d.id, d.data()]));
+      const emails = staffList.map((s) => staffEmailKey(s.email || "")).filter(Boolean);
+      if (new Set(emails).size !== emails.length) {
+        throw new Error("同じメールアドレスの担当者が重複しています。");
+      }
+
       staffList.forEach((s) => {
-        const docId = s.id.startsWith("new_") ? `staff_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` : s.id;
+        const docId = isNewDocId(s.id) ? createDocId("staff") : s.id;
         const ref = doc(db, "staff", docId);
-        batch.set(ref, {
-          name: s.name, email: s.email, passcode: s.passcode,
-          role: s.role, rank: s.rank, isActive: s.isActive,
-          updatedAt: serverTimestamp(),
-        });
+        const payload = {
+          name: s.name.trim(),
+          email: s.email.trim(),
+          passcode: s.passcode.trim(),
+          role: s.role,
+          rank: s.rank,
+          isActive: s.isActive,
+        };
+
+        if (isNewDocId(s.id)) {
+          batch.set(ref, {
+            ...payload,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          setStaffAuthMirrorInBatch(batch, docId, payload);
+          return;
+        }
+
+        const current = currentStaff.get(docId);
+        const isDirty = dirtyStaffIds.includes(s.id);
+        if (!isDirty) {
+          if (current) setStaffAuthMirrorInBatch(batch, docId, current);
+          return;
+        }
+        if (!current) {
+          throw new Error(`担当者「${s.name || docId}」は他の操作で削除されています。再読込してください。`);
+        }
+        assertNotChangedSinceLoad(s as any, current, `担当者「${s.name || docId}」`);
+
+        const oldEmail = staffEmailKey(String(current.email || ""));
+        const newEmail = staffEmailKey(payload.email);
+        if (oldEmail && oldEmail !== newEmail) {
+          deleteStaffAuthMirrorInBatch(batch, oldEmail);
+        }
+
+        if (hasFieldChanges(current, payload)) {
+          batch.update(ref, {
+            ...payload,
+            updatedAt: serverTimestamp(),
+          });
+        }
+        setStaffAuthMirrorInBatch(batch, docId, payload);
       });
       await batch.commit();
       await fetchAll();
@@ -238,13 +331,13 @@ export default function SettingsPage() {
         id: `new_${Date.now()}`,
         name: "", formalName: "",
         price10: 0, price12: 0,
-        loginId: "", passcode: "",
         isActive: true,
       },
     ]);
   };
 
   const updateDest = (id: string, field: keyof Destination, value: any) => {
+    setDirtyDestIds((prev) => prev.includes(id) ? prev : [...prev, id]);
     setDestList((prev) => prev.map((d) => (d.id === id ? { ...d, [field]: value } : d)));
   };
 
@@ -253,18 +346,42 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       const batch = writeBatch(db);
-      const oldSnap = await getDocs(collection(db, "destinations"));
-      oldSnap.forEach((d) => batch.delete(d.ref));
+      const destSnap = await getDocs(collection(db, "destinations"));
+      const currentDest = new Map(destSnap.docs.map((d) => [d.id, d.data()]));
 
       destList.forEach((d) => {
-        const docId = d.id.startsWith("new_") ? `dest_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` : d.id;
+        const docId = isNewDocId(d.id) ? createDocId("dest") : d.id;
         const ref = doc(db, "destinations", docId);
-        batch.set(ref, {
-          name: d.name, formalName: d.formalName,
-          price10: Number(d.price10), price12: Number(d.price12),
-          loginId: d.loginId || "", passcode: d.passcode || "",
-          isActive: d.isActive, updatedAt: serverTimestamp(),
-        });
+        const payload = {
+          name: d.name.trim(),
+          formalName: d.formalName.trim(),
+          price10: Number(d.price10),
+          price12: Number(d.price12),
+          isActive: d.isActive,
+        };
+
+        if (isNewDocId(d.id)) {
+          batch.set(ref, {
+            ...payload,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          return;
+        }
+
+        if (!dirtyDestIds.includes(d.id)) return;
+
+        const current = currentDest.get(docId);
+        if (!current) {
+          throw new Error(`貸出先「${d.name || docId}」は他の操作で削除されています。再読込してください。`);
+        }
+        assertNotChangedSinceLoad(d as any, current, `貸出先「${d.name || docId}」`);
+        if (hasFieldChanges(current, payload)) {
+          batch.update(ref, {
+            ...payload,
+            updatedAt: serverTimestamp(),
+          });
+        }
       });
       await batch.commit();
       await fetchAll();
@@ -285,10 +402,15 @@ export default function SettingsPage() {
   };
 
   const updateOrder = (id: string, field: keyof OrderItem, value: any) => {
+    setDirtyOrderIds((prev) => prev.includes(id) ? prev : [...prev, id]);
     setOrderList((prev) => prev.map((o) => (o.id === id ? { ...o, [field]: value } : o)));
   };
 
   const removeOrder = (id: string) => {
+    if (!isNewDocId(id)) {
+      setDeletedOrderIds((prev) => prev.includes(id) ? prev : [...prev, id]);
+    }
+    setDirtyOrderIds((prev) => prev.filter((dirtyId) => dirtyId !== id));
     setOrderList((prev) => prev.filter((o) => o.id !== id));
   };
 
@@ -297,17 +419,45 @@ export default function SettingsPage() {
     setSaving(true);
     try {
       const batch = writeBatch(db);
-      const oldSnap = await getDocs(collection(db, "orderMaster"));
-      oldSnap.forEach((d) => batch.delete(d.ref));
+      const orderSnap = await getDocs(collection(db, "orderMaster"));
+      const currentOrders = new Map(orderSnap.docs.map((d) => [d.id, d.data()]));
+
+      deletedOrderIds.forEach((id) => {
+        batch.delete(doc(db, "orderMaster", id));
+      });
 
       orderList.forEach((o) => {
-        const docId = o.id.startsWith("new_") ? `order_${Date.now()}_${Math.random().toString(36).slice(2, 6)}` : o.id;
+        const docId = isNewDocId(o.id) ? createDocId("order") : o.id;
         const ref = doc(db, "orderMaster", docId);
-        batch.set(ref, {
-          category: o.category, colA: o.colA,
-          colB: o.colB, price: Number(o.price),
-          updatedAt: serverTimestamp(),
-        });
+        const payload = {
+          category: o.category,
+          colA: String(o.colA).trim(),
+          colB: o.colB.trim(),
+          price: Number(o.price),
+        };
+
+        if (isNewDocId(o.id)) {
+          batch.set(ref, {
+            ...payload,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
+          return;
+        }
+
+        if (!dirtyOrderIds.includes(o.id)) return;
+
+        const current = currentOrders.get(docId);
+        if (!current) {
+          throw new Error(`発注品目「${o.colB || o.id}」は他の操作で削除されています。再読込してください。`);
+        }
+        assertNotChangedSinceLoad(o as any, current, `発注品目「${o.colB || o.id}」`);
+        if (hasFieldChanges(current, payload)) {
+          batch.update(ref, {
+            ...payload,
+            updatedAt: serverTimestamp(),
+          });
+        }
       });
       await batch.commit();
       await fetchAll();
@@ -319,27 +469,73 @@ export default function SettingsPage() {
     }
   };
 
-  /* ─── Customer CRUD ─── */
-  const updateCustomer = (id: string, field: keyof Customer, value: any) => {
-    setCustomerList((prev) => prev.map((c) => (c.id === id ? { ...c, [field]: value } : c)));
+  /* ─── Customer user linking ─── */
+  const getCustomerDisplayName = (customer?: Customer) => (
+    customer?.name || customer?.companyName || customer?.email || customer?.id || ""
+  );
+
+  const updateCustomerUser = (id: string, field: keyof CustomerUser, value: any) => {
+    setDirtyCustomerUserIds((prev) => prev.includes(id) ? prev : [...prev, id]);
+    setCustomerUserList((prev) => prev.map((u) => (u.id === id ? { ...u, [field]: value } : u)));
   };
 
-  const saveCustomer = async () => {
-    if (!confirm("ポータル利用者リストを保存しますか？")) return;
+  const saveCustomerUsers = async () => {
+    if (!confirm("ポータル利用者の紐付けを保存しますか？")) return;
     setSaving(true);
     try {
       const batch = writeBatch(db);
-      
-      customerList.forEach((c) => {
-        const ref = doc(db, "customers", c.id);
-        batch.update(ref, {
-          linkedLocation: c.linkedLocation || "",
-          updatedAt: serverTimestamp(),
+      const customerUserSnap = await getDocs(collection(db, "customerUsers"));
+      const currentCustomerUsers = new Map(customerUserSnap.docs.map((d) => [d.id, d.data()]));
+
+      for (const u of customerUserList) {
+        if (!dirtyCustomerUserIds.includes(u.id)) continue;
+
+        const customerId = u.customerId || "";
+        const linkedCustomer = customerList.find((c) => c.id === customerId);
+        const customerName = customerId ? getCustomerDisplayName(linkedCustomer) : "";
+        const status = u.status === "disabled"
+          ? "disabled"
+          : customerId
+            ? "active"
+            : u.setupCompleted
+              ? "pending"
+              : "pending_setup";
+        const current = currentCustomerUsers.get(u.id);
+        if (!current) {
+          throw new Error(`ポータル利用者「${u.email || u.id}」は他の操作で削除されています。再読込してください。`);
+        }
+        assertNotChangedSinceLoad(u as any, current, `ポータル利用者「${u.email || u.id}」`);
+        const payload = {
+          customerId: customerId || null,
+          customerName,
+          status,
+        };
+
+        if (hasFieldChanges(current, payload)) {
+          batch.set(doc(db, "customerUsers", u.id), {
+            ...payload,
+            updatedAt: serverTimestamp(),
+          }, { merge: true });
+        }
+
+        const previousCustomerId = current.customerId || "";
+        if (!customerId || previousCustomerId === customerId) continue;
+
+        const pendingItems = await transactionsRepository.findPendingLinksByUid(u.uid);
+        pendingItems.forEach((item) => {
+          batch.update(doc(db, "transactions", item.id), {
+            customerId,
+            customerName,
+            status: "pending_approval",
+            linkedAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+          });
         });
-      });
+      }
+
       await batch.commit();
       await fetchAll();
-      alert("ポータル利用者リストを保存しました。");
+      alert("ポータル利用者の紐付けを保存しました。");
     } catch (e: any) {
       alert("保存エラー: " + e.message);
     } finally {
@@ -558,10 +754,10 @@ export default function SettingsPage() {
                 </div>
 
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 460 }}>
                     <thead>
                       <tr style={{ borderBottom: "2px solid #e8eaed" }}>
-                        {["表示名", "10L/12L 単価", "ログインID", "パスワード", "状態"].map((h) => (
+                        {["表示名", "10L/12L 単価", "状態"].map((h) => (
                           <th key={h} style={{ padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textAlign: "left", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                             {h}
                           </th>
@@ -571,7 +767,7 @@ export default function SettingsPage() {
                     <tbody>
                       {destList.length === 0 ? (
                         <tr>
-                          <td colSpan={5} style={{ padding: 40, textAlign: "center", color: "#cbd5e1", fontSize: 14 }}>
+                          <td colSpan={3} style={{ padding: 40, textAlign: "center", color: "#cbd5e1", fontSize: 14 }}>
                             データがありません。「追加」ボタンで登録してください。
                           </td>
                         </tr>
@@ -614,38 +810,6 @@ export default function SettingsPage() {
                                 />
                               </div>
                             </td>
-                            <td style={{ padding: "10px 12px" }}>
-                              <input
-                                style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12 }}
-                                value={d.loginId || ""}
-                                placeholder="customer_id"
-                                disabled={!d.isActive}
-                                onChange={(e) => updateDest(d.id, "loginId", e.target.value)}
-                              />
-                            </td>
-                            <td style={{ padding: "10px 12px" }}>
-                              <div style={{ display: "flex", gap: 4 }}>
-                                <input
-                                  type={showPasscodes.has(d.id) ? "text" : "password"}
-                                  style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12, flex: 1 }}
-                                  value={d.passcode || ""}
-                                  placeholder="password"
-                                  disabled={!d.isActive}
-                                  onChange={(e) => updateDest(d.id, "passcode", e.target.value)}
-                                />
-                                <button
-                                  onClick={() => togglePasscode(d.id)}
-                                  style={{
-                                    border: "1px solid #e2e8f0", borderRadius: 8,
-                                    background: "#fff", padding: "0 8px",
-                                    cursor: "pointer", color: "#94a3b8",
-                                    display: "flex", alignItems: "center",
-                                  }}
-                                >
-                                  {showPasscodes.has(d.id) ? <EyeOff size={14} /> : <Eye size={14} />}
-                                </button>
-                              </div>
-                            </td>
                             <td style={{ padding: "10px 12px", textAlign: "center" }}>
                               <button
                                 onClick={() => updateDest(d.id, "isActive", !d.isActive)}
@@ -679,15 +843,15 @@ export default function SettingsPage() {
               <div>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
                   <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
-                    ※ 顧客アカウントと「貸出先」を紐付けることでデータが連動します。
+                    ※ Google登録した利用者を既存の顧客マスタに紐付けます。紐付けると未紐付けの発注も承認待ちに移動します。
                   </p>
                 </div>
 
                 <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 600 }}>
+                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
                     <thead>
                       <tr style={{ borderBottom: "2px solid #e8eaed" }}>
-                        {["登録日", "会社名/名前", "Email", "パスコード", "紐付け先 (貸出先)"].map((h) => (
+                        {["状態", "登録会社/氏名", "Google Email", "Google名", "紐付け先"].map((h) => (
                           <th key={h} style={{ padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textAlign: "left", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                             {h}
                           </th>
@@ -695,75 +859,76 @@ export default function SettingsPage() {
                       </tr>
                     </thead>
                     <tbody>
-                      {customerList.length === 0 ? (
+                      {customerUserList.length === 0 ? (
                         <tr>
                           <td colSpan={5} style={{ padding: 40, textAlign: "center", color: "#cbd5e1", fontSize: 14 }}>
-                            登録されているポータル利用者がいません。
+                            Google登録済みのポータル利用者がいません。
                           </td>
                         </tr>
                       ) : (
-                        customerList.map((c) => (
-                          <tr key={c.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                        customerUserList.map((u) => {
+                          const statusLabel =
+                            u.status === "active" ? "紐付け済"
+                              : u.status === "disabled" ? "停止中"
+                                : u.status === "pending" ? "未紐付け"
+                                  : "初期設定中";
+                          const statusColor =
+                            u.status === "active" ? "#10b981"
+                              : u.status === "disabled" ? "#ef4444"
+                                : u.status === "pending" ? "#f59e0b"
+                                  : "#94a3b8";
+                          return (
+                          <tr key={u.id} style={{ borderBottom: "1px solid #f1f5f9" }}>
                             <td style={{ padding: "10px 12px", fontSize: 12, color: "#64748b" }}>
-                              {c.setupCompleted ? "設定済" : "未設定"}
+                              <span style={{
+                                display: "inline-flex", alignItems: "center",
+                                padding: "4px 8px", borderRadius: 999,
+                                background: `${statusColor}14`, color: statusColor,
+                                fontSize: 11, fontWeight: 800,
+                              }}>
+                                {statusLabel}
+                              </span>
                             </td>
                             <td style={{ padding: "10px 12px" }}>
                               <div style={{ fontWeight: 700, color: "#1e293b", fontSize: 13 }}>
-                                {c.companyName || "未入力"}
+                                {u.selfCompanyName || "会社名未入力"}
                               </div>
                               <div style={{ fontSize: 11, color: "#94a3b8" }}>
-                                {c.lineName && `LINE: ${c.lineName}`}
+                                {u.selfName || "氏名未入力"}{u.lineName ? ` / LINE: ${u.lineName}` : ""}
                               </div>
                             </td>
-                            <td style={{ padding: "10px 12px", fontSize: 12, fontFamily: "monospace", color: c.email ? "#1e293b" : "#94a3b8" }}>
-                              {c.email || "メール未登録"}
+                            <td style={{ padding: "10px 12px", fontSize: 12, fontFamily: "monospace", color: u.email ? "#1e293b" : "#94a3b8" }}>
+                              {u.email || "メール未取得"}
                             </td>
-                            <td style={{ padding: "10px 12px" }}>
-                              <div style={{ display: "flex", gap: 4 }}>
-                                <input
-                                  type={showPasscodes.has(c.id) ? "text" : "password"}
-                                  style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12, width: 80 }}
-                                  value={c.passcode || ""}
-                                  disabled
-                                />
-                                <button
-                                  onClick={() => togglePasscode(c.id)}
-                                  style={{
-                                    border: "1px solid #e2e8f0", borderRadius: 8,
-                                    background: "#fff", padding: "0 8px",
-                                    cursor: "pointer", color: "#94a3b8",
-                                    display: "flex", alignItems: "center",
-                                  }}
-                                >
-                                  {showPasscodes.has(c.id) ? <EyeOff size={14} /> : <Eye size={14} />}
-                                </button>
-                              </div>
+                            <td style={{ padding: "10px 12px", fontSize: 12, color: "#64748b" }}>
+                              {u.displayName || "未取得"}
                             </td>
                             <td style={{ padding: "10px 12px" }}>
                               <select
                                 style={{ ...selectStyle, paddingRight: 32 }}
-                                value={c.linkedLocation || ""}
-                                onChange={(e) => updateCustomer(c.id, "linkedLocation", e.target.value)}
+                                value={u.customerId || ""}
+                                onChange={(e) => updateCustomerUser(u.id, "customerId", e.target.value)}
                               >
-                                <option value="">-- 未設定 --</option>
-                                {destList.filter(d => d.isActive).map((d) => (
-                                  <option key={d.id} value={d.id}>
-                                    {d.name}
+                                <option value="">-- 未紐付け --</option>
+                                {customerList.filter(c => c.isActive !== false).map((c) => (
+                                  <option key={c.id} value={c.id}>
+                                    {getCustomerDisplayName(c)}
                                   </option>
                                 ))}
                               </select>
                             </td>
                           </tr>
-                        ))
+                          );
+                        })
                       )}
                     </tbody>
                   </table>
                 </div>
 
                 <div style={{ marginTop: 20 }}>
-                  <button onClick={saveCustomer} disabled={saving} style={btnPrimary}>
+                  <button onClick={saveCustomerUsers} disabled={saving} style={btnPrimary}>
                     <Save size={16} />
-                    {saving ? "保存中…" : "ポータル利用者リストを保存"}
+                    {saving ? "保存中…" : "ポータル利用者の紐付けを保存"}
                   </button>
                 </div>
               </div>
