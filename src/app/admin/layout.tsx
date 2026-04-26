@@ -24,16 +24,59 @@ import {
 import AdminAuthGuard from "@/components/AdminAuthGuard";
 import { auth } from "@/lib/firebase/config";
 
-const ALL_NAV_ITEMS = [
-  { href: "/admin", label: "ダッシュボード", icon: LayoutDashboard },
-  { href: "/admin/settings", label: "設定変更", icon: Settings },
-  { href: "/admin/notifications", label: "通知設定", icon: Bell },
-  { href: "/admin/sales", label: "売上統計", icon: BarChart3 },
-  { href: "/admin/staff-analytics", label: "スタッフ実績", icon: Users },
-  { href: "/admin/money", label: "金銭・ランク", icon: Wallet },
-  { href: "/admin/billing", label: "請求書発行", icon: FileText },
-  { href: "/admin/state-diagram", label: "状態遷移図", icon: Workflow },
-  { href: "/admin/permissions", label: "ページ権限", icon: Shield, adminOnly: true },
+type AdminNavItem = {
+  href: string;
+  label: string;
+  icon: typeof LayoutDashboard;
+  adminOnly?: boolean;
+};
+
+type AdminNavGroup = {
+  label: string;
+  items: AdminNavItem[];
+};
+
+const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
+  {
+    label: "確認・分析",
+    items: [
+      { href: "/admin", label: "ダッシュボード", icon: LayoutDashboard },
+      { href: "/admin/sales", label: "売上統計", icon: BarChart3 },
+      { href: "/admin/staff-analytics", label: "スタッフ実績", icon: Users },
+    ],
+  },
+  {
+    label: "顧客・請求",
+    items: [
+      { href: "/admin/customers", label: "顧客管理", icon: Building2 },
+      { href: "/admin/billing", label: "請求書発行", icon: FileText },
+    ],
+  },
+  {
+    label: "スタッフ・権限",
+    items: [
+      { href: "/admin/permissions", label: "ページ権限", icon: Shield, adminOnly: true },
+    ],
+  },
+  {
+    label: "マスタ・料金",
+    items: [
+      { href: "/admin/money", label: "金銭・ランク", icon: Wallet },
+      { href: "/admin/settings", label: "設定変更", icon: Settings },
+    ],
+  },
+  {
+    label: "通知・外部連携",
+    items: [
+      { href: "/admin/notifications", label: "通知設定", icon: Bell },
+    ],
+  },
+  {
+    label: "開発・確認",
+    items: [
+      { href: "/admin/state-diagram", label: "状態遷移図", icon: Workflow },
+    ],
+  },
 ];
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
@@ -58,15 +101,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return pathname.startsWith(href);
   };
 
-  // Filter nav items based on permissions
-  const visibleNavItems = ALL_NAV_ITEMS.filter((item) => {
-    // adminOnly items only visible to 管理者
-    if ((item as any).adminOnly && staffRole !== "管理者") return false;
-    // 管理者 sees everything
-    if (staffRole === "管理者") return true;
-    // 準管理者 sees only allowed paths
-    return allowedPaths.includes(item.href);
-  });
+  // Filter nav items based on permissions, then drop empty groups
+  const visibleNavGroups: AdminNavGroup[] = ADMIN_NAV_GROUPS.map((group) => ({
+    label: group.label,
+    items: group.items.filter((item) => {
+      // adminOnly items only visible to 管理者
+      if (item.adminOnly && staffRole !== "管理者") return false;
+      // 管理者 sees everything
+      if (staffRole === "管理者") return true;
+      // 準管理者 sees only allowed paths
+      return allowedPaths.includes(item.href);
+    }),
+  })).filter((group) => group.items.length > 0);
 
   const handleLogout = async () => {
     if (!confirm("ログアウトしますか？")) return;
@@ -157,34 +203,52 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
         {/* Nav */}
         <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {visibleNavItems.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 12,
-                    padding: collapsed ? "10px 0" : "10px 16px",
-                    justifyContent: collapsed ? "center" : "flex-start",
-                    borderRadius: 10,
-                    textDecoration: "none",
-                    fontSize: 14,
-                    fontWeight: active ? 600 : 500,
-                    color: active ? "#6366f1" : "#64748b",
-                    background: active ? "#eef2ff" : "transparent",
-                    transition: "all 0.15s",
-                  }}
-                >
-                  <Icon size={18} style={{ flexShrink: 0 }} />
-                  {!collapsed && <span>{item.label}</span>}
-                </Link>
-              );
-            })}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {visibleNavGroups.map((group) => (
+              <div key={group.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                {!collapsed && (
+                  <div
+                    style={{
+                      padding: "4px 16px 6px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      color: "#94a3b8",
+                      letterSpacing: "0.08em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    {group.label}
+                  </div>
+                )}
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 12,
+                        padding: collapsed ? "10px 0" : "10px 16px",
+                        justifyContent: collapsed ? "center" : "flex-start",
+                        borderRadius: 10,
+                        textDecoration: "none",
+                        fontSize: 14,
+                        fontWeight: active ? 600 : 500,
+                        color: active ? "#6366f1" : "#64748b",
+                        background: active ? "#eef2ff" : "transparent",
+                        transition: "all 0.15s",
+                      }}
+                    >
+                      <Icon size={18} style={{ flexShrink: 0 }} />
+                      {!collapsed && <span>{item.label}</span>}
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         </nav>
 
@@ -315,28 +379,44 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </button>
         </div>
         <nav style={{ flex: 1, padding: "12px 8px", overflowY: "auto" }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-            {visibleNavItems.map((item) => {
-              const Icon = item.icon;
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  onClick={() => setSidebarOpen(false)}
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            {visibleNavGroups.map((group) => (
+              <div key={group.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+                <div
                   style={{
-                    display: "flex", alignItems: "center", gap: 12,
-                    padding: "10px 16px", borderRadius: 10, textDecoration: "none",
-                    fontSize: 14, fontWeight: active ? 600 : 500,
-                    color: active ? "#6366f1" : "#64748b",
-                    background: active ? "#eef2ff" : "transparent",
+                    padding: "4px 16px 6px",
+                    fontSize: 10,
+                    fontWeight: 700,
+                    color: "#94a3b8",
+                    letterSpacing: "0.08em",
+                    textTransform: "uppercase",
                   }}
                 >
-                  <Icon size={18} />
-                  <span>{item.label}</span>
-                </Link>
-              );
-            })}
+                  {group.label}
+                </div>
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const active = isActive(item.href);
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setSidebarOpen(false)}
+                      style={{
+                        display: "flex", alignItems: "center", gap: 12,
+                        padding: "10px 16px", borderRadius: 10, textDecoration: "none",
+                        fontSize: 14, fontWeight: active ? 600 : 500,
+                        color: active ? "#6366f1" : "#64748b",
+                        background: active ? "#eef2ff" : "transparent",
+                      }}
+                    >
+                      <Icon size={18} />
+                      <span>{item.label}</span>
+                    </Link>
+                  );
+                })}
+              </div>
+            ))}
           </div>
           <div style={{ marginTop: 12, borderTop: "1px solid #e8eaed", paddingTop: 12 }}>
             <div style={{ padding: "4px 16px 6px", fontSize: 10, fontWeight: 700, color: "#94a3b8", letterSpacing: "0.08em", textTransform: "uppercase" }}>

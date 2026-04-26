@@ -28,7 +28,7 @@
 |---|---|---|---|
 | 顧客ポータル | [`src/app/portal/layout.tsx`](src/app/portal/layout.tsx) | localStorage `customerSession` | 同ファイル内 |
 | スタッフ | [`src/app/staff/layout.tsx`](src/app/staff/layout.tsx) | [`StaffAuthGuard`](src/components/StaffAuthGuard.tsx) | 同ファイル `SIDE_NAV` |
-| 管理者 | [`src/app/admin/layout.tsx`](src/app/admin/layout.tsx) | [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) | 同ファイル `ALL_NAV_ITEMS` |
+| 管理者 | [`src/app/admin/layout.tsx`](src/app/admin/layout.tsx) | [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) | 同ファイル `ADMIN_NAV_GROUPS` |
 
 ---
 
@@ -162,23 +162,76 @@ OperationsTerminal
 
 ## 5. 管理者画面マップ
 
-サイドバー（`src/app/admin/layout.tsx` の `ALL_NAV_ITEMS`）:
+サイドバー（`src/app/admin/layout.tsx` の `ADMIN_NAV_GROUPS`）はカテゴリ単位で並ぶ。
+カテゴリ見出しは UI に直接出る（「設定・管理」のような大階層は挟まない）。
+group 内の visible items が 0 件のときは group ごと非表示。
+
+### 5-1. 確認・分析
+
+確認・分析カテゴリは「読むだけ」の画面群。書き込みを伴うマスタや権限とは切り離す。
+売上統計はこのカテゴリの独立ページとして扱う（マスタ・料金カテゴリには入れない）。
 
 | 画面 | URL | ファイル |
 |---|---|---|
 | ダッシュボード | `/admin` | [`src/app/admin/page.tsx`](src/app/admin/page.tsx) |
-| 設定変更 | `/admin/settings` | [`src/app/admin/settings/page.tsx`](src/app/admin/settings/page.tsx) |
-| 通知設定 | `/admin/notifications` | [`src/app/admin/notifications/page.tsx`](src/app/admin/notifications/page.tsx) |
 | 売上統計 | `/admin/sales` | [`src/app/admin/sales/page.tsx`](src/app/admin/sales/page.tsx) |
 | スタッフ実績 | `/admin/staff-analytics` | [`src/app/admin/staff-analytics/page.tsx`](src/app/admin/staff-analytics/page.tsx) |
-| 金銭・ランク | `/admin/money` | [`src/app/admin/money/page.tsx`](src/app/admin/money/page.tsx) |
-| 請求書発行 | `/admin/billing` | [`src/app/admin/billing/page.tsx`](src/app/admin/billing/page.tsx) |
-| 状態遷移図 | `/admin/state-diagram` | [`src/app/admin/state-diagram/page.tsx`](src/app/admin/state-diagram/page.tsx) |
+
+### 5-2. 顧客・請求
+
+| 画面 | URL | ファイル |
+|---|---|---|
 | 顧客管理 | `/admin/customers` | [`src/app/admin/customers/page.tsx`](src/app/admin/customers/page.tsx) |
-| ページ権限 | `/admin/permissions` | [`src/app/admin/permissions/page.tsx`](src/app/admin/permissions/page.tsx) |
+| 請求書発行 | `/admin/billing` | [`src/app/admin/billing/page.tsx`](src/app/admin/billing/page.tsx) |
+
+### 5-3. スタッフ・権限
+
+| 画面 | URL | ファイル | 表示条件 |
+|---|---|---|---|
+| ページ権限 | `/admin/permissions` | [`src/app/admin/permissions/page.tsx`](src/app/admin/permissions/page.tsx) | `adminOnly`（管理者のみ） |
+
+> `/admin/staff`（スタッフ管理ページ）は未実装のため、ナビには出していない。
+> 実装したら同カテゴリに追加する。
+
+### 5-4. マスタ・料金
+
+| 画面 | URL | ファイル |
+|---|---|---|
+| 金銭・ランク | `/admin/money` | [`src/app/admin/money/page.tsx`](src/app/admin/money/page.tsx) |
+| 設定変更 | `/admin/settings` | [`src/app/admin/settings/page.tsx`](src/app/admin/settings/page.tsx) |
+
+> `/admin/order-master`（発注品目マスタの専用ページ）は未実装のため、ナビには出していない。
+> 実装したら同カテゴリに追加する。
+
+### 5-5. 通知・外部連携
+
+| 画面 | URL | ファイル |
+|---|---|---|
+| 通知設定 | `/admin/notifications` | [`src/app/admin/notifications/page.tsx`](src/app/admin/notifications/page.tsx) |
+
+### 5-6. 開発・確認
+
+| 画面 | URL | ファイル |
+|---|---|---|
+| 状態遷移図 | `/admin/state-diagram` | [`src/app/admin/state-diagram/page.tsx`](src/app/admin/state-diagram/page.tsx) |
 
 権限制御: [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) が
 Firestore `settings/adminPermissions` を見て、ログインスタッフのロールに応じて表示可否を決める。
+- `管理者`: 全カテゴリ・全 item を表示（`adminOnly` 含む）
+- `準管理者`: `allowedPaths` に含まれる href のみ。group 内の visible items が 0 件なら group ごと非表示
+
+### 5-7. 将来構想（未実装）
+
+売上統計・スタッフ実績は現状 `logs` を直接走査しているが、
+データが膨らむ前提で次の退避経路を検討中（**現時点では実装しない**）。
+
+- 毎月 15 日などのバッチで、3 ヶ月以上前の `logs` から
+  集計に必要な軽量データだけを `monthly_stats` に保存する
+- 元の生 `logs` は GAS 経由で Spreadsheet にエクスポートして保管し、
+  Firestore 側からは間引く可能性がある
+
+今は構想止め。`monthly_stats` コレクション、GAS 連携、Spreadsheet 退避処理のいずれも
+実装しない。実装する場合は別タスクで設計から起こす。
 
 ---
 
