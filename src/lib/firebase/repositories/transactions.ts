@@ -10,7 +10,7 @@ import {
   type QueryConstraint,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
-import { normalizeOrderDoc } from "@/lib/order-types";
+import { normalizeOrderDoc, type OrderStatus } from "@/lib/order-types";
 import type {
   PendingOrder,
   RepositoryWriter,
@@ -33,7 +33,7 @@ export type TransactionPatch = Partial<Omit<TransactionDoc, "id">> & {
 
 /** 発注取得オプション */
 export interface GetOrdersOptions {
-  status?: "pending" | "pending_approval" | "approved";
+  status?: OrderStatus;
   customerId?: string;
   since?: unknown;
 }
@@ -201,7 +201,7 @@ export async function getUnchargedReports(
 
 /** 受注画面用のスナップショット購読。 */
 export function listenOrders(
-  _status: "pending" | "pending_approval" | "approved",
+  _status: OrderStatus,
   _callback: (orders: PendingOrder[]) => void,
 ): Unsubscribe {
   throw new Error("not implemented in Phase 1");

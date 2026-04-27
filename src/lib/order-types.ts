@@ -10,15 +10,36 @@ export type OrderItem = {
   quantity: number;
 };
 
+export type OrderStatus =
+  | "pending"
+  | "pending_approval"
+  | "pending_link"
+  | "approved"
+  | "completed";
+
 /** Firestore transactions(type="order") を正規化したアプリ内表現 */
 export type PendingOrder = {
   id: string;
   customerId: string;
   customerName: string;
+  status: OrderStatus;
   items: OrderItem[];
   // Firestore Timestamp（toMillis() を呼び出すため any で受ける）
   createdAt: any;
 };
+
+function normalizeOrderStatus(status: unknown): OrderStatus {
+  if (
+    status === "pending"
+    || status === "pending_approval"
+    || status === "pending_link"
+    || status === "approved"
+    || status === "completed"
+  ) {
+    return status;
+  }
+  return "pending";
+}
 
 /**
  * Firestoreの生データを PendingOrder に正規化する。
@@ -48,6 +69,7 @@ export function normalizeOrderDoc(
     id,
     customerId: String(data.customerId ?? ""),
     customerName: String(data.customerName ?? ""),
+    status: normalizeOrderStatus(data.status),
     items,
     createdAt: data.createdAt,
   };
