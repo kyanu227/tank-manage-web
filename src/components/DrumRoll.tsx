@@ -296,6 +296,7 @@ export default function DrumRoll<T extends string>({
 
   return (
     <div
+      data-swipe-ignore="true"
       style={{
         width,
         height: "100%",

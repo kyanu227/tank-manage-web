@@ -2,8 +2,11 @@
 
 import { useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { MODES } from "../constants";
-import type { OpMode } from "../types";
+import {
+  MAINTENANCE_MODES,
+  MAINTENANCE_ROUTE_BY_MODE,
+  type MaintenanceMode,
+} from "@/features/maintenance/constants";
 import {
   STAFF_SECTION_SWIPE_COMMIT_DISTANCE_PX,
   dispatchStaffSectionSwipeEnd,
@@ -11,7 +14,7 @@ import {
   shouldIgnoreSwipeStart,
 } from "@/components/staff-section-tabs-events";
 
-export function useOperationSwipe(mode: OpMode) {
+export function useMaintenanceSwipe(mode: MaintenanceMode) {
   const router = useRouter();
   const swipeRef = useRef<{
     startX: number;
@@ -47,10 +50,10 @@ export function useOperationSwipe(mode: OpMode) {
         swipe.horizontalSwipeStarted = true;
       }
 
-      const idx = MODES.indexOf(mode);
-      const offsetTabs = Math.max(-1, Math.min(1, -dx / (window.innerWidth / MODES.length)));
+      const idx = MAINTENANCE_MODES.indexOf(mode);
+      const offsetTabs = Math.max(-1, Math.min(1, -dx / (window.innerWidth / MAINTENANCE_MODES.length)));
       dispatchStaffSectionSwipeProgress({
-        key: "operations",
+        key: "maintenance",
         baseIndex: idx,
         offsetTabs,
       });
@@ -67,21 +70,21 @@ export function useOperationSwipe(mode: OpMode) {
       swipeRef.current = null;
 
       if (!swipe.horizontalSwipeStarted || Math.abs(dx) < STAFF_SECTION_SWIPE_COMMIT_DISTANCE_PX || Math.abs(dx) < Math.abs(dy)) {
-        dispatchStaffSectionSwipeEnd({ key: "operations", committed: false });
+        dispatchStaffSectionSwipeEnd({ key: "maintenance", committed: false });
         return;
       }
 
-      const idx = MODES.indexOf(mode);
-      const next = dx < 0
-        ? MODES[(idx + 1) % MODES.length]
-        : MODES[(idx - 1 + MODES.length) % MODES.length];
+      const idx = MAINTENANCE_MODES.indexOf(mode);
+      const nextMode = dx < 0
+        ? MAINTENANCE_MODES[(idx + 1) % MAINTENANCE_MODES.length]
+        : MAINTENANCE_MODES[(idx - 1 + MAINTENANCE_MODES.length) % MAINTENANCE_MODES.length];
 
       dispatchStaffSectionSwipeEnd({
-        key: "operations",
+        key: "maintenance",
         committed: true,
-        settledIndex: MODES.indexOf(next),
+        settledIndex: MAINTENANCE_MODES.indexOf(nextMode),
       });
-      router.replace(`/staff/${next}`);
+      router.replace(MAINTENANCE_ROUTE_BY_MODE[nextMode]);
     };
 
     const onTouchCancel = () => {
@@ -90,7 +93,7 @@ export function useOperationSwipe(mode: OpMode) {
         return;
       }
       swipeRef.current = null;
-      dispatchStaffSectionSwipeEnd({ key: "operations", committed: false });
+      dispatchStaffSectionSwipeEnd({ key: "maintenance", committed: false });
     };
 
     document.addEventListener("touchstart", onTouchStart, { passive: true });

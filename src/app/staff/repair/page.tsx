@@ -5,6 +5,7 @@ import { Wrench, CheckCircle2, Send, Loader2, Sparkles, AlertTriangle } from "lu
 import { STATUS, ACTION } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
+import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
 import { getStaffName } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
@@ -17,6 +18,7 @@ const ACCENT_BG = "#f0f9ff";
  * - 破損/不良ステータスのタンクを選択して「空」に戻す
  */
 export default function RepairPage() {
+  useMaintenanceSwipe("repair");
   const { tanks: allTanks, loading, refetch } = useTanks();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);

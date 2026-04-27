@@ -5,6 +5,7 @@ import { ShieldCheck, CheckCircle2, Send, Loader2, Sparkles, AlertTriangle } fro
 import { STATUS, ACTION } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
+import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
 import { getStaffName } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import { useInspectionSettings } from "@/hooks/useInspectionSettings";
@@ -44,6 +45,7 @@ function formatDateYMD(d: Date): string {
  * - 選択して検査完了処理（ステータス空化 + nextMaintenanceDate を N年後に更新）
  */
 export default function InspectionPage() {
+  useMaintenanceSwipe("inspection");
   const { tanks: allTanks, loading: tanksLoading, refetch } = useTanks();
   const { settings, loading: settingsLoading } = useInspectionSettings();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());

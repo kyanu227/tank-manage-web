@@ -6,12 +6,14 @@ import { ACTION } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import TankIdInput from "@/components/TankIdInput";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
+import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
 import { getStaffName } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
 const ACCENT = "#ef4444";
 
 export default function DamageReportPage() {
+  useMaintenanceSwipe("damage");
   const { prefixes } = useTanks();
   const [activePrefix, setActivePrefix] = useState<string | null>(null);
   const [numberValue, setNumberValue] = useState("");
