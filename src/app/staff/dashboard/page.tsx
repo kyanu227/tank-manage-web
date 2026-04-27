@@ -135,12 +135,16 @@ export default function StaffDashboard() {
   const fetchData = useCallback(async () => {
     setDashboardLoading(true);
     try {
-      const [logs, orders, returns, customerSnap] = await Promise.all([
+      const [logs, ordersByStatus, returns, customerSnap] = await Promise.all([
         // orderBy: null は Firestore 側で timestamp desc を付けない指定。
         // dashboard はクライアントで originalAt ?? timestamp で再ソートするため、
         // timestamp フィールドを持たない revision ログ等の取りこぼしを防ぐ。
         logsRepository.getActiveLogs({ orderBy: null }),
-        transactionsRepository.getOrders({ status: "pending" }),
+        Promise.all(
+          (["pending", "pending_approval", "pending_link"] as const).map((status) =>
+            transactionsRepository.getOrders({ status })
+          )
+        ),
         transactionsRepository.getReturns({ status: "pending_approval" }),
         getDocs(collection(db, "customers")),
       ]);
@@ -166,7 +170,7 @@ export default function StaffDashboard() {
       });
       setCustomerDestinations(Array.from(destinationSet).sort((a, b) => a.localeCompare(b)));
 
-      setPendingOrders(orders.length);
+      setPendingOrders(ordersByStatus.flat().length);
       setPendingReturns(returns.length);
     } catch (e) {
       console.error(e);
