@@ -17,6 +17,10 @@ export type OrderStatus =
   | "approved"
   | "completed";
 
+type TimestampLike = {
+  toMillis: () => number;
+};
+
 /** Firestore transactions(type="order") を正規化したアプリ内表現 */
 export type PendingOrder = {
   id: string;
@@ -24,8 +28,13 @@ export type PendingOrder = {
   customerName: string;
   status: OrderStatus;
   items: OrderItem[];
-  // Firestore Timestamp（toMillis() を呼び出すため any で受ける）
-  createdAt: any;
+  deliveryType?: "pickup" | "delivery";
+  deliveryTargetName?: string;
+  deliveryNote?: string;
+  note?: string;
+  createdByUid?: string;
+  // Firestore Timestamp（UI側で toMillis() を呼び出す）
+  createdAt: TimestampLike | undefined;
 };
 
 function normalizeOrderStatus(status: unknown): OrderStatus {
@@ -53,10 +62,15 @@ export function normalizeOrderDoc(
 ): PendingOrder {
   const items: OrderItem[] =
     Array.isArray(data.items) && data.items.length > 0
-      ? data.items.map((item: any) => ({
-          tankType: String(item?.tankType ?? ""),
-          quantity: Number(item?.quantity) || 0,
-        }))
+      ? data.items.map((item: unknown) => {
+          const itemRecord = item && typeof item === "object"
+            ? item as Record<string, unknown>
+            : {};
+          return {
+            tankType: String(itemRecord.tankType ?? ""),
+            quantity: Number(itemRecord.quantity) || 0,
+          };
+        })
       : [
           {
             // 旧スキーマ互換: tankType/quantity スカラーを items 配列に変換
@@ -68,9 +82,14 @@ export function normalizeOrderDoc(
   return {
     id,
     customerId: String(data.customerId ?? ""),
-    customerName: String(data.customerName ?? ""),
+    customerName: String(data.customerName ?? data.customerNameInput ?? ""),
     status: normalizeOrderStatus(data.status),
     items,
+    deliveryType: data.deliveryType === "delivery" || data.deliveryRequired === true ? "delivery" : "pickup",
+    deliveryTargetName: String(data.deliveryTargetName ?? data.deliveryPlaceName ?? ""),
+    deliveryNote: String(data.deliveryNote ?? ""),
+    note: String(data.note ?? data.orderNote ?? data.deliveryNote ?? ""),
+    createdByUid: String(data.createdByUid ?? ""),
     createdAt: data.createdAt,
   };
 }
