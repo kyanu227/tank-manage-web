@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, Loader2, X } from "lucide-react";
+import { ArrowLeft, CheckCircle2, Loader2, Store, Truck, X } from "lucide-react";
 import DrumRoll from "@/components/DrumRoll";
 import { totalOrderQuantity, type PendingOrder } from "@/lib/order-types";
 import type { UseOrderFulfillmentResult } from "../hooks/useOrderFulfillment";
@@ -57,6 +57,8 @@ export default function OrderFulfillmentScreen({
   const headerBadgeText = isSingleType
     ? `${selectedOrder.items[0].tankType} × ${selectedOrder.items[0].quantity}本`
     : `${selectedOrder.items.length}種・合計${requiredQty}本`;
+  const isDelivery = selectedOrder.deliveryType === "delivery";
+  const memo = selectedOrder.note || selectedOrder.deliveryNote;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "#f8fafc" }}>
@@ -82,6 +84,18 @@ export default function OrderFulfillmentScreen({
           <span style={{ fontSize: 24, fontWeight: 900, color: isReady ? "#10b981" : "#3b82f6", lineHeight: 1 }}>{orderValidCount}</span>
           <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>/ {requiredQty}</span>
         </div>
+      </div>
+
+      <div style={{ padding: "8px 16px", background: isDelivery ? "#f0f9ff" : "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+        <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 900, color: isDelivery ? "#0369a1" : "#475569" }}>
+          {isDelivery ? <Truck size={14} /> : <Store size={14} />}
+          {isDelivery ? `配達: ${selectedOrder.deliveryTargetName || "配達先未入力"}` : "引き取り"}
+        </span>
+        {memo && (
+          <span style={{ fontSize: 12, fontWeight: 600, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            メモ: {memo}
+          </span>
+        )}
       </div>
 
       {/* 種別別進捗（複数種別時のみ表示・コンパクト） */}
