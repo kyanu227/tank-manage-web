@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Building2, Plus, Save, Search, X } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { Building2, Plus, Save, Search, X, RefreshCw, ToggleLeft, ToggleRight } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { addDoc, collection, doc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
 
@@ -43,7 +42,26 @@ const emptyCustomerForm: CustomerForm = {
   isActive: true,
 };
 
-const inputClass = "w-full px-3 py-2 bg-white border border-slate-200 rounded-lg text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all disabled:bg-slate-100";
+const inputStyle: React.CSSProperties = {
+  width: "100%", padding: "8px 12px", fontSize: 13, fontWeight: 500,
+  border: "1px solid #e2e8f0", borderRadius: 8, outline: "none",
+  background: "#fff", color: "#1e293b", transition: "border-color 0.15s",
+};
+
+const btnPrimary: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 8,
+  padding: "10px 20px", borderRadius: 10, border: "none",
+  background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 700,
+  cursor: "pointer", transition: "all 0.15s",
+};
+
+const btnOutline: React.CSSProperties = {
+  display: "inline-flex", alignItems: "center", gap: 6,
+  padding: "8px 14px", borderRadius: 8,
+  border: "1px solid #e2e8f0", background: "#fff",
+  color: "#64748b", fontSize: 13, fontWeight: 600,
+  cursor: "pointer", transition: "all 0.15s",
+};
 
 const toNumber = (value: unknown) => {
   const n = Number(value);
@@ -95,7 +113,6 @@ const buildCustomerPayload = (customer: Customer) => {
 };
 
 export default function CustomerManagementPage() {
-  const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [dirtyCustomerIds, setDirtyCustomerIds] = useState<string[]>([]);
   const [savingCustomerIds, setSavingCustomerIds] = useState<string[]>([]);
@@ -271,276 +288,350 @@ export default function CustomerManagementPage() {
   });
 
   return (
-    <div className="min-h-screen bg-slate-50 flex flex-col">
-      <header className="bg-white border-b border-slate-200 sticky top-0 z-10">
-        <div className="max-w-7xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => router.push("/admin")}
-              className="w-10 h-10 flex items-center justify-center text-slate-500 hover:bg-slate-100 rounded-full transition-colors shrink-0"
-            >
-              <ArrowLeft size={20} />
-            </button>
-            <h1 className="text-xl font-bold text-slate-800">貸出先管理（顧客マスター）</h1>
-          </div>
-          <button
-            onClick={openNewCustomerModal}
-            className="flex items-center gap-2 bg-slate-900 hover:bg-slate-800 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors shadow-sm"
-          >
-            <Plus size={16} />
-            新規登録
+    <div>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", display: "inline-flex", alignItems: "center", gap: 10 }}>
+            <Building2 size={22} /> 貸出先管理
+          </h1>
+          <p style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>
+            貸出先（顧客マスター）の登録・単価・有効/無効を管理します
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={fetchCustomers} disabled={loading} style={btnOutline}>
+            <RefreshCw size={14} style={{ animation: loading ? "spin 1s linear infinite" : undefined }} />
+            再読込
+          </button>
+          <button onClick={openNewCustomerModal} style={btnPrimary}>
+            <Plus size={16} /> 新規登録
           </button>
         </div>
-      </header>
+      </div>
 
-      <main className="flex-1 max-w-7xl mx-auto w-full px-4 py-8">
-        <div className="bg-white p-4 rounded-xl border border-slate-200 shadow-sm mb-6 flex gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={18} />
-            <input
-              type="text"
-              placeholder="貸出先名・会社名・正式名称で検索..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
-            />
+      {/* Search */}
+      <div
+        style={{
+          background: "#fff", border: "1px solid #e8eaed",
+          borderRadius: 12, padding: 12, marginBottom: 16,
+          display: "flex", alignItems: "center", gap: 8,
+        }}
+      >
+        <Search size={16} color="#94a3b8" style={{ marginLeft: 4 }} />
+        <input
+          type="text"
+          placeholder="貸出先名・会社名・正式名称で検索..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
+          style={{
+            flex: 1, padding: "6px 8px", fontSize: 13, fontWeight: 500,
+            border: "none", outline: "none", background: "transparent",
+            color: "#1e293b",
+          }}
+        />
+      </div>
+
+      {/* Table card */}
+      <div
+        style={{
+          background: "#fff", border: "1px solid #e8eaed",
+          borderRadius: 16, padding: 24, minHeight: 300,
+        }}
+      >
+        {loading ? (
+          <div style={{ textAlign: "center", padding: 60, color: "#94a3b8" }}>
+            <RefreshCw size={24} style={{ animation: "spin 1s linear infinite", marginBottom: 12 }} />
+            <p style={{ fontSize: 14, fontWeight: 600 }}>データを読み込み中…</p>
           </div>
-        </div>
+        ) : (
+          <>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
+                ※「停止」にすると選択肢から消えます。各行の「保存」ボタンで個別に保存します。
+              </p>
+            </div>
 
-        <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
-          {loading ? (
-            <div className="p-12 text-center text-slate-500 flex flex-col items-center">
-              <div className="w-8 h-8 border-4 border-slate-200 border-t-slate-500 rounded-full animate-spin mb-4" />
-              <p className="text-sm font-medium">データを読み込み中...</p>
-            </div>
-          ) : filteredCustomers.length === 0 ? (
-            <div className="p-12 text-center text-slate-500">
-              <Building2 size={48} className="mx-auto text-slate-300 mb-4" />
-              <p className="text-lg font-bold text-slate-700 mb-1">顧客データがありません</p>
-              <p className="text-sm">右上の「新規登録」ボタンから店舗を追加してください。</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse min-w-[1120px]">
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 980 }}>
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200 text-xs uppercase tracking-wider text-slate-500 font-bold">
-                    <th className="px-4 py-3 w-[190px]">貸出先名 *</th>
-                    <th className="px-4 py-3 w-[190px]">会社名</th>
-                    <th className="px-4 py-3 w-[210px]">正式名称</th>
-                    <th className="px-4 py-3 w-[220px]">単価</th>
-                    <th className="px-4 py-3 w-[110px]">状態</th>
-                    <th className="px-4 py-3 w-[150px] text-right">操作</th>
+                  <tr style={{ borderBottom: "2px solid #e8eaed" }}>
+                    {["貸出先名", "会社名", "正式名称", "単価 (10L / 12L / アルミ)", "状態", "操作"].map((h) => (
+                      <th key={h} style={{ padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textAlign: "left", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                        {h}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredCustomers.map((customer) => {
-                    const dirty = dirtyCustomerIds.includes(customer.id);
-                    const saving = savingCustomerIds.includes(customer.id);
-                    return (
-                      <tr key={customer.id} className="hover:bg-slate-50/50 transition-colors align-top">
-                        <td className="px-4 py-3">
-                          <input
-                            value={customer.name}
-                            required
-                            placeholder="例: 〇〇ダイビング"
-                            onChange={(e) => updateCustomer(customer.id, "name", e.target.value)}
-                            className={inputClass}
-                          />
-                          <p className="text-[11px] text-slate-400 font-mono mt-1">ID: {customer.id.slice(0, 8)}...</p>
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            value={customer.companyName}
-                            placeholder="会社名"
-                            onChange={(e) => updateCustomer(customer.id, "companyName", e.target.value)}
-                            className={inputClass}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <input
-                            value={customer.formalName}
-                            placeholder="請求書用の正式名称"
-                            onChange={(e) => updateCustomer(customer.id, "formalName", e.target.value)}
-                            className={inputClass}
-                          />
-                        </td>
-                        <td className="px-4 py-3">
-                          <div className="grid grid-cols-3 gap-2">
-                            <label className="block">
-                              <span className="block text-[11px] font-bold text-slate-400 mb-1">10L</span>
+                <tbody>
+                  {filteredCustomers.length === 0 ? (
+                    <tr>
+                      <td colSpan={6} style={{ padding: 40, textAlign: "center", color: "#cbd5e1", fontSize: 14 }}>
+                        {customers.length === 0
+                          ? "データがありません。「新規登録」ボタンで追加してください。"
+                          : "該当する貸出先がありません。"}
+                      </td>
+                    </tr>
+                  ) : (
+                    filteredCustomers.map((customer) => {
+                      const dirty = dirtyCustomerIds.includes(customer.id);
+                      const saving = savingCustomerIds.includes(customer.id);
+                      return (
+                        <tr
+                          key={customer.id}
+                          style={{
+                            borderBottom: "1px solid #f1f5f9",
+                            opacity: customer.isActive ? 1 : 0.5,
+                            background: customer.isActive ? undefined : "#fafafa",
+                            transition: "opacity 0.15s",
+                          }}
+                        >
+                          <td style={{ padding: "10px 12px" }}>
+                            <input
+                              style={{ ...inputStyle, fontWeight: 700 }}
+                              value={customer.name}
+                              placeholder="例: 〇〇ダイビング"
+                              onChange={(e) => updateCustomer(customer.id, "name", e.target.value)}
+                            />
+                            <p style={{ fontSize: 10, color: "#cbd5e1", fontFamily: "monospace", marginTop: 4 }}>
+                              ID: {customer.id.slice(0, 8)}...
+                            </p>
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <input
+                              style={inputStyle}
+                              value={customer.companyName}
+                              placeholder="会社名"
+                              onChange={(e) => updateCustomer(customer.id, "companyName", e.target.value)}
+                            />
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <input
+                              style={inputStyle}
+                              value={customer.formalName}
+                              placeholder="請求書用の正式名称"
+                              onChange={(e) => updateCustomer(customer.id, "formalName", e.target.value)}
+                            />
+                          </td>
+                          <td style={{ padding: "10px 12px" }}>
+                            <div style={{ display: "flex", gap: 6 }}>
                               <input
                                 type="number"
+                                style={{ ...inputStyle, textAlign: "right" as const, fontFamily: "monospace", width: 80 }}
                                 value={customer.price10}
+                                placeholder="10L"
                                 onChange={(e) => updateCustomer(customer.id, "price10", toNumber(e.target.value))}
-                                className={`${inputClass} text-right font-mono`}
                               />
-                            </label>
-                            <label className="block">
-                              <span className="block text-[11px] font-bold text-slate-400 mb-1">12L</span>
                               <input
                                 type="number"
+                                style={{ ...inputStyle, textAlign: "right" as const, fontFamily: "monospace", width: 80 }}
                                 value={customer.price12}
+                                placeholder="12L"
                                 onChange={(e) => updateCustomer(customer.id, "price12", toNumber(e.target.value))}
-                                className={`${inputClass} text-right font-mono`}
                               />
-                            </label>
-                            <label className="block">
-                              <span className="block text-[11px] font-bold text-slate-400 mb-1">アルミ</span>
                               <input
                                 type="number"
+                                style={{ ...inputStyle, textAlign: "right" as const, fontFamily: "monospace", width: 80 }}
                                 value={customer.priceAluminum}
+                                placeholder="アルミ"
                                 onChange={(e) => updateCustomer(customer.id, "priceAluminum", toNumber(e.target.value))}
-                                className={`${inputClass} text-right font-mono`}
                               />
-                            </label>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3">
-                          <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold ${
-                            customer.isActive
-                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                              : "bg-slate-100 text-slate-500 border border-slate-200"
-                          }`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${customer.isActive ? "bg-emerald-500" : "bg-slate-400"}`} />
-                            {customer.isActive ? "有効" : "無効"}
-                          </span>
-                        </td>
-                        <td className="px-4 py-3 text-right">
-                          <div className="flex justify-end gap-2">
+                            </div>
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "center" }}>
                             <button
                               onClick={() => toggleCustomerStatus(customer)}
-                              className="text-xs font-semibold px-3 py-2 rounded-md border border-slate-200 hover:bg-slate-100 text-slate-600 transition-colors"
+                              style={{
+                                border: "none", background: "none",
+                                cursor: "pointer", padding: 4,
+                                color: customer.isActive ? "#10b981" : "#cbd5e1",
+                                transition: "color 0.15s",
+                              }}
+                              title={customer.isActive ? "停止する" : "有効化する"}
                             >
-                              {customer.isActive ? "無効化" : "有効化"}
+                              {customer.isActive ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
                             </button>
+                          </td>
+                          <td style={{ padding: "10px 12px", textAlign: "right" }}>
                             <button
                               onClick={() => saveCustomer(customer)}
                               disabled={!dirty || saving || !customer.name.trim()}
-                              className="inline-flex items-center gap-1.5 text-xs font-bold px-3 py-2 rounded-md bg-slate-900 hover:bg-slate-800 text-white transition-colors disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
+                              style={{
+                                ...btnOutline,
+                                color: dirty ? "#6366f1" : "#cbd5e1",
+                                borderColor: dirty ? "#c7d2fe" : "#e2e8f0",
+                                cursor: (!dirty || saving || !customer.name.trim()) ? "not-allowed" : "pointer",
+                              }}
                             >
                               <Save size={13} />
                               {saving ? "保存中" : dirty ? "保存" : "保存済"}
                             </button>
-                          </div>
-                        </td>
-                      </tr>
-                    );
-                  })}
+                          </td>
+                        </tr>
+                      );
+                    })
+                  )}
                 </tbody>
               </table>
             </div>
-          )}
-        </div>
-      </main>
+          </>
+        )}
+      </div>
 
+      {/* New customer modal */}
       {isModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-2xl shadow-xl w-full max-w-2xl overflow-hidden animate-fade-in-up">
-            <div className="px-6 py-4 border-b border-slate-100 flex justify-between items-center">
-              <h2 className="text-lg font-bold text-slate-800">貸出先の登録</h2>
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 50,
+            background: "rgba(15, 23, 42, 0.4)",
+            backdropFilter: "blur(4px)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            padding: 16,
+          }}
+        >
+          <div
+            style={{
+              background: "#fff", borderRadius: 20, width: "100%", maxWidth: 640,
+              boxShadow: "0 20px 40px rgba(0,0,0,0.18)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                padding: "16px 24px", borderBottom: "1px solid #f1f5f9",
+                display: "flex", justifyContent: "space-between", alignItems: "center",
+              }}
+            >
+              <h2 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a" }}>貸出先の登録</h2>
               <button
                 onClick={closeNewCustomerModal}
-                className="w-8 h-8 flex items-center justify-center text-slate-400 hover:bg-slate-100 rounded-full transition-colors"
+                style={{
+                  width: 32, height: 32, borderRadius: 8, border: "none",
+                  background: "#f1f5f9", color: "#64748b",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  cursor: "pointer",
+                }}
               >
-                <X size={20} />
+                <X size={16} />
               </button>
             </div>
 
-            <form onSubmit={handleAddCustomer} className="p-6">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <form onSubmit={handleAddCustomer} style={{ padding: 24 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">貸出先名 *</label>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+                    貸出先名 *
+                  </label>
                   <input
                     type="text"
                     required
                     value={newCustomer.name}
                     onChange={(e) => updateNewCustomer("name", e.target.value)}
                     placeholder="例: 〇〇ダイビング"
-                    className={inputClass}
+                    style={inputStyle}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">会社名</label>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+                    会社名
+                  </label>
                   <input
                     type="text"
                     value={newCustomer.companyName}
                     onChange={(e) => updateNewCustomer("companyName", e.target.value)}
                     placeholder="未入力なら貸出先名と同じ"
-                    className={inputClass}
+                    style={inputStyle}
                   />
                 </div>
-                <div className="md:col-span-2">
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">正式名称</label>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+                    正式名称
+                  </label>
                   <input
                     type="text"
                     value={newCustomer.formalName}
                     onChange={(e) => updateNewCustomer("formalName", e.target.value)}
                     placeholder="請求書・正式表示用"
-                    className={inputClass}
+                    style={inputStyle}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">10L 単価</label>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+                    10L 単価
+                  </label>
                   <input
                     type="number"
                     value={newCustomer.price10}
                     onChange={(e) => updateNewCustomer("price10", e.target.value)}
-                    className={`${inputClass} text-right font-mono`}
+                    style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace" }}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">12L 単価</label>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+                    12L 単価
+                  </label>
                   <input
                     type="number"
                     value={newCustomer.price12}
                     onChange={(e) => updateNewCustomer("price12", e.target.value)}
-                    className={`${inputClass} text-right font-mono`}
+                    style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace" }}
                   />
                 </div>
                 <div>
-                  <label className="block text-sm font-bold text-slate-700 mb-1.5">アルミ 単価</label>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+                    アルミ 単価
+                  </label>
                   <input
                     type="number"
                     value={newCustomer.priceAluminum}
                     onChange={(e) => updateNewCustomer("priceAluminum", e.target.value)}
-                    className={`${inputClass} text-right font-mono`}
+                    style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace" }}
                   />
                 </div>
-                <label className="flex items-center gap-2 pt-7 text-sm font-bold text-slate-700">
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 600, color: "#475569", paddingTop: 22 }}>
                   <input
                     type="checkbox"
                     checked={newCustomer.isActive}
                     onChange={(e) => updateNewCustomer("isActive", e.target.checked)}
-                    className="h-4 w-4 rounded border-slate-300"
+                    style={{ width: 16, height: 16 }}
                   />
                   有効にする
                 </label>
               </div>
 
-              <div className="mt-8 flex gap-3">
+              <div style={{ marginTop: 24, display: "flex", gap: 12 }}>
                 <button
                   type="button"
                   onClick={closeNewCustomerModal}
-                  className="flex-1 px-4 py-2.5 rounded-xl border border-slate-200 text-slate-600 font-bold hover:bg-slate-50 transition-colors"
+                  style={{ ...btnOutline, flex: 1, justifyContent: "center", padding: "10px 16px" }}
                 >
                   キャンセル
                 </button>
                 <button
                   type="submit"
                   disabled={isSubmitting || !newCustomer.name.trim()}
-                  className="flex-1 px-4 py-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white font-bold transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+                  style={{
+                    ...btnPrimary, flex: 1, justifyContent: "center",
+                    background: (isSubmitting || !newCustomer.name.trim()) ? "#c7d2fe" : "#6366f1",
+                    cursor: (isSubmitting || !newCustomer.name.trim()) ? "not-allowed" : "pointer",
+                  }}
                 >
                   {isSubmitting ? (
-                    <span className="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <RefreshCw size={16} style={{ animation: "spin 1s linear infinite" }} />
                   ) : (
-                    "登録する"
+                    <Save size={16} />
                   )}
+                  {isSubmitting ? "登録中…" : "登録する"}
                 </button>
               </div>
             </form>
           </div>
         </div>
       )}
+
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
