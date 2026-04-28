@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef } from "react";
-import { ArrowLeft, Send, CheckCircle2, X, Plus } from "lucide-react";
+import { ArrowLeft, Send, CheckCircle2, X, Plus, Ship, Store, MessageSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase/config";
 import { collection, addDoc, serverTimestamp } from "firebase/firestore";
@@ -26,10 +26,14 @@ export default function CustomerOrderPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [orderIds, setOrderIds] = useState<string[]>([]);
+  const [deliveryType, setDeliveryType] = useState<"pickup" | "delivery" | null>(null);
+  const [deliveryTargetName, setDeliveryTargetName] = useState("");
+  const [orderNote, setOrderNote] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
 
   const currentQty = parseInt(input, 10) || 0;
   const totalItems = cart.reduce((s, c) => s + c.quantity, 0);
+  const canSubmit = cart.length > 0 && !!deliveryType && (deliveryType === "pickup" || deliveryTargetName.trim().length > 0);
 
   const addToCart = () => {
     if (currentQty <= 0) return;
@@ -50,13 +54,15 @@ export default function CustomerOrderPage() {
   };
 
   const submitOrder = async () => {
-    if (cart.length === 0) return;
+    if (!canSubmit || !deliveryType) return;
+    const selectedDeliveryType = deliveryType;
     setIsSubmitting(true);
     try {
       const sessionStr = localStorage.getItem("customerSession");
       const session = sessionStr ? JSON.parse(sessionStr) : {};
       const customerId = session.uid || "unknown";
       const customerName = session.name || "不明な顧客";
+      const orderNoteText = orderNote.trim();
 
       // 1発注 = 1ドキュメント（items配列）としてまとめて保存する
       const ref = await addDoc(collection(db, "transactions"), {
@@ -68,7 +74,14 @@ export default function CustomerOrderPage() {
         })),
         customerId,
         customerName,
+        createdByUid: session.uid || "legacy_customer",
+        deliveryType: selectedDeliveryType,
+        deliveryTargetName: selectedDeliveryType === "delivery" ? deliveryTargetName.trim() : "",
+        note: orderNoteText,
+        orderNote: orderNoteText,
+        deliveryNote: orderNoteText,
         createdAt: serverTimestamp(),
+        updatedAt: serverTimestamp(),
         source: "customer_portal",
       });
       setOrderIds([ref.id]);
@@ -118,10 +131,68 @@ export default function CustomerOrderPage() {
     );
   }
 
+  if (!deliveryType) {
+    return (
+      <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#f8fafc", overflow: "hidden" }}>
+        <header style={{ display: "flex", alignItems: "center", gap: 6, padding: "12px 14px 8px", flexShrink: 0 }}>
+          <button onClick={() => router.push("/portal")} style={{ width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", color: "#94a3b8", background: "none", border: "none", cursor: "pointer" }}>
+            <ArrowLeft size={18} />
+          </button>
+          <span style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", flex: 1 }}>発注</span>
+        </header>
+
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", justifyContent: "center", padding: "20px 16px", gap: 14 }}>
+          <div style={{ textAlign: "center", marginBottom: 8 }}>
+            <h1 style={{ fontSize: 22, fontWeight: 900, color: "#0f172a", margin: 0 }}>受け取り方法</h1>
+            <p style={{ fontSize: 13, fontWeight: 600, color: "#64748b", margin: "8px 0 0" }}>
+              先に引き取りか配達を選んでください
+            </p>
+          </div>
+
+          <button
+            onClick={() => setDeliveryType("pickup")}
+            style={{
+              width: "100%", border: "2px solid #e2e8f0", borderRadius: 18,
+              background: "#fff", padding: "22px 18px",
+              display: "flex", alignItems: "center", gap: 14,
+              cursor: "pointer", textAlign: "left",
+            }}
+          >
+            <div style={{ width: 48, height: 48, borderRadius: 14, background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Store size={24} color="#475569" />
+            </div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: "#0f172a" }}>引き取り</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#64748b", marginTop: 3 }}>店舗・倉庫で受け取る場合</div>
+            </div>
+          </button>
+
+          <button
+            onClick={() => setDeliveryType("delivery")}
+            style={{
+              width: "100%", border: "2px solid #bae6fd", borderRadius: 18,
+              background: "#f0f9ff", padding: "22px 18px",
+              display: "flex", alignItems: "center", gap: 14,
+              cursor: "pointer", textAlign: "left",
+            }}
+          >
+            <div style={{ width: 48, height: 48, borderRadius: 14, background: "#e0f2fe", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+              <Ship size={24} color="#0284c7" />
+            </div>
+            <div>
+              <div style={{ fontSize: 18, fontWeight: 900, color: "#0369a1" }}>配達</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: "#64748b", marginTop: 3 }}>船名などの配達先を指定する場合</div>
+            </div>
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   const typeInfo = TANK_TYPES.find((t) => t.key === selectedType)!;
 
   return (
-    <div style={{ height: "100dvh", display: "flex", flexDirection: "column", background: "#f8fafc", overflow: "hidden" }}>
+    <div style={{ height: "100%", display: "flex", flexDirection: "column", background: "#f8fafc", overflow: "hidden" }}>
 
       {/* Header — compact */}
       <header style={{ display: "flex", alignItems: "center", gap: 6, padding: "12px 14px 8px", flexShrink: 0 }}>
@@ -190,6 +261,75 @@ export default function CustomerOrderPage() {
             })}
           </div>
         )}
+
+        <div style={{ marginTop: 12, background: "#fff", border: "1px solid #e8eaed", borderRadius: 12, padding: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
+              <div style={{
+                width: 30, height: 30, borderRadius: 9,
+                background: deliveryType === "delivery" ? "#e0f2fe" : "#f1f5f9",
+                display: "flex", alignItems: "center", justifyContent: "center",
+                flexShrink: 0,
+              }}>
+                {deliveryType === "delivery" ? <Ship size={16} color="#0284c7" /> : <Store size={16} color="#475569" />}
+              </div>
+              <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a" }}>
+                {deliveryType === "delivery" ? "配達" : "引き取り"}
+              </span>
+            </div>
+            <button
+              onClick={() => {
+                setDeliveryType(null);
+                setDeliveryTargetName("");
+              }}
+              style={{
+                border: "1px solid #e2e8f0",
+                background: "#fff",
+                borderRadius: 8,
+                padding: "5px 9px",
+                color: "#64748b",
+                fontSize: 12,
+                fontWeight: 800,
+                cursor: "pointer",
+              }}
+            >
+              変更
+            </button>
+          </div>
+
+          {deliveryType === "delivery" && (
+            <div style={{ marginBottom: 8 }}>
+              <input
+                type="text"
+                placeholder="配達先名・船名"
+                value={deliveryTargetName}
+                onChange={(e) => setDeliveryTargetName(e.target.value)}
+                style={{
+                  width: "100%", padding: "11px 12px",
+                  borderRadius: 10, border: "1.5px solid #bae6fd",
+                  fontSize: 14, fontWeight: 700, outline: "none",
+                  background: "#f8fafc", color: "#0f172a",
+                }}
+              />
+            </div>
+          )}
+
+          <div style={{ position: "relative" }}>
+            <MessageSquare size={15} color="#94a3b8" style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)" }} />
+            <input
+              type="text"
+              placeholder="メモ (任意)"
+              value={orderNote}
+              onChange={(e) => setOrderNote(e.target.value)}
+              style={{
+                width: "100%", padding: "10px 12px 10px 34px",
+                borderRadius: 10, border: "1px solid #e2e8f0",
+                fontSize: 13, outline: "none",
+                background: "#fff", color: "#334155",
+              }}
+            />
+          </div>
+        </div>
       </div>
 
       {/* Input row */}
@@ -256,14 +396,14 @@ export default function CustomerOrderPage() {
       }}>
         <button
           onClick={submitOrder}
-          disabled={isSubmitting || cart.length === 0}
+          disabled={isSubmitting || !canSubmit}
           style={{
             width: "100%", padding: "16px 0", borderRadius: 18, border: "none",
-            background: cart.length > 0 ? "#0f172a" : "#e2e8f0",
-            color: cart.length > 0 ? "#fff" : "#94a3b8",
+            background: canSubmit ? "#0f172a" : "#e2e8f0",
+            color: canSubmit ? "#fff" : "#94a3b8",
             fontSize: 16, fontWeight: 800,
             display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-            cursor: cart.length > 0 && !isSubmitting ? "pointer" : "default",
+            cursor: canSubmit && !isSubmitting ? "pointer" : "default",
             transition: "all 0.15s",
           }}
         >
@@ -272,7 +412,11 @@ export default function CustomerOrderPage() {
           ) : (
             <>
               <Send size={17} />
-              {cart.length > 0 ? `${totalItems}本 (${cart.length}種) を発注する` : "種類と本数を選んでください"}
+              {cart.length > 0
+                ? deliveryType === "delivery" && !deliveryTargetName.trim()
+                  ? "配達先名を入力してください"
+                  : `${totalItems}本 (${cart.length}種) を発注する`
+                : "種類と本数を選んでください"}
             </>
           )}
         </button>
