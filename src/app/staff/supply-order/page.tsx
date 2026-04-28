@@ -3,9 +3,10 @@
 import { useState, useEffect } from "react";
 import { ShoppingCart, Plus, Send, Loader2, CheckCircle2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
 import ProcurementTabs from "@/components/ProcurementTabs";
 import { useProcurementSwipe } from "@/features/procurement/hooks/useProcurementSwipe";
+import { submitSupplyOrder } from "@/lib/firebase/supply-order";
 
 interface OrderMasterItem { colA: string; colB: string; price: number; category: string; }
 interface CartItem { uid: string; name: string; count: number; price: number; }
@@ -52,23 +53,14 @@ export default function SupplyOrderPage() {
     if (!confirm(`${cart.length}品目を発注しますか？`)) return;
     setSubmitting(true);
     try {
-      const batch = writeBatch(db);
-      cart.forEach((c) => {
-        batch.set(doc(collection(db, "orders")), {
-          name: c.name, count: c.count, price: c.price,
-          total: c.price * c.count, staff: "スタッフ",
-          timestamp: serverTimestamp(),
-        });
+      await submitSupplyOrder({
+        items: cart.map((c) => ({
+          name: c.name,
+          count: c.count,
+          price: c.price,
+        })),
+        staff: "スタッフ",
       });
-      batch.set(doc(collection(db, "logs")), {
-        tankId: "-", action: "資材発注", newStatus: "-",
-        location: "-", staff: "スタッフ",
-        note: cart.map((c) => `${c.name}×${c.count}`).join(", "),
-        logStatus: "active",
-        logKind: "order",
-        timestamp: serverTimestamp(),
-      });
-      await batch.commit();
       setResult({ success: true, message: `${cart.length}品目の発注を完了（合計 ¥${total.toLocaleString()}）` });
       setCart([]);
     } catch (e: unknown) {
