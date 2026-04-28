@@ -1,9 +1,11 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Bell, Plus, Trash2, Save, Loader2, Mail, MessageSquare } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, doc, setDoc, deleteDoc, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
+import { isNewDocId } from "@/lib/firebase/diff-write";
+import { saveAdminNotificationSettings } from "@/lib/firebase/admin-notification-settings";
 
 interface LineConfig {
   uid: string;
@@ -26,36 +28,52 @@ export default function NotificationsPage() {
   const [validityYears, setValidityYears] = useState(3);
   const [saving, setSaving] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [dirtyLineConfigIds, setDirtyLineConfigIds] = useState<string[]>([]);
+  const [deletedLineConfigIds, setDeletedLineConfigIds] = useState<string[]>([]);
+
+  const fetchSettings = useCallback(async () => {
+    try {
+      const snap = await getDocs(collection(db, "notifySettings"));
+      snap.forEach((d) => {
+        const data = d.data();
+        if (d.id === "config") {
+          setEmails(data.emails || []);
+          setAlertMonths(data.alertMonths || 6);
+          setValidityYears(data.validityYears || 3);
+        }
+      });
+      const lineSnap = await getDocs(collection(db, "lineConfigs"));
+      const configs: LineConfig[] = [];
+      lineSnap.forEach((d) => configs.push({ uid: d.id, ...d.data() } as LineConfig));
+      setLineConfigs(configs);
+      setDirtyLineConfigIds([]);
+      setDeletedLineConfigIds([]);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
+  }, []);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const snap = await getDocs(collection(db, "notifySettings"));
-        snap.forEach((d) => {
-          const data = d.data();
-          if (d.id === "config") {
-            setEmails(data.emails || []);
-            setAlertMonths(data.alertMonths || 6);
-            setValidityYears(data.validityYears || 3);
-          }
-        });
-        const lineSnap = await getDocs(collection(db, "lineConfigs"));
-        const configs: LineConfig[] = [];
-        lineSnap.forEach((d) => configs.push({ uid: d.id, ...d.data() } as LineConfig));
-        setLineConfigs(configs);
-      } catch (e) { console.error(e); }
-      finally { setLoading(false); }
-    })();
-  }, []);
+    void fetchSettings();
+  }, [fetchSettings]);
 
   const addEmail = () => setEmails((prev) => [...prev, ""]);
   const updateEmail = (i: number, val: string) => setEmails((prev) => prev.map((e, idx) => idx === i ? val : e));
   const removeEmail = (i: number) => setEmails((prev) => prev.filter((_, idx) => idx !== i));
 
   const addLine = () => setLineConfigs((prev) => [...prev, { uid: `new_${Date.now()}`, name: "", token: "", groupId: "", targets: ["ALL"] }]);
-  const updateLine = (uid: string, field: string, val: any) => setLineConfigs((prev) => prev.map((c) => c.uid === uid ? { ...c, [field]: val } : c));
-  const removeLine = (uid: string) => setLineConfigs((prev) => prev.filter((c) => c.uid !== uid));
+  const updateLine = (uid: string, field: keyof Omit<LineConfig, "uid" | "targets">, val: string) => {
+    setDirtyLineConfigIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
+    setLineConfigs((prev) => prev.map((c) => c.uid === uid ? { ...c, [field]: val } : c));
+  };
+  const removeLine = (uid: string) => {
+    if (!isNewDocId(uid)) {
+      setDeletedLineConfigIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
+    }
+    setDirtyLineConfigIds((prev) => prev.filter((id) => id !== uid));
+    setLineConfigs((prev) => prev.filter((c) => c.uid !== uid));
+  };
   const toggleTarget = (uid: string, target: string) => {
+    setDirtyLineConfigIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
     setLineConfigs((prev) => prev.map((c) => {
       if (c.uid !== uid) return c;
       const has = c.targets.includes(target);
@@ -66,25 +84,18 @@ export default function NotificationsPage() {
   const handleSave = async () => {
     setSaving(true);
     try {
-      await setDoc(doc(db, "notifySettings", "config"), {
-        emails: emails.filter((e) => e.trim()),
-        alertMonths, validityYears, updatedAt: serverTimestamp(),
+      await saveAdminNotificationSettings({
+        emails,
+        alertMonths,
+        validityYears,
+        lineConfigs,
+        dirtyLineConfigIds,
+        deletedLineConfigIds,
       });
-      // Save line configs
-      const oldSnap = await getDocs(collection(db, "lineConfigs"));
-      const deletePromises: Promise<void>[] = [];
-      oldSnap.forEach((d) => deletePromises.push(deleteDoc(d.ref)));
-      await Promise.all(deletePromises);
-      for (const c of lineConfigs) {
-        const id = c.uid.startsWith("new_") ? `line_${Date.now()}_${Math.random().toString(36).slice(2, 5)}` : c.uid;
-        await setDoc(doc(db, "lineConfigs", id), {
-          name: c.name, token: c.token, groupId: c.groupId, targets: c.targets,
-          updatedAt: serverTimestamp(),
-        });
-      }
+      await fetchSettings();
       alert("通知設定を保存しました。");
-    } catch (e: any) {
-      alert("保存エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("保存エラー: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSaving(false);
     }
