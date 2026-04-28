@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import {
-  Users, Building2, Package, Plus, Save, RefreshCw, Trash2,
+  Users, Package, Plus, Save, RefreshCw, Trash2,
   ToggleLeft, ToggleRight, Eye, EyeOff, ChevronDown, Clock, ShieldCheck,
 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
@@ -29,15 +29,6 @@ interface StaffMember {
   isActive: boolean;
 }
 
-interface Destination {
-  id: string;
-  name: string;
-  formalName: string;
-  price10: number;
-  price12: number;
-  isActive: boolean;
-}
-
 interface OrderItem {
   id: string;
   category: "tank" | "supply";
@@ -54,7 +45,6 @@ interface Customer {
   setupCompleted?: boolean;
   companyName?: string;
   lineName?: string;
-  linkedLocation?: string; // Links to a destination ID
   isActive?: boolean;
 }
 
@@ -72,11 +62,10 @@ interface CustomerUser {
   setupCompleted: boolean;
 }
 
-type TabId = "staff" | "dest" | "customer" | "order" | "portal" | "inspection";
+type TabId = "staff" | "customer" | "order" | "portal" | "inspection";
 
 const TABS: { id: TabId; label: string; icon: any }[] = [
   { id: "staff",      label: "担当者",       icon: Users },
-  { id: "dest",       label: "貸出先",       icon: Building2 },
   { id: "customer",   label: "ポータル利用者", icon: Users },
   { id: "order",      label: "発注品目",     icon: Package },
   { id: "portal",     label: "ポータル設定", icon: Clock },
@@ -126,10 +115,6 @@ export default function SettingsPage() {
   const [dirtyStaffIds, setDirtyStaffIds] = useState<string[]>([]);
   const [showPasscodes, setShowPasscodes] = useState<Set<string>>(new Set());
 
-  // Destinations
-  const [destList, setDestList] = useState<Destination[]>([]);
-  const [dirtyDestIds, setDirtyDestIds] = useState<string[]>([]);
-
   // Customers (Portal Users)
   const [customerList, setCustomerList] = useState<Customer[]>([]);
   const [customerUserList, setCustomerUserList] = useState<CustomerUser[]>([]);
@@ -160,13 +145,6 @@ export default function SettingsPage() {
       staffSnap.forEach((d) => staff.push({ id: d.id, ...d.data() } as StaffMember));
       setStaffList(staff.length > 0 ? staff : []);
       setDirtyStaffIds([]);
-
-      // Destinations
-      const destSnap = await getDocs(collection(db, "destinations"));
-      const dests: Destination[] = [];
-      destSnap.forEach((d) => dests.push({ id: d.id, ...d.data() } as Destination));
-      setDestList(dests.length > 0 ? dests : []);
-      setDirtyDestIds([]);
 
       // Customers
       const custSnap = await getDocs(collection(db, "customers"));
@@ -316,76 +294,6 @@ export default function SettingsPage() {
       await batch.commit();
       await fetchAll();
       alert("担当者リストを保存しました。");
-    } catch (e: any) {
-      alert("保存エラー: " + e.message);
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  /* ─── Dest CRUD ─── */
-  const addDest = () => {
-    setDestList((prev) => [
-      ...prev,
-      {
-        id: `new_${Date.now()}`,
-        name: "", formalName: "",
-        price10: 0, price12: 0,
-        isActive: true,
-      },
-    ]);
-  };
-
-  const updateDest = (id: string, field: keyof Destination, value: any) => {
-    setDirtyDestIds((prev) => prev.includes(id) ? prev : [...prev, id]);
-    setDestList((prev) => prev.map((d) => (d.id === id ? { ...d, [field]: value } : d)));
-  };
-
-  const saveDest = async () => {
-    if (!confirm("貸出先リストを保存しますか？")) return;
-    setSaving(true);
-    try {
-      const batch = writeBatch(db);
-      const destSnap = await getDocs(collection(db, "destinations"));
-      const currentDest = new Map(destSnap.docs.map((d) => [d.id, d.data()]));
-
-      destList.forEach((d) => {
-        const docId = isNewDocId(d.id) ? createDocId("dest") : d.id;
-        const ref = doc(db, "destinations", docId);
-        const payload = {
-          name: d.name.trim(),
-          formalName: d.formalName.trim(),
-          price10: Number(d.price10),
-          price12: Number(d.price12),
-          isActive: d.isActive,
-        };
-
-        if (isNewDocId(d.id)) {
-          batch.set(ref, {
-            ...payload,
-            createdAt: serverTimestamp(),
-            updatedAt: serverTimestamp(),
-          });
-          return;
-        }
-
-        if (!dirtyDestIds.includes(d.id)) return;
-
-        const current = currentDest.get(docId);
-        if (!current) {
-          throw new Error(`貸出先「${d.name || docId}」は他の操作で削除されています。再読込してください。`);
-        }
-        assertNotChangedSinceLoad(d as any, current, `貸出先「${d.name || docId}」`);
-        if (hasFieldChanges(current, payload)) {
-          batch.update(ref, {
-            ...payload,
-            updatedAt: serverTimestamp(),
-          });
-        }
-      });
-      await batch.commit();
-      await fetchAll();
-      alert("貸出先リストを保存しました。");
     } catch (e: any) {
       alert("保存エラー: " + e.message);
     } finally {
@@ -553,7 +461,7 @@ export default function SettingsPage() {
             設定変更
           </h1>
           <p style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>
-            担当者・貸出先・発注品目のマスターデータを管理
+            担当者・ポータル利用者・発注品目のマスターデータを管理
           </p>
         </div>
         <button onClick={fetchAll} disabled={loading} style={btnOutline}>
@@ -736,103 +644,6 @@ export default function SettingsPage() {
                   <button onClick={saveStaff} disabled={saving} style={btnPrimary}>
                     <Save size={16} />
                     {saving ? "保存中…" : "担当者リストを保存"}
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* ─── Tab: Destinations ─── */}
-            {activeTab === "dest" && (
-              <div>
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-                  <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
-                    ※「停止」にすると選択肢から消えます
-                  </p>
-                  <button onClick={addDest} style={btnOutline}>
-                    <Plus size={14} /> 追加
-                  </button>
-                </div>
-
-                <div style={{ overflowX: "auto" }}>
-                  <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 460 }}>
-                    <thead>
-                      <tr style={{ borderBottom: "2px solid #e8eaed" }}>
-                        {["表示名", "10L/12L 単価", "状態"].map((h) => (
-                          <th key={h} style={{ padding: "10px 12px", fontSize: 11, fontWeight: 700, color: "#94a3b8", textAlign: "left", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                            {h}
-                          </th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {destList.length === 0 ? (
-                        <tr>
-                          <td colSpan={3} style={{ padding: 40, textAlign: "center", color: "#cbd5e1", fontSize: 14 }}>
-                            データがありません。「追加」ボタンで登録してください。
-                          </td>
-                        </tr>
-                      ) : (
-                        destList.map((d) => (
-                          <tr
-                            key={d.id}
-                            style={{
-                              borderBottom: "1px solid #f1f5f9",
-                              opacity: d.isActive ? 1 : 0.5,
-                              background: d.isActive ? undefined : "#fafafa",
-                            }}
-                          >
-                            <td style={{ padding: "10px 12px" }}>
-                              <input
-                                style={{ ...inputStyle, fontWeight: 700 }}
-                                value={d.name}
-                                placeholder="例: 〇〇ダイビング"
-                                disabled={!d.isActive}
-                                onChange={(e) => updateDest(d.id, "name", e.target.value)}
-                              />
-                            </td>
-                            <td style={{ padding: "10px 12px" }}>
-                              <div style={{ display: "flex", gap: 6 }}>
-                                <input
-                                  type="number"
-                                  style={{ ...inputStyle, textAlign: "right" as const, fontFamily: "monospace", width: 70 }}
-                                  value={d.price10}
-                                  placeholder="10L"
-                                  disabled={!d.isActive}
-                                  onChange={(e) => updateDest(d.id, "price10", e.target.value)}
-                                />
-                                <input
-                                  type="number"
-                                  style={{ ...inputStyle, textAlign: "right" as const, fontFamily: "monospace", width: 70 }}
-                                  value={d.price12}
-                                  placeholder="12L"
-                                  disabled={!d.isActive}
-                                  onChange={(e) => updateDest(d.id, "price12", e.target.value)}
-                                />
-                              </div>
-                            </td>
-                            <td style={{ padding: "10px 12px", textAlign: "center" }}>
-                              <button
-                                onClick={() => updateDest(d.id, "isActive", !d.isActive)}
-                                style={{
-                                  border: "none", background: "none",
-                                  cursor: "pointer", padding: 4,
-                                  color: d.isActive ? "#10b981" : "#cbd5e1",
-                                }}
-                              >
-                                {d.isActive ? <ToggleRight size={28} /> : <ToggleLeft size={28} />}
-                              </button>
-                            </td>
-                          </tr>
-                        ))
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-
-                <div style={{ marginTop: 20 }}>
-                  <button onClick={saveDest} disabled={saving} style={btnPrimary}>
-                    <Save size={16} />
-                    {saving ? "保存中…" : "貸出先リストを保存"}
                   </button>
                 </div>
               </div>
