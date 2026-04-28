@@ -48,7 +48,7 @@ export async function saveAdminMoneySettings({
     };
 
     if (isNewDocId(price.uid)) {
-      batch.set(ref, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      batch.set(ref, { ...payload, updatedAt: serverTimestamp() });
       return;
     }
 
@@ -78,7 +78,7 @@ export async function saveAdminMoneySettings({
     };
 
     if (isNewDocId(rank.uid)) {
-      batch.set(ref, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      batch.set(ref, { ...payload, updatedAt: serverTimestamp() });
       return;
     }
 

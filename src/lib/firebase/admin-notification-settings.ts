@@ -51,7 +51,7 @@ export async function saveAdminNotificationSettings({
     };
 
     if (isNewDocId(lineConfig.uid)) {
-      batch.set(ref, { ...payload, createdAt: serverTimestamp(), updatedAt: serverTimestamp() });
+      batch.set(ref, { ...payload, updatedAt: serverTimestamp() });
       return;
     }
 
