@@ -11,10 +11,13 @@ import {
   User,
 } from "firebase/auth";
 import { collection, getDocs, query, where } from "firebase/firestore";
+import { DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
+
+type StaffRole = "一般" | "準管理者" | "管理者";
 
 interface StaffAuthGuardProps {
   children: React.ReactNode;
-  allowedRoles?: ("一般" | "準管理者" | "管理者")[];
+  allowedRoles?: StaffRole[];
 }
 
 interface StaffUser {
@@ -25,6 +28,7 @@ interface StaffUser {
 }
 
 export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuardProps) {
+  const devAuthBypassEnabled = isDevAuthBypassEnabled();
   const authScreenRef = useRef<HTMLDivElement>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -62,6 +66,14 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     resetViewportAfterInput();
   }, [isAuthenticated, resetViewportAfterInput]);
 
+  useEffect(() => {
+    if (!devAuthBypassEnabled) return;
+    localStorage.setItem("staffSession", JSON.stringify(DEV_STAFF_SESSION));
+    window.dispatchEvent(new Event("staffLogin"));
+    setIsAuthenticated(true);
+    setLoading(false);
+  }, [devAuthBypassEnabled]);
+
   // Helper: look up staff by email, set session, authenticate
   const authenticateByEmail = useCallback(async (userEmail: string) => {
     try {
@@ -80,7 +92,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       const d = snap.docs[0];
       const data = d.data();
 
-      if (allowedRoles && !allowedRoles.includes(data.role as any)) {
+      if (allowedRoles && !allowedRoles.includes(data.role as StaffRole)) {
         setError("このページにアクセスする権限がありません");
         return false;
       }
@@ -109,7 +121,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     if (session) {
       try {
         const user = JSON.parse(session) as StaffUser;
-        if (!allowedRoles || allowedRoles.includes(user.role as any)) {
+        if (!allowedRoles || allowedRoles.includes(user.role as StaffRole)) {
           setIsAuthenticated(true);
           setLoading(false);
           return;
@@ -117,7 +129,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
           setError("アクセス権限がありません");
           localStorage.removeItem("staffSession");
         }
-      } catch (e) {
+      } catch {
         localStorage.removeItem("staffSession");
       }
     }
@@ -126,16 +138,17 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
   // 2. Check Firebase Auth (Google / Email already logged in)
   useEffect(() => {
+    if (devAuthBypassEnabled) return;
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setFirebaseAuthChecked(true);
     });
     return () => unsub();
-  }, []);
+  }, [devAuthBypassEnabled]);
 
   // 3. When Firebase Auth resolves, try to auto-login if session not already set
   useEffect(() => {
-    if (!firebaseAuthChecked) return;
+    if (devAuthBypassEnabled || !firebaseAuthChecked) return;
 
     // Already authenticated via localStorage
     if (isAuthenticated) {
@@ -151,7 +164,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     } else {
       setLoading(false);
     }
-  }, [firebaseAuthChecked, firebaseUser, isAuthenticated, authenticateByEmail]);
+  }, [devAuthBypassEnabled, firebaseAuthChecked, firebaseUser, isAuthenticated, authenticateByEmail]);
 
   // --- Passcode login handler (existing) ---
   const handlePasscodeLogin = async (e: React.FormEvent) => {
@@ -178,7 +191,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       const doc = snap.docs[0];
       const data = doc.data();
 
-      if (allowedRoles && !allowedRoles.includes(data.role as any)) {
+      if (allowedRoles && !allowedRoles.includes(data.role as StaffRole)) {
         setError("このページにアクセスする権限がありません");
         setChecking(false);
         return;
@@ -214,7 +227,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       } else {
         setError("Googleアカウントにメールアドレスがありません。");
       }
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
       setError("Googleログインに失敗しました。");
     } finally {
@@ -234,7 +247,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       if (result.user.email) {
         await authenticateByEmail(result.user.email);
       }
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setError("メールアドレスまたはパスワードが間違っています。");
     } finally {
@@ -261,7 +274,16 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
   // --- Render: Authenticated ---
   if (isAuthenticated) {
-    return <>{children}</>;
+    return (
+      <>
+        {devAuthBypassEnabled && (
+          <div style={{ position: "fixed", right: 8, bottom: 8, zIndex: 9999, padding: "3px 7px", borderRadius: 999, background: "#0f172a", color: "#f8fafc", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", opacity: 0.72, pointerEvents: "none" }}>
+            DEV AUTH BYPASS
+          </div>
+        )}
+        {children}
+      </>
+    );
   }
 
   // --- Render: Login form ---

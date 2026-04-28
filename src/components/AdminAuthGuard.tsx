@@ -16,6 +16,7 @@ import {
 import {
   collection, getDocs, query, where, doc, getDoc,
 } from "firebase/firestore";
+import { DEV_ADMIN_ALLOWED_PATHS, DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 
 interface StaffUser {
   id: string;
@@ -39,6 +40,7 @@ export default function AdminAuthGuard({
   onPermissionsLoaded,
 }: AdminAuthGuardProps) {
   const pathname = usePathname();
+  const devAuthBypassEnabled = isDevAuthBypassEnabled();
 
   // Auth state
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
@@ -59,8 +61,24 @@ export default function AdminAuthGuard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
+  useEffect(() => {
+    if (!devAuthBypassEnabled) return;
+    const devStaff: StaffUser = { ...DEV_STAFF_SESSION };
+    localStorage.setItem("staffSession", JSON.stringify(devStaff));
+    window.dispatchEvent(new Event("staffLogin"));
+    setFirebaseUser(null);
+    setAuthChecked(true);
+    setStaffUser(devStaff);
+    setStaffChecked(true);
+    onStaffLoaded?.(devStaff);
+    onPermissionsLoaded?.(DEV_ADMIN_ALLOWED_PATHS);
+    setHasAccess(true);
+    setPermChecked(true);
+  }, [devAuthBypassEnabled, onPermissionsLoaded, onStaffLoaded]);
+
   // 1. Listen to Firebase Auth
   useEffect(() => {
+    if (devAuthBypassEnabled) return;
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setAuthChecked(true);
@@ -71,10 +89,11 @@ export default function AdminAuthGuard({
       }
     });
     return () => unsub();
-  }, []);
+  }, [devAuthBypassEnabled]);
 
   // 2. When user is logged in, find matching staff document
   useEffect(() => {
+    if (devAuthBypassEnabled) return;
     if (!firebaseUser) return;
 
     const lookupStaff = async () => {
@@ -119,10 +138,11 @@ export default function AdminAuthGuard({
     };
 
     lookupStaff();
-  }, [firebaseUser, onStaffLoaded]);
+  }, [devAuthBypassEnabled, firebaseUser, onStaffLoaded]);
 
   // 3. Check permissions for current path
   useEffect(() => {
+    if (devAuthBypassEnabled) return;
     if (!staffChecked || !staffUser) {
       if (staffChecked) setPermChecked(true);
       return;
@@ -181,7 +201,7 @@ export default function AdminAuthGuard({
     };
 
     checkPermissions();
-  }, [staffChecked, staffUser, pathname, onPermissionsLoaded]);
+  }, [devAuthBypassEnabled, staffChecked, staffUser, pathname, onPermissionsLoaded]);
 
   // --- Login handlers ---
   const handleGoogleLogin = async () => {
@@ -189,7 +209,7 @@ export default function AdminAuthGuard({
     setError("");
     try {
       await signInWithPopup(auth, new GoogleAuthProvider());
-    } catch (e: any) {
+    } catch (e: unknown) {
       console.error(e);
       setError("Googleログインに失敗しました。");
     } finally {
@@ -204,7 +224,7 @@ export default function AdminAuthGuard({
     setError("");
     try {
       await signInWithEmailAndPassword(auth, email, password);
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error(err);
       setError("メールアドレスまたはパスワードが間違っています。");
     } finally {
@@ -226,7 +246,7 @@ export default function AdminAuthGuard({
   }
 
   // --- Render: Not logged in → Login screen ---
-  if (!firebaseUser) {
+  if (!firebaseUser && !devAuthBypassEnabled) {
     return (
       <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20, paddingTop: "max(20px, env(safe-area-inset-top))", paddingBottom: "max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
         <div style={{
@@ -415,5 +435,14 @@ export default function AdminAuthGuard({
   }
 
   // --- Render: Authorized ---
-  return <>{children}</>;
+  return (
+    <>
+      {devAuthBypassEnabled && (
+        <div style={{ position: "fixed", right: 8, bottom: 8, zIndex: 9999, padding: "3px 7px", borderRadius: 999, background: "#0f172a", color: "#f8fafc", fontSize: 10, fontWeight: 800, letterSpacing: "0.04em", opacity: 0.72, pointerEvents: "none" }}>
+          DEV AUTH BYPASS
+        </div>
+      )}
+      {children}
+    </>
+  );
 }
