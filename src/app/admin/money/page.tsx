@@ -1,67 +1,90 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { Wallet, Plus, Trash2, Save, Loader2 } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { collection, getDocs, doc, writeBatch, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
+import { isNewDocId } from "@/lib/firebase/diff-write";
+import { saveAdminMoneySettings } from "@/lib/firebase/admin-money-settings";
 
-interface PriceRow { uid: string; action: string; base: number; score: number; }
-interface RankRow { uid: string; name: string; minScore: number; }
+interface PriceRow { uid: string; action: string; base: number | string; score: number | string; }
+interface RankRow { uid: string; name: string; minScore: number | string; }
 
 export default function MoneySettingsPage() {
   const [prices, setPrices] = useState<PriceRow[]>([]);
   const [ranks, setRanks] = useState<RankRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [dirtyPriceIds, setDirtyPriceIds] = useState<string[]>([]);
+  const [deletedPriceIds, setDeletedPriceIds] = useState<string[]>([]);
+  const [dirtyRankIds, setDirtyRankIds] = useState<string[]>([]);
+  const [deletedRankIds, setDeletedRankIds] = useState<string[]>([]);
 
-  useEffect(() => {
-    (async () => {
-      try {
-        const pSnap = await getDocs(collection(db, "priceMaster"));
-        const pList: PriceRow[] = [];
-        pSnap.forEach((d) => pList.push({ uid: d.id, ...d.data() } as PriceRow));
-        setPrices(pList);
+  const fetchSettings = useCallback(async () => {
+    try {
+      const pSnap = await getDocs(collection(db, "priceMaster"));
+      const pList: PriceRow[] = [];
+      pSnap.forEach((d) => pList.push({ uid: d.id, ...d.data() } as PriceRow));
+      setPrices(pList);
+      setDirtyPriceIds([]);
+      setDeletedPriceIds([]);
 
-        const rSnap = await getDocs(collection(db, "rankMaster"));
-        const rList: RankRow[] = [];
-        rSnap.forEach((d) => rList.push({ uid: d.id, ...d.data() } as RankRow));
-        setRanks(rList.sort((a, b) => b.minScore - a.minScore));
-      } catch (e) { console.error(e); }
-      finally { setLoading(false); }
-    })();
+      const rSnap = await getDocs(collection(db, "rankMaster"));
+      const rList: RankRow[] = [];
+      rSnap.forEach((d) => rList.push({ uid: d.id, ...d.data() } as RankRow));
+      setRanks(rList.sort((a, b) => Number(b.minScore) - Number(a.minScore)));
+      setDirtyRankIds([]);
+      setDeletedRankIds([]);
+    } catch (e) { console.error(e); }
+    finally { setLoading(false); }
   }, []);
 
+  useEffect(() => {
+    void fetchSettings();
+  }, [fetchSettings]);
+
   const addPrice = () => setPrices((p) => [...p, { uid: `new_${Date.now()}`, action: "", base: 0, score: 0 }]);
-  const updatePrice = (uid: string, f: string, v: any) => setPrices((p) => p.map((r) => r.uid === uid ? { ...r, [f]: v } : r));
-  const removePrice = (uid: string) => setPrices((p) => p.filter((r) => r.uid !== uid));
+  const updatePrice = (uid: string, f: keyof Omit<PriceRow, "uid">, v: string | number) => {
+    setDirtyPriceIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
+    setPrices((p) => p.map((r) => r.uid === uid ? { ...r, [f]: v } : r));
+  };
+  const removePrice = (uid: string) => {
+    if (!isNewDocId(uid)) {
+      setDeletedPriceIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
+    }
+    setDirtyPriceIds((prev) => prev.filter((id) => id !== uid));
+    setPrices((p) => p.filter((r) => r.uid !== uid));
+  };
 
   const addRank = () => setRanks((r) => [...r, { uid: `new_${Date.now()}`, name: "", minScore: 0 }]);
-  const updateRank = (uid: string, f: string, v: any) => setRanks((r) => r.map((rr) => rr.uid === uid ? { ...rr, [f]: v } : rr));
-  const removeRank = (uid: string) => setRanks((r) => r.filter((rr) => rr.uid !== uid));
+  const updateRank = (uid: string, f: keyof Omit<RankRow, "uid">, v: string | number) => {
+    setDirtyRankIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
+    setRanks((r) => r.map((rr) => rr.uid === uid ? { ...rr, [f]: v } : rr));
+  };
+  const removeRank = (uid: string) => {
+    if (!isNewDocId(uid)) {
+      setDeletedRankIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
+    }
+    setDirtyRankIds((prev) => prev.filter((id) => id !== uid));
+    setRanks((r) => r.filter((rr) => rr.uid !== uid));
+  };
 
   const handleSave = async () => {
     if (!confirm("金銭・ランク設定を保存しますか？")) return;
     setSaving(true);
     try {
-      const batch = writeBatch(db);
-      // Clear and rewrite prices
-      const pOld = await getDocs(collection(db, "priceMaster"));
-      pOld.forEach((d) => batch.delete(d.ref));
-      prices.forEach((p) => {
-        const id = p.uid.startsWith("new_") ? `price_${Date.now()}_${Math.random().toString(36).slice(2, 5)}` : p.uid;
-        batch.set(doc(db, "priceMaster", id), { action: p.action, base: Number(p.base), score: Number(p.score), updatedAt: serverTimestamp() });
+      await saveAdminMoneySettings({
+        prices,
+        ranks,
+        dirtyPriceIds,
+        deletedPriceIds,
+        dirtyRankIds,
+        deletedRankIds,
       });
-      // Clear and rewrite ranks
-      const rOld = await getDocs(collection(db, "rankMaster"));
-      rOld.forEach((d) => batch.delete(d.ref));
-      ranks.forEach((r) => {
-        const id = r.uid.startsWith("new_") ? `rank_${Date.now()}_${Math.random().toString(36).slice(2, 5)}` : r.uid;
-        batch.set(doc(db, "rankMaster", id), { name: r.name, minScore: Number(r.minScore), updatedAt: serverTimestamp() });
-      });
-      await batch.commit();
+      await fetchSettings();
       alert("金銭・ランク設定を保存しました。");
-    } catch (e: any) {
-      alert("保存エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("保存エラー: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSaving(false);
     }
