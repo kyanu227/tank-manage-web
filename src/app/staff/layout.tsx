@@ -8,6 +8,7 @@ import {
   Menu, X, Hand, Building2
 } from "lucide-react";
 import StaffAuthGuard from "@/components/StaffAuthGuard";
+import { PROCUREMENT_PATHS } from "@/features/procurement/constants";
 
 /* ── Side menu ──
    破損報告/修理完了/耐圧検査完了の3画面は「メンテナンス」グループとして
@@ -17,7 +18,7 @@ const SIDE_NAV = [
   { href: "/staff/inhouse",   label: "自社管理",       icon: Building2 },
   { href: "/staff/damage",    label: "メンテナンス",   icon: Wrench },
   { href: "/staff/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
-  { href: "/staff/order",     label: "資材発注",       icon: ShoppingCart },
+  { href: "/staff/order",     label: "発注/タンク登録", icon: ShoppingCart },
   { href: "/staff/mypage",    label: "マイページ",     icon: User },
 ];
 
@@ -38,6 +39,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const isLendPage = pathname === "/staff/lend";
   const isOpsGroup = OPS_PATHS.includes(pathname ?? "");
   const isInhousePage = pathname === "/staff/inhouse";
+  const isProcurementGroup = PROCUREMENT_PATHS.includes(pathname ?? "");
   const isInternalScrollPage = [
     "/staff/inhouse",
     "/staff/damage",
@@ -158,10 +160,13 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
               // 複数URLを束ねるグループナビは個別判定
               const isMaintenance = item.href === "/staff/damage";
               const isOpsGroupItem = item.href === "/staff/lend";
+              const isProcurementItem = item.href === "/staff/order";
               const active = isMaintenance
                 ? ["/staff/damage", "/staff/repair", "/staff/inspection"].includes(pathname ?? "")
                 : isOpsGroupItem
                 ? isOpsGroup
+                : isProcurementItem
+                ? isProcurementGroup
                 : pathname === item.href;
               return (
                 <Link
