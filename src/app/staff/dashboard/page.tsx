@@ -1,9 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import {
-  AlertTriangle,
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
   Building2,
   CheckCircle2,
   CheckSquare,
@@ -12,17 +12,9 @@ import {
   ClipboardList,
   Clock,
   Edit2,
-  Factory,
-  Flame,
-  Inbox,
+  Layers,
   Loader2,
-  PackageCheck,
-  PackageX,
-  ShieldAlert,
-  ShieldCheck,
   Square,
-  Timer,
-  Truck,
   Undo2,
   Users,
   X,
@@ -31,13 +23,9 @@ import {
   collection,
   getDocs,
 } from "firebase/firestore";
-import {
-  logsRepository,
-  transactionsRepository,
-} from "@/lib/firebase/repositories";
+import { logsRepository } from "@/lib/firebase/repositories";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
 import { getStaffName, useStaffSession } from "@/hooks/useStaffSession";
-import { useInspectionSettings } from "@/hooks/useInspectionSettings";
 import { useTanks } from "@/hooks/useTanks";
 import {
   applyLogCorrection,
@@ -53,6 +41,8 @@ import {
   STATUS_COLORS,
   type TankAction,
 } from "@/lib/tank-rules";
+
+type LogSortOrder = "desc" | "asc";
 
 interface TankSummary {
   [status: string]: number;
@@ -100,13 +90,11 @@ export default function StaffDashboard() {
     [session?.role]
   );
   const { tanks, loading: tanksLoading, refetch: refetchTanks } = useTanks();
-  const { settings: inspectionSettings, loading: settingsLoading } = useInspectionSettings();
   const tankIds = useMemo(() => tanks.map((t) => t.id), [tanks]);
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [customerDestinations, setCustomerDestinations] = useState<string[]>([]);
-  const [pendingOrders, setPendingOrders] = useState(0);
-  const [pendingReturns, setPendingReturns] = useState(0);
+  const [logSortOrder, setLogSortOrder] = useState<LogSortOrder>("desc");
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
@@ -135,27 +123,17 @@ export default function StaffDashboard() {
   const fetchData = useCallback(async () => {
     setDashboardLoading(true);
     try {
-      const [logs, ordersByStatus, returns, customerSnap] = await Promise.all([
+      const [logs, customerSnap] = await Promise.all([
         // orderBy: null は Firestore 側で timestamp desc を付けない指定。
         // dashboard はクライアントで originalAt ?? timestamp で再ソートするため、
         // timestamp フィールドを持たない revision ログ等の取りこぼしを防ぐ。
         logsRepository.getActiveLogs({ orderBy: null }),
-        Promise.all(
-          (["pending", "pending_approval", "pending_link"] as const).map((status) =>
-            transactionsRepository.getOrders({ status })
-          )
-        ),
-        transactionsRepository.getReturns({ status: "pending_approval" }),
         getDocs(collection(db, "customers")),
       ]);
 
+      // 取得時点の素のログを保持し、表示時に sort order に従って並べ替える。
       const entries = logs as unknown as LogEntry[];
-      entries.sort((a, b) => {
-        const aTime = timestampToMillis(a.originalAt ?? a.timestamp) ?? 0;
-        const bTime = timestampToMillis(b.originalAt ?? b.timestamp) ?? 0;
-        return bTime - aTime;
-      });
-      setLogs(entries.slice(0, 50));
+      setLogs(entries.slice(0, 200));
 
       const destinationSet = new Set<string>(["倉庫", "自社"]);
       customerSnap.forEach((d) => {
@@ -169,9 +147,6 @@ export default function StaffDashboard() {
         if (location) destinationSet.add(location);
       });
       setCustomerDestinations(Array.from(destinationSet).sort((a, b) => a.localeCompare(b)));
-
-      setPendingOrders(ordersByStatus.flat().length);
-      setPendingReturns(returns.length);
     } catch (e) {
       console.error(e);
     } finally {
@@ -197,31 +172,16 @@ export default function StaffDashboard() {
   }, [tanks]);
 
   const totalTanks = tanks.length;
-  const damagedCount = (summary[STATUS.DAMAGED] ?? 0) + (summary[STATUS.DEFECTIVE] ?? 0);
-  const filledCount = summary[STATUS.FILLED] ?? 0;
-  const emptyCount = summary[STATUS.EMPTY] ?? 0;
-  const lentCount = (summary[STATUS.LENT] ?? 0) + (summary[STATUS.UNRETURNED] ?? 0);
-  const inHouseCount = summary[STATUS.IN_HOUSE] ?? 0;
-  const disposedCount = summary[STATUS.DISPOSED] ?? 0;
-  const unreturnedCount = summary[STATUS.UNRETURNED] ?? 0;
 
-  const { expiredCount, nearExpiryCount } = useMemo(() => {
-    const now = new Date();
-    const alertDate = new Date();
-    alertDate.setMonth(alertDate.getMonth() + inspectionSettings.alertMonths);
-    let expired = 0;
-    let near = 0;
-
-    tanks.forEach((tank) => {
-      if (tank.status === STATUS.DISPOSED) return;
-      const date = toDate(tank.nextMaintenanceDate);
-      if (!date) return;
-      if (date.getTime() < now.getTime()) expired += 1;
-      else if (date.getTime() <= alertDate.getTime()) near += 1;
+  const sortedLogs = useMemo(() => {
+    const copy = [...logs];
+    copy.sort((a, b) => {
+      const aTime = timestampToMillis(a.originalAt ?? a.timestamp) ?? 0;
+      const bTime = timestampToMillis(b.originalAt ?? b.timestamp) ?? 0;
+      return logSortOrder === "desc" ? bTime - aTime : aTime - bTime;
     });
-
-    return { expiredCount: expired, nearExpiryCount: near };
-  }, [inspectionSettings.alertMonths, tanks]);
+    return copy;
+  }, [logs, logSortOrder]);
 
   const byLocation = useMemo(() => {
     const map: Record<string, { lent: number; unreturned: number }> = {};
@@ -262,7 +222,7 @@ export default function StaffDashboard() {
     return { total, breakdown };
   }, [logs]);
 
-  const loading = dashboardLoading || tanksLoading || settingsLoading;
+  const loading = dashboardLoading || tanksLoading;
 
   const refreshAfterCorrection = async () => {
     await Promise.all([fetchData(), refetchTanks()]);
@@ -509,7 +469,7 @@ export default function StaffDashboard() {
               ダッシュボード
             </h1>
             <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-              今すぐ対応が必要な業務 / 稼働状況 / 操作ログ
+              ステータス別内訳 / 業務状況 / 操作ログ
             </p>
           </div>
           <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700, whiteSpace: "nowrap" }}>
@@ -534,73 +494,21 @@ export default function StaffDashboard() {
           </div>
         ) : (
           <>
-            <SectionLabel icon={<AlertTriangle size={14} />} title="今すぐ対応" tone="alert" />
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                gap: 10,
-                marginBottom: 22,
-              }}
-            >
-              <AlertCard
-                icon={<Inbox size={18} />}
-                label="未処理受注"
-                value={pendingOrders}
-                tone={pendingOrders > 0 ? "red" : "neutral"}
-                href="/staff/lend"
-              />
-              <AlertCard
-                icon={<PackageCheck size={18} />}
-                label="返却承認待ち"
-                value={pendingReturns}
-                tone={pendingReturns > 0 ? "orange" : "neutral"}
-                href="/staff/return"
-              />
-              <AlertCard
-                icon={<ShieldAlert size={18} />}
-                label="破損 / 不良"
-                value={damagedCount}
-                tone={damagedCount > 0 ? "red" : "neutral"}
-                href="/staff/repair"
-                subValue={
-                  damagedCount > 0
-                    ? `破損 ${summary[STATUS.DAMAGED] ?? 0} / 不良 ${summary[STATUS.DEFECTIVE] ?? 0}`
-                    : undefined
-                }
-              />
-              <AlertCard
-                icon={<Timer size={18} />}
-                label="耐圧期限切れ"
-                value={expiredCount}
-                tone={expiredCount > 0 ? "red" : "neutral"}
-                href="/staff/inspection"
-              />
-              <AlertCard
-                icon={<ShieldCheck size={18} />}
-                label="耐圧期限間近"
-                value={nearExpiryCount}
-                tone={nearExpiryCount > 0 ? "amber" : "neutral"}
-                href="/staff/inspection"
-                subValue={`${inspectionSettings.alertMonths}ヶ月以内`}
-              />
-            </div>
-
-            <SectionLabel icon={<Factory size={14} />} title="タンク稼働状況" />
+            <SectionLabel icon={<Layers size={14} />} title="ステータス別内訳" />
             <div
               style={{
                 background: "#fff",
                 border: "1px solid #e8eaed",
                 borderRadius: 14,
                 padding: "14px 16px",
-                marginBottom: 10,
+                marginBottom: 22,
               }}
             >
               <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
                 <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>総本数</span>
                 <span
                   style={{
-                    fontSize: 26,
+                    fontSize: 22,
                     fontWeight: 900,
                     color: "#0f172a",
                     fontFamily: "ui-monospace, SFMono-Regular, monospace",
@@ -609,43 +517,6 @@ export default function StaffDashboard() {
                   {totalTanks}
                   <span style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginLeft: 4 }}>本</span>
                 </span>
-              </div>
-              <StatusStackBar summary={summary} total={totalTanks} />
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(140px, 1fr))",
-                gap: 10,
-                marginBottom: 12,
-              }}
-            >
-              <StatCard icon={<Flame size={18} />} label="貸出可能" sublabel="充填済み" value={filledCount} color={STATUS_COLORS[STATUS.FILLED]} />
-              <StatCard icon={<PackageX size={18} />} label="充填待ち" sublabel="空" value={emptyCount} color={STATUS_COLORS[STATUS.EMPTY]} />
-              <StatCard
-                icon={<Truck size={18} />}
-                label="貸出中"
-                sublabel={unreturnedCount > 0 ? `未返却 ${unreturnedCount} 含む` : "貸出中 + 未返却"}
-                value={lentCount}
-                color={STATUS_COLORS[STATUS.LENT]}
-                accent={unreturnedCount > 0 ? STATUS_COLORS[STATUS.UNRETURNED] : undefined}
-              />
-              <StatCard icon={<Building2 size={18} />} label="自社利用中" value={inHouseCount} color={STATUS_COLORS[STATUS.IN_HOUSE]} />
-              <StatCard icon={<X size={18} />} label="破棄" value={disposedCount} color={STATUS_COLORS[STATUS.DISPOSED]} muted />
-            </div>
-
-            <div
-              style={{
-                background: "#fff",
-                border: "1px solid #e8eaed",
-                borderRadius: 14,
-                padding: "14px 16px",
-                marginBottom: 22,
-              }}
-            >
-              <div style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8", marginBottom: 10, letterSpacing: "0.04em" }}>
-                ステータス別内訳
               </div>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                 {Object.entries(summary)
@@ -778,6 +649,28 @@ export default function StaffDashboard() {
                 </span>
                 <button
                   type="button"
+                  onClick={() => setLogSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))}
+                  title={logSortOrder === "desc" ? "新しい順 → 古い順に切替" : "古い順 → 新しい順に切替"}
+                  style={{
+                    border: "1px solid #e2e8f0",
+                    background: "#fff",
+                    color: "#475569",
+                    borderRadius: 8,
+                    padding: "7px 11px",
+                    fontSize: 11,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 5,
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  {logSortOrder === "desc" ? <ArrowDownWideNarrow size={13} /> : <ArrowUpNarrowWide size={13} />}
+                  {logSortOrder === "desc" ? "新しい順" : "古い順"}
+                </button>
+                <button
+                  type="button"
                   onClick={toggleEditMode}
                   style={{
                     border: "1px solid #dbeafe",
@@ -849,11 +742,11 @@ export default function StaffDashboard() {
                 </div>
               )}
 
-              {logs.length === 0 ? (
+              {sortedLogs.length === 0 ? (
                 <p style={{ fontSize: 13, color: "#cbd5e1", textAlign: "center", padding: 20 }}>ログがありません</p>
               ) : (
                 <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {logs.map((log) => {
+                  {sortedLogs.map((log) => {
                     const rootId = log.rootLogId ?? log.id;
                     const isExpanded = expandedRootId === rootId;
                     const canModify = canModifyLog(log, correctionRole);
@@ -1248,172 +1141,6 @@ function SectionLabel({
   );
 }
 
-function AlertCard({
-  icon,
-  label,
-  value,
-  tone,
-  href,
-  subValue,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: number;
-  tone: "red" | "orange" | "amber" | "neutral";
-  href: string;
-  subValue?: string;
-}) {
-  const palette = {
-    red: {
-      bg: "#fef2f2",
-      border: "#fecaca",
-      iconBg: "#fee2e2",
-      iconFg: "#dc2626",
-      valueFg: "#991b1b",
-    },
-    orange: {
-      bg: "#fff7ed",
-      border: "#fed7aa",
-      iconBg: "#ffedd5",
-      iconFg: "#ea580c",
-      valueFg: "#9a3412",
-    },
-    amber: {
-      bg: "#fffbeb",
-      border: "#fde68a",
-      iconBg: "#fef3c7",
-      iconFg: "#d97706",
-      valueFg: "#92400e",
-    },
-    neutral: {
-      bg: "#fff",
-      border: "#e8eaed",
-      iconBg: "#f1f5f9",
-      iconFg: "#94a3b8",
-      valueFg: "#334155",
-    },
-  }[tone];
-
-  return (
-    <Link href={href} style={{ textDecoration: "none", display: "block", height: "100%" }}>
-      <div
-        style={{
-          position: "relative",
-          padding: "14px 14px 12px",
-          borderRadius: 14,
-          background: palette.bg,
-          border: `1px solid ${palette.border}`,
-          cursor: "pointer",
-          height: "100%",
-          boxSizing: "border-box",
-          transition: "transform 0.15s",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-          <div
-            style={{
-              width: 28,
-              height: 28,
-              borderRadius: 8,
-              background: palette.iconBg,
-              color: palette.iconFg,
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "center",
-            }}
-          >
-            {icon}
-          </div>
-          <span style={{ fontSize: 12, fontWeight: 800, color: "#334155", lineHeight: 1.2 }}>{label}</span>
-        </div>
-        <div style={{ display: "flex", alignItems: "baseline", gap: 6, marginTop: 2 }}>
-          <span
-            style={{
-              fontSize: 28,
-              fontWeight: 900,
-              color: palette.valueFg,
-              lineHeight: 1,
-              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-            }}
-          >
-            {value}
-          </span>
-          <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8" }}>件</span>
-        </div>
-        {subValue && <div style={{ marginTop: 4, fontSize: 10, fontWeight: 700, color: "#64748b" }}>{subValue}</div>}
-      </div>
-    </Link>
-  );
-}
-
-function StatCard({
-  icon,
-  label,
-  sublabel,
-  value,
-  color,
-  accent,
-  muted,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  sublabel?: string;
-  value: number;
-  color: string;
-  accent?: string;
-  muted?: boolean;
-}) {
-  return (
-    <div
-      style={{
-        position: "relative",
-        padding: "12px 14px",
-        borderRadius: 12,
-        background: "#fff",
-        border: "1px solid #e8eaed",
-        opacity: muted ? 0.75 : 1,
-        overflow: "hidden",
-      }}
-    >
-      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 3, background: color }} />
-      <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
-        <span style={{ color, display: "flex" }}>{icon}</span>
-        <span style={{ fontSize: 12, fontWeight: 800, color: "#334155" }}>{label}</span>
-        {accent && <span style={{ width: 6, height: 6, borderRadius: "50%", background: accent }} />}
-      </div>
-      <div style={{ display: "flex", alignItems: "baseline", gap: 4 }}>
-        <span
-          style={{
-            fontSize: 26,
-            fontWeight: 900,
-            color: "#0f172a",
-            lineHeight: 1,
-            fontFamily: "ui-monospace, SFMono-Regular, monospace",
-          }}
-        >
-          {value}
-        </span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8" }}>本</span>
-      </div>
-      {sublabel && (
-        <div
-          style={{
-            marginTop: 4,
-            fontSize: 10,
-            fontWeight: 700,
-            color: "#94a3b8",
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {sublabel}
-        </div>
-      )}
-    </div>
-  );
-}
-
 function DashboardPanel({
   icon,
   title,
@@ -1441,47 +1168,6 @@ function DashboardPanel({
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 280, overflowY: "auto" }}>{children}</div>
       )}
-    </div>
-  );
-}
-
-function StatusStackBar({ summary, total }: { summary: TankSummary; total: number }) {
-  if (total === 0) {
-    return <div style={{ height: 10, borderRadius: 6, background: "#f1f5f9" }} />;
-  }
-
-  const order = [
-    STATUS.FILLED,
-    STATUS.EMPTY,
-    STATUS.LENT,
-    STATUS.UNRETURNED,
-    STATUS.IN_HOUSE,
-    STATUS.DAMAGED,
-    STATUS.DEFECTIVE,
-    STATUS.DISPOSED,
-  ];
-  const segments = order
-    .map((status) => ({
-      status,
-      count: summary[status] ?? 0,
-      color: STATUS_COLORS[status] || "#cbd5e1",
-    }))
-    .filter((segment) => segment.count > 0);
-
-  return (
-    <div
-      style={{
-        display: "flex",
-        height: 10,
-        borderRadius: 6,
-        overflow: "hidden",
-        background: "#f1f5f9",
-      }}
-      title={segments.map((segment) => `${segment.status}: ${segment.count}`).join(" / ")}
-    >
-      {segments.map((segment) => (
-        <div key={segment.status} style={{ width: `${(segment.count / total) * 100}%`, background: segment.color }} />
-      ))}
     </div>
   );
 }
