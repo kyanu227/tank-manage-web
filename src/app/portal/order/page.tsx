@@ -74,7 +74,7 @@ export default function CustomerOrderPage() {
         })),
         customerId,
         customerName,
-        createdByUid: session.uid || "legacy_customer",
+        createdByUid: session.customerUserUid || session.uid || "legacy_customer",
         deliveryType: selectedDeliveryType,
         deliveryTargetName: selectedDeliveryType === "delivery" ? deliveryTargetName.trim() : "",
         note: orderNoteText,
