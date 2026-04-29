@@ -130,9 +130,11 @@
 
 ### 対象外コレクション
 
-`staff` / `destinations` / `customers` / `customerUsers` / `orderMaster` / `settings` / `notifySettings` / `lineConfigs` / `monthly_stats` / `priceMaster` / `rankMaster` / `tankProcurements` / `orders`
+`staff` / `customers` / `customerUsers` / `orderMaster` / `settings` / `notifySettings` / `lineConfigs` / `monthly_stats` / `priceMaster` / `rankMaster` / `tankProcurements` / `orders`
 
-主な利用元: `admin/settings`, `admin/customers`, `admin/money`, `admin/notifications`, `admin/permissions`, `admin/sales`（monthly_stats）, `admin/billing`（customers）, `staff/order`, `staff/dashboard`（customers）, `useDestinations`, `useInspectionSettings`, `customer-user.ts` 等。
+主な利用元: `admin/settings`, `admin/customers`, `admin/money`, `admin/notifications`, `admin/permissions`, `admin/sales`（monthly_stats）, `admin/billing`（customers）, `staff/supply-order`, `staff/dashboard`（customers）, `useDestinations`, `useInspectionSettings` 等。
+
+`src/lib/firebase/customer-user.ts` は portal Auth / customerUsers 移行用の未commit WIP が存在する場合があるが、現行mainの repository migration 完了範囲には含めない。
 
 ---
 
@@ -161,7 +163,7 @@
 
 ### データモデル改善
 
-- **portal の貸出中タンク取得を `customerId` 参照に**: 現状 `tanks.location == customerName` の文字列マッチに依存している。`destinations` と顧客名がズレると取りこぼしが発生するため、`tanks` 側に `customerId` を持たせる／`destinations` 経由で名寄せする案
+- **portal の貸出中タンク取得を `customerId` 参照に**: 現状 `tanks.location == customerName` の文字列マッチに依存している。`destinations` は廃止済みのため名寄せには使わない。`tanks` 側に `customerId` を持たせるか、`customers.name` と `location` の文字列マッチ継続を判断する
 - **`admin/sales` の monthly_stats 統合**: 現状 limit 3000 の active logs をクライアント集計。`monthly_stats` を主データソースに、または `getActiveLogs({ from, to })` で対象月のみ取得し、3000 件上限による集計欠損リスクを除去
 
 ---
