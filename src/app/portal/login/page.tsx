@@ -2,15 +2,17 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { auth, db } from "@/lib/firebase/config";
-import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider } from "firebase/auth";
-import { collection, query, where, getDocs, doc, getDoc } from "firebase/firestore";
-import { KeyRound, Mail, Lock, UserCheck, ArrowRight } from "lucide-react";
+import { auth } from "@/lib/firebase/config";
+import { signInWithEmailAndPassword, signInWithPopup, GoogleAuthProvider, type User } from "firebase/auth";
+import { Mail, Lock, UserCheck, ArrowRight } from "lucide-react";
+import {
+  ensureCustomerUser,
+  needsCustomerUserSetup,
+  saveCustomerPortalSession,
+} from "@/lib/firebase/customer-user";
 
 export default function LoginPage() {
   const router = useRouter();
-  const [loginMethod, setLoginMethod] = useState<"passcode" | "email">("passcode");
-  const [passcode, setPasscode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   
@@ -19,81 +21,31 @@ export default function LoginPage() {
 
   // すでにログイン済みならポータルへ
   useEffect(() => {
-    const session = localStorage.getItem("customerSession");
-    if (session) {
-      router.replace("/portal");
+    try {
+      const raw = localStorage.getItem("customerSession");
+      const session = raw ? JSON.parse(raw) as { customerUserUid?: string } : null;
+      if (session?.customerUserUid) {
+        router.replace("/portal");
+        return;
+      }
+      if (raw) localStorage.removeItem("customerSession");
+    } catch {
+      localStorage.removeItem("customerSession");
     }
   }, [router]);
 
-  const setSessionAndRedirect = (data: any, uid: string) => {
-    // Setup the local storage session data that portal layout expects
-    if (typeof window !== 'undefined') {
-      localStorage.setItem("customerSession", JSON.stringify({
-        uid: uid,
-        name: data.companyName || "お客様"
-      }));
-    }
-
-    // setupCompleted フラグ、または companyName が設定済みであればポータルへ
-    // (adminが手動作成した顧客は setupCompleted 未設定でも companyName が入っている)
-    if (data.setupCompleted || data.companyName) {
-      router.push("/portal");
-    } else {
-      router.push("/portal/setup");
-    }
-  };
-
-  const checkUserSetupAndRedirect = async (uid: string) => {
-    const userRef = doc(db, "customers", uid);
-    const snap = await getDoc(userRef);
-    if (snap.exists()) {
-      setSessionAndRedirect(snap.data(), uid);
-    } else {
-      // Very edge case: user somehow exists in auth but not customers collection
-      router.push("/portal/setup");
-    }
-  };
-
-  const handlePasscodeLogin = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!passcode || passcode.length !== 4) {
-      setError("4桁のパスコードを入力してください。");
+  const handleFirebaseUserRedirect = async (user: User) => {
+    const customerUser = await ensureCustomerUser(user);
+    if (customerUser.status === "disabled") {
+      setError("このアカウントは利用停止中です。");
       return;
     }
-
-    // iOS: キーボードを閉じてから遷移しないとビューポートがズレたまま固定される
-    (document.activeElement as HTMLElement | null)?.blur?.();
-
-    setLoading(true);
-    setError("");
-
-    try {
-      // Find the customer doc by passcode
-      const q = query(collection(db, "customers"), where("passcode", "==", passcode));
-      const querySnapshot = await getDocs(q);
-      
-      if (querySnapshot.empty) {
-        throw new Error("正しいパスコードが見つかりません。");
-      }
-
-      const userData = querySnapshot.docs[0].data();
-      const userUid = userData.uid || querySnapshot.docs[0].id;
-
-      // パスコードユーザーはadmin管理なのでsetup不要、直接ポータルへ
-      if (typeof window !== 'undefined') {
-        localStorage.setItem("customerSession", JSON.stringify({
-          uid: userUid,
-          name: userData.companyName || userData.name || "お客様",
-        }));
-      }
-      router.push("/portal");
-
-    } catch (err: any) {
-      console.error(err);
-      setError(err.message || "ログインに失敗しました。");
-    } finally {
-      setLoading(false);
+    if (needsCustomerUserSetup(customerUser)) {
+      router.push("/portal/setup");
+      return;
     }
+    saveCustomerPortalSession(customerUser);
+    router.push("/portal");
   };
 
   const handleEmailLogin = async (e: React.FormEvent) => {
@@ -104,12 +56,11 @@ export default function LoginPage() {
 
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
-      // We rely on Firebase Auth state for email/google users
       if (typeof window !== 'undefined') {
          localStorage.removeItem("customerSessionUid"); // Clear any stale simple session
       }
-      await checkUserSetupAndRedirect(result.user.uid);
-    } catch (err: any) {
+      await handleFirebaseUserRedirect(result.user);
+    } catch (err) {
       console.error(err);
       setError("メールアドレスまたはパスワードが間違っています。");
     } finally {
@@ -129,32 +80,8 @@ export default function LoginPage() {
          localStorage.removeItem("customerSessionUid");
       }
       
-      // 1. Check if UID exists in customers collection
-      const userRef = doc(db, "customers", result.user.uid);
-      const snap = await getDoc(userRef);
-      if (snap.exists()) {
-        await checkUserSetupAndRedirect(result.user.uid);
-        return;
-      }
-
-      // 2. Check if email exists in customers collection — silently log them in if so
-      const userEmail = result.user.email;
-      if (userEmail) {
-        const emailQ = query(
-          collection(db, "customers"),
-          where("email", "==", userEmail)
-        );
-        const emailSnap = await getDocs(emailQ);
-        if (!emailSnap.empty) {
-          const existingDoc = emailSnap.docs[0];
-          setSessionAndRedirect(existingDoc.data(), existingDoc.id);
-          return;
-        }
-      }
-
-      // 3. No existing customer → go to register
-      router.push("/portal/register");
-    } catch (err: any) {
+      await handleFirebaseUserRedirect(result.user);
+    } catch (err) {
       console.error(err);
       setError("Googleログインに失敗しました。");
     } finally {
@@ -217,75 +144,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        {/* Method Toggle */}
-        <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 12, padding: 4 }}>
-          <button
-            onClick={() => { setLoginMethod("passcode"); setError(""); }}
-            style={{
-              flex: 1, padding: "10px 0", borderRadius: 8, border: "none", fontSize: 14, fontWeight: 700,
-              background: loginMethod === "passcode" ? "#fff" : "transparent",
-              color: loginMethod === "passcode" ? "#3b82f6" : "#64748b",
-              boxShadow: loginMethod === "passcode" ? "0 2px 4px rgba(0,0,0,0.05)" : "none",
-              cursor: "pointer", transition: "all 0.2s"
-            }}
-          >
-            パスコード
-          </button>
-          <button
-            onClick={() => { setLoginMethod("email"); setError(""); }}
-            style={{
-              flex: 1, padding: "10px 0", borderRadius: 8, border: "none", fontSize: 14, fontWeight: 700,
-              background: loginMethod === "email" ? "#fff" : "transparent",
-              color: loginMethod === "email" ? "#3b82f6" : "#64748b",
-              boxShadow: loginMethod === "email" ? "0 2px 4px rgba(0,0,0,0.05)" : "none",
-              cursor: "pointer", transition: "all 0.2s"
-            }}
-          >
-            メール/Google
-          </button>
-        </div>
-
-        {loginMethod === "passcode" ? (
-          <form onSubmit={handlePasscodeLogin} style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-            <div style={{ position: "relative" }}>
-              <KeyRound size={18} color="#94a3b8" style={{ position: "absolute", left: 16, top: "50%", transform: "translateY(-50%)" }} />
-              <input
-                type="text"
-                pattern="[0-9]*"
-                inputMode="numeric"
-                maxLength={4}
-                placeholder="4桁のパスコードを入力"
-                value={passcode}
-                onChange={(e) => setPasscode(e.target.value.replace(/[^0-9]/g, ""))}
-                required
-                style={{
-                  width: "100%", padding: "14px 16px 14px 44px",
-                  borderRadius: 12, border: "2px solid #e2e8f0",
-                  fontSize: 16, outline: "none", transition: "border-color 0.2s",
-                  letterSpacing: passcode ? "8px" : "normal",
-                  fontWeight: 600
-                }}
-              />
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading || passcode.length !== 4}
-              style={{
-                width: "100%", padding: "14px", borderRadius: 12,
-                background: "#3b82f6", color: "#fff", border: "none",
-                fontSize: 16, fontWeight: 700, cursor: (loading || passcode.length !== 4) ? "not-allowed" : "pointer",
-                transition: "all 0.2s", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                opacity: (loading || passcode.length !== 4) ? 0.7 : 1,
-                marginTop: 8
-              }}
-            >
-              ログイン
-              <ArrowRight size={18} />
-            </button>
-          </form>
-        ) : (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
             <button
               onClick={handleGoogleLogin}
               disabled={loading}
@@ -298,7 +157,9 @@ export default function LoginPage() {
                 transition: "all 0.2s", opacity: loading ? 0.7 : 1
               }}
             >
-              <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" style={{ width: 20, height: 20 }} />
+              <span aria-hidden="true" style={{ width: 20, height: 20, display: "inline-flex", alignItems: "center", justifyContent: "center", color: "#4285f4", fontWeight: 900 }}>
+                G
+              </span>
               Google でログイン
             </button>
 
@@ -357,8 +218,7 @@ export default function LoginPage() {
                 <ArrowRight size={18} />
               </button>
             </form>
-          </div>
-        )}
+        </div>
 
         <div style={{ textAlign: "center", marginTop: 8 }}>
           <button 

@@ -3,6 +3,14 @@
 import { useState, useEffect } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import { LogOut, Building2 } from "lucide-react";
+import { onAuthStateChanged, signOut } from "firebase/auth";
+import { auth } from "@/lib/firebase/config";
+import {
+  ensureCustomerUser,
+  needsCustomerUserSetup,
+  normalizeCustomerUser,
+  saveCustomerPortalSession,
+} from "@/lib/firebase/customer-user";
 
 const PUBLIC_PATHS = ["/portal/login", "/portal/register", "/portal/setup"];
 
@@ -21,36 +29,59 @@ export default function PortalLayout({ children }: { children: React.ReactNode }
 
   useEffect(() => {
     if (isPublic) {
-      setLoading(false);
       return;
     }
-    const session = localStorage.getItem("customerSession");
-    if (!session) {
-      router.replace("/portal/login");
-      return;
-    }
-    try {
-      const user = JSON.parse(session);
-      setCustomerName(user.name);
-      setLoading(false);
-    } catch (e) {
+
+    const redirectToLogin = () => {
       localStorage.removeItem("customerSession");
       router.replace("/portal/login");
-    }
+    };
+
+    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      if (!user) {
+        redirectToLogin();
+        return;
+      }
+
+      try {
+        const customerUser = normalizeCustomerUser(await ensureCustomerUser(user));
+        if (customerUser.status === "disabled") {
+          await signOut(auth);
+          redirectToLogin();
+          return;
+        }
+
+        if (needsCustomerUserSetup(customerUser)) {
+          localStorage.removeItem("customerSession");
+          router.replace("/portal/setup");
+          return;
+        }
+
+        const freshSession = saveCustomerPortalSession(customerUser);
+        setCustomerName(freshSession.name);
+        setLoading(false);
+      } catch (error) {
+        console.error("Portal auth check failed:", error);
+        redirectToLogin();
+      }
+    });
+
+    return () => unsubscribe();
   }, [router, isPublic]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     if (!confirm("ログアウトしますか？")) return;
     localStorage.removeItem("customerSession");
+    await signOut(auth);
     router.replace("/portal/login");
   };
 
-  if (loading) {
-    return <div style={{ minHeight: "100vh", background: "#f8f9fb" }} />;
-  }
-
   if (isPublic) {
     return <>{children}</>;
+  }
+
+  if (loading) {
+    return <div style={{ minHeight: "100vh", background: "#f8f9fb" }} />;
   }
 
   return (
