@@ -25,10 +25,14 @@ interface StaffUser {
   name: string;
   role: string;
   rank: string;
+  email?: string;
 }
 
 export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuardProps) {
   const devAuthBypassEnabled = isDevAuthBypassEnabled();
+  // パスコードログインは request.auth に乗らないため通常は無効。
+  // 一時復活が必要な場合のみ NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN=true を設定する。
+  const passcodeLoginEnabled = process.env.NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN === "true";
   const authScreenRef = useRef<HTMLDivElement>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -36,7 +40,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   const [checking, setChecking] = useState(false);
 
   // Login form state
-  const [loginMethod, setLoginMethod] = useState<"passcode" | "email">("passcode");
+  const [loginMethod, setLoginMethod] = useState<"passcode" | "email">("email");
   const [passcode, setPasscode] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -86,6 +90,8 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
       if (snap.empty) {
         setError("このメールアドレスはスタッフとして登録されていません。");
+        localStorage.removeItem("staffSession");
+        setIsAuthenticated(false);
         return false;
       }
 
@@ -94,6 +100,8 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
       if (allowedRoles && !allowedRoles.includes(data.role as StaffRole)) {
         setError("このページにアクセスする権限がありません");
+        localStorage.removeItem("staffSession");
+        setIsAuthenticated(false);
         return false;
       }
 
@@ -102,6 +110,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         name: data.name,
         role: data.role,
         rank: data.rank || "レギュラー",
+        email: data.email,
       };
 
       localStorage.setItem("staffSession", JSON.stringify(userSession));
@@ -111,64 +120,53 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     } catch (e) {
       console.error("Email staff lookup failed:", e);
       setError("認証エラーが発生しました");
+      localStorage.removeItem("staffSession");
+      setIsAuthenticated(false);
       return false;
     }
   }, [allowedRoles]);
 
-  // 1. Check localStorage session first
-  useEffect(() => {
-    const session = localStorage.getItem("staffSession");
-    if (session) {
-      try {
-        const user = JSON.parse(session) as StaffUser;
-        if (!allowedRoles || allowedRoles.includes(user.role as StaffRole)) {
-          setIsAuthenticated(true);
-          setLoading(false);
-          return;
-        } else {
-          setError("アクセス権限がありません");
-          localStorage.removeItem("staffSession");
-        }
-      } catch {
-        localStorage.removeItem("staffSession");
-      }
-    }
-    // Don't set loading=false yet — wait for Firebase Auth check too
-  }, [allowedRoles]);
-
-  // 2. Check Firebase Auth (Google / Email already logged in)
+  // 1. Check Firebase Auth (Google / Email already logged in)
   useEffect(() => {
     if (devAuthBypassEnabled) return;
     const unsub = onAuthStateChanged(auth, (user) => {
       setFirebaseUser(user);
       setFirebaseAuthChecked(true);
+      if (!user) {
+        localStorage.removeItem("staffSession");
+        setIsAuthenticated(false);
+      }
     });
     return () => unsub();
   }, [devAuthBypassEnabled]);
 
-  // 3. When Firebase Auth resolves, try to auto-login if session not already set
+  // 2. Firebase user exists → staff collection で有効スタッフか確認する。
+  // localStorage staffSession だけでは認証済みにしない。
   useEffect(() => {
     if (devAuthBypassEnabled || !firebaseAuthChecked) return;
 
-    // Already authenticated via localStorage
-    if (isAuthenticated) {
-      setLoading(false);
-      return;
-    }
-
-    // Firebase user exists → try to match staff
     if (firebaseUser?.email) {
       authenticateByEmail(firebaseUser.email).then(() => {
         setLoading(false);
       });
-    } else {
-      setLoading(false);
+      return;
     }
-  }, [devAuthBypassEnabled, firebaseAuthChecked, firebaseUser, isAuthenticated, authenticateByEmail]);
 
-  // --- Passcode login handler (existing) ---
+    localStorage.removeItem("staffSession");
+    setIsAuthenticated(false);
+    setLoading(false);
+  }, [devAuthBypassEnabled, firebaseAuthChecked, firebaseUser, authenticateByEmail]);
+
+  // --- Passcode login handler (feature flag only) ---
   const handlePasscodeLogin = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!passcodeLoginEnabled) {
+      setError("パスコードログインは現在無効です。メールまたはGoogleでログインしてください。");
+      localStorage.removeItem("staffSession");
+      setIsAuthenticated(false);
+      setLoading(false);
+      return;
+    }
     if (!passcode) return;
 
     resetViewportAfterInput();
@@ -202,6 +200,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         name: data.name,
         role: data.role,
         rank: data.rank || "レギュラー",
+        email: data.email,
       };
 
       localStorage.setItem("staffSession", JSON.stringify(userSession));
@@ -211,7 +210,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       console.error("Login verify failed", e);
       setError("認証エラーが発生しました");
     } finally {
-      if (!isAuthenticated) setChecking(false);
+      setChecking(false);
     }
   };
 
@@ -344,34 +343,36 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         </div>
 
         {/* Method toggle: Passcode / Email */}
-        <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 3, marginBottom: 16 }}>
-          <button
-            onClick={() => { setLoginMethod("passcode"); setError(""); }}
-            style={{
-              flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700,
-              background: loginMethod === "passcode" ? "#fff" : "transparent",
-              color: loginMethod === "passcode" ? "#6366f1" : "#94a3b8",
-              boxShadow: loginMethod === "passcode" ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
-              cursor: "pointer", transition: "all 0.2s",
-            }}
-          >
-            パスコード
-          </button>
-          <button
-            onClick={() => { setLoginMethod("email"); setError(""); }}
-            style={{
-              flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700,
-              background: loginMethod === "email" ? "#fff" : "transparent",
-              color: loginMethod === "email" ? "#6366f1" : "#94a3b8",
-              boxShadow: loginMethod === "email" ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
-              cursor: "pointer", transition: "all 0.2s",
-            }}
-          >
-            メール
-          </button>
-        </div>
+        {passcodeLoginEnabled && (
+          <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 3, marginBottom: 16 }}>
+            <button
+              onClick={() => { setLoginMethod("passcode"); setError(""); }}
+              style={{
+                flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700,
+                background: loginMethod === "passcode" ? "#fff" : "transparent",
+                color: loginMethod === "passcode" ? "#6366f1" : "#94a3b8",
+                boxShadow: loginMethod === "passcode" ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+                cursor: "pointer", transition: "all 0.2s",
+              }}
+            >
+              パスコード
+            </button>
+            <button
+              onClick={() => { setLoginMethod("email"); setError(""); }}
+              style={{
+                flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700,
+                background: loginMethod === "email" ? "#fff" : "transparent",
+                color: loginMethod === "email" ? "#6366f1" : "#94a3b8",
+                boxShadow: loginMethod === "email" ? "0 1px 3px rgba(0,0,0,0.06)" : "none",
+                cursor: "pointer", transition: "all 0.2s",
+              }}
+            >
+              メール
+            </button>
+          </div>
+        )}
 
-        {loginMethod === "passcode" ? (
+        {passcodeLoginEnabled && loginMethod === "passcode" ? (
           /* Passcode form (existing) */
           <form onSubmit={handlePasscodeLogin} style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <input
