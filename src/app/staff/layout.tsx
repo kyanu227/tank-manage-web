@@ -5,10 +5,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Wrench, ShoppingCart, User,
-  Menu, X, Hand, Building2
+  Menu, X, Hand, Building2, Inbox
 } from "lucide-react";
 import StaffAuthGuard from "@/components/StaffAuthGuard";
 import { PROCUREMENT_PATHS } from "@/features/procurement/constants";
+import { usePendingOrderCount } from "@/hooks/usePendingOrderCount";
 
 /* ── Side menu ──
    破損報告/修理完了/耐圧検査完了の3画面は「メンテナンス」グループとして
@@ -29,6 +30,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const mainRef = useRef<HTMLElement | null>(null);
+  const pendingOrderCount = usePendingOrderCount();
 
   // iOS: 前画面のキーボードでズレたビューポートを強制リセット（スクロールロック画面のため手動では戻せない）
   useEffect(() => {
@@ -92,6 +94,25 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             <Menu size={18} />
           </button>
           <div style={{ flex: 1 }} />
+          {pendingOrderCount !== null && pendingOrderCount > 0 && (
+            <Link
+              href="/staff/lend"
+              title="未処理の受注があります"
+              style={{
+                display: "flex", alignItems: "center", gap: 6,
+                padding: "6px 10px", borderRadius: 8,
+                background: "#fef3c7",
+                color: "#92400e",
+                fontSize: 12, fontWeight: 800, textDecoration: "none",
+                marginRight: 8,
+                border: "1px solid #fde68a",
+                whiteSpace: "nowrap",
+              }}
+            >
+              <Inbox size={14} />
+              受注 {pendingOrderCount}
+            </Link>
+          )}
           <Link
             href="/staff/inhouse"
             style={{
