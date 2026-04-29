@@ -1,0 +1,429 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function hasEmail() {
+      return signedIn() && request.auth.token.email != null;
+    }
+
+    // Staff/admin rules rely on Firebase Auth + staffByEmail/{lowercase email}.
+    // Firestore Rules では email の lowercase 正規化を行わないため、
+    // Firebase Auth email と staffByEmail doc id は lowercase 運用を前提にする。
+    // Staff passcode localStorage sessions are not represented in Firestore Rules.
+    function isStaff() {
+      return hasEmail()
+        && exists(/databases/$(database)/documents/staffByEmail/$(request.auth.token.email))
+        && get(/databases/$(database)/documents/staffByEmail/$(request.auth.token.email)).data.isActive == true;
+    }
+
+    function staffRole() {
+      return get(/databases/$(database)/documents/staffByEmail/$(request.auth.token.email)).data.role;
+    }
+
+    function isAdmin() {
+      return isStaff() && staffRole() == "管理者";
+    }
+
+    function isSubAdmin() {
+      return isStaff() && staffRole() == "準管理者";
+    }
+
+    function isAdminStaff() {
+      return isAdmin() || isSubAdmin();
+    }
+
+    function isValidCustomerUserStatus(status) {
+      return status in ["pending_setup", "pending", "active", "disabled"];
+    }
+
+    function hasCustomerUser(uid) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/customerUsers/$(uid));
+    }
+
+    function customerUserData(uid) {
+      return get(/databases/$(database)/documents/customerUsers/$(uid)).data;
+    }
+
+    function ownCustomerUser() {
+      return signedIn() && hasCustomerUser(request.auth.uid);
+    }
+
+    function isOwnCustomerUser(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    function isActiveCustomerUser() {
+      return ownCustomerUser()
+        && customerUserData(request.auth.uid).get("disabled", false) != true;
+    }
+
+    function linkedCustomerId() {
+      return customerUserData(request.auth.uid).get("customerId", null);
+    }
+
+    function linkedCustomerName() {
+      return customerUserData(request.auth.uid).get("customerName", "");
+    }
+
+    function selfCompanyName() {
+      return customerUserData(request.auth.uid).get("selfCompanyName", "");
+    }
+
+    function hasLinkedCustomer() {
+      return isActiveCustomerUser()
+        && linkedCustomerId() is string
+        && linkedCustomerId() != ""
+        && linkedCustomerName() is string
+        && linkedCustomerName() != "";
+    }
+
+    function requestCustomerIdentityMatchesOwner() {
+      return ownCustomerUser()
+        && (
+          (
+            hasLinkedCustomer()
+            && request.resource.data.get("customerId", "") == linkedCustomerId()
+            && request.resource.data.get("customerName", "") == linkedCustomerName()
+          )
+          || (
+            !hasLinkedCustomer()
+            && request.resource.data.get("customerId", "") == request.auth.uid
+            && request.resource.data.get("customerName", "") == selfCompanyName()
+          )
+        );
+    }
+
+    function isOwnCustomerUserCreate(uid) {
+      return isOwnCustomerUser(uid)
+        && hasEmail()
+        && request.resource.data.keys().hasOnly([
+          "uid",
+          "email",
+          "displayName",
+          "selfCompanyName",
+          "selfName",
+          "lineName",
+          "customerId",
+          "customerName",
+          "setupCompleted",
+          "disabled",
+          "createdAt",
+          "lastLoginAt",
+          "updatedAt"
+        ])
+        && request.resource.data.keys().hasAll([
+          "uid",
+          "email",
+          "displayName",
+          "selfCompanyName",
+          "selfName",
+          "customerId",
+          "customerName",
+          "setupCompleted",
+          "disabled",
+          "createdAt",
+          "lastLoginAt",
+          "updatedAt"
+        ])
+        && !request.resource.data.keys().hasAny(["status"])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.email == request.auth.token.email
+        && request.resource.data.displayName is string
+        && request.resource.data.selfCompanyName == ""
+        && request.resource.data.selfName is string
+        && (
+          !request.resource.data.keys().hasAny(["lineName"])
+          || request.resource.data.lineName is string
+        )
+        && request.resource.data.get("customerId", "missing") == null
+        && request.resource.data.customerName == ""
+        && request.resource.data.setupCompleted == false
+        && request.resource.data.disabled == false;
+    }
+
+    function isOwnCustomerUserUpdate(uid) {
+      return isOwnCustomerUser(uid)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "email",
+          "displayName",
+          "lastLoginAt",
+          "updatedAt",
+          "selfCompanyName",
+          "selfName",
+          "lineName",
+          "setupCompleted"
+        ])
+        && !request.resource.data.keys().hasAny(["status"])
+        && request.resource.data.get("uid", "") == resource.data.get("uid", "")
+        && request.resource.data.get("customerId", null) == resource.data.get("customerId", null)
+        && request.resource.data.get("customerName", "") == resource.data.get("customerName", "")
+        && request.resource.data.get("disabled", false) == resource.data.get("disabled", false)
+        && request.resource.data.get("createdAt", null) == resource.data.get("createdAt", null)
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(["email"])
+          || request.resource.data.email == request.auth.token.email
+        )
+        && (
+          request.resource.data.get("setupCompleted", false) != true
+          || (
+            request.resource.data.get("selfCompanyName", "") is string
+            && request.resource.data.get("selfCompanyName", "").size() > 0
+            && request.resource.data.get("selfName", "") is string
+            && request.resource.data.get("selfName", "").size() > 0
+          )
+        );
+    }
+
+    function isAdminCustomerUserUpdate() {
+      // 現行 admin/settings は status を merge するため暫定許可。
+      // 方針としては customerUsers.status は保存せず派生値に寄せる。
+      return isAdminStaff()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "customerId",
+          "customerName",
+          "disabled",
+          "status",
+          "updatedAt"
+        ])
+        && (
+          !request.resource.data.diff(resource.data).affectedKeys().hasAny(["status"])
+          || isValidCustomerUserStatus(request.resource.data.status)
+        );
+    }
+
+    function isOwnTransaction() {
+      return isActiveCustomerUser()
+        && resource.data.createdByUid == request.auth.uid;
+    }
+
+    function isPortalOrderCreate() {
+      return isActiveCustomerUser()
+        && request.resource.data.type == "order"
+        && request.resource.data.status == "pending"
+        && request.resource.data.source == "customer_portal"
+        && request.resource.data.createdByUid == request.auth.uid
+        && requestCustomerIdentityMatchesOwner()
+        && request.resource.data.keys().hasOnly([
+          "type",
+          "status",
+          "items",
+          "customerId",
+          "customerName",
+          "createdByUid",
+          "deliveryType",
+          "deliveryTargetName",
+          "note",
+          "orderNote",
+          "deliveryNote",
+          "createdAt",
+          "updatedAt",
+          "source"
+        ])
+        && request.resource.data.keys().hasAll([
+          "type",
+          "status",
+          "items",
+          "customerId",
+          "customerName",
+          "createdByUid",
+          "createdAt",
+          "source"
+        ])
+        && request.resource.data.items is list;
+    }
+
+    function isPortalReturnCreate() {
+      return isActiveCustomerUser()
+        && request.resource.data.type == "return"
+        && request.resource.data.status == "pending_approval"
+        && request.resource.data.source in ["customer_portal", "auto_schedule"]
+        && request.resource.data.createdByUid == request.auth.uid
+        && requestCustomerIdentityMatchesOwner()
+        && request.resource.data.keys().hasOnly([
+          "type",
+          "status",
+          "tankId",
+          "condition",
+          "customerId",
+          "customerName",
+          "createdByUid",
+          "createdAt",
+          "source"
+        ])
+        && request.resource.data.keys().hasAll([
+          "type",
+          "status",
+          "tankId",
+          "condition",
+          "customerId",
+          "customerName",
+          "createdByUid",
+          "createdAt",
+          "source"
+        ]);
+    }
+
+    function isPortalUnchargedReportCreate() {
+      return isActiveCustomerUser()
+        && request.resource.data.type == "uncharged_report"
+        && request.resource.data.status == "completed"
+        && request.resource.data.source == "customer_app"
+        && request.resource.data.createdByUid == request.auth.uid
+        && requestCustomerIdentityMatchesOwner()
+        && request.resource.data.keys().hasOnly([
+          "type",
+          "status",
+          "tankId",
+          "customerId",
+          "customerName",
+          "createdByUid",
+          "createdAt",
+          "source"
+        ])
+        && request.resource.data.keys().hasAll([
+          "type",
+          "status",
+          "tankId",
+          "customerId",
+          "customerName",
+          "createdByUid",
+          "createdAt",
+          "source"
+        ]);
+    }
+
+    function isOwnTransactionCreate() {
+      return isPortalOrderCreate()
+        || isPortalReturnCreate()
+        || isPortalUnchargedReportCreate();
+    }
+
+    function canReadLinkedCustomerResource() {
+      return hasLinkedCustomer()
+        && (
+          resource.data.get("customerId", "") == linkedCustomerId()
+          || resource.data.get("location", "") == linkedCustomerName()
+        );
+    }
+
+    match /staffByEmail/{email} {
+      allow get: if hasEmail() && request.auth.token.email == email;
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /staff/{staffId} {
+      allow get, list: if isAdminStaff()
+        || (hasEmail()
+          && resource.data.email == request.auth.token.email
+          && resource.data.isActive == true);
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /customerUsers/{uid} {
+      allow get: if isAdminStaff() || isOwnCustomerUser(uid);
+      allow list: if isAdminStaff();
+      allow create: if isOwnCustomerUserCreate(uid);
+      allow update: if isAdminCustomerUserUpdate() || isOwnCustomerUserUpdate(uid);
+      allow delete: if isAdmin();
+    }
+
+    match /customers/{customerId} {
+      allow get, list: if isStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // destinations はコード上の管理UI/read/write削除済み。Firestoreデータ削除までは全拒否。
+    match /destinations/{destinationId} {
+      allow read, write: if false;
+    }
+
+    match /orderMaster/{orderId} {
+      allow get, list: if isStaff();
+      allow create, update, delete: if isAdminStaff();
+    }
+
+    match /settings/{settingId} {
+      allow get: if isStaff() || (signedIn() && settingId == "portal");
+      allow list: if isAdminStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /tanks/{tankId} {
+      allow get, list: if isStaff()
+        || canReadLinkedCustomerResource();
+      allow create, update, delete: if isStaff();
+    }
+
+    match /logs/{logId} {
+      // customerId 未紐付けの portal user は読めない。
+      // 未紐付け状態の /portal 表示は UI 側で permission-denied 対応が必要。
+      allow get, list: if isStaff()
+        || canReadLinkedCustomerResource();
+      allow create, update, delete: if isStaff();
+    }
+
+    match /transactions/{transactionId} {
+      allow get, list: if isStaff() || isOwnTransaction();
+      allow create: if isStaff() || isOwnTransactionCreate();
+      allow update, delete: if isStaff();
+    }
+
+    match /tankProcurements/{docId} {
+      allow get, list: if isStaff();
+      allow create, update: if isStaff();
+      allow delete: if isAdmin();
+    }
+
+    match /priceMaster/{docId} {
+      allow get, list: if isAdminStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /rankMaster/{docId} {
+      allow get, list: if isAdminStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /notifySettings/{docId} {
+      allow get, list: if isAdminStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /lineConfigs/{docId} {
+      allow get, list: if isAdminStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /monthly_stats/{docId} {
+      allow get, list: if isAdminStaff();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /delete_history/{docId} {
+      allow get, list: if isAdminStaff();
+      allow create: if isAdminStaff();
+      allow update, delete: if false;
+    }
+
+    match /edit_history/{docId} {
+      allow get, list: if isAdminStaff();
+      allow create: if isAdminStaff();
+      allow update, delete: if false;
+    }
+
+    match /orders/{docId} {
+      allow get, list: if isStaff();
+      allow create, update, delete: if isStaff();
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
