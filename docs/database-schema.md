@@ -11,7 +11,7 @@
 - ただし、月次確定値や監査ログなど、後から再計算すると意味が変わる値は保存してよい。
 - 日時は原則 Firestore `Timestamp` を使う。
 - タンクIDは `A-01` のような大文字・ハイフン形式に正規化する。
-- 顧客ポータルの現行mainは localStorage `customerSession` を基準にする。Firebase Auth `uid` と `customerUsers/{uid}` への本番移行は未commit WIP / 未deployの設計予定。
+- 顧客ポータルは Firebase Auth `uid` と `customerUsers/{uid}` を基準にする。画面互換用に localStorage `customerSession` も保存する。
 - スタッフ・管理者権限は `staff` と `staffByEmail` を基準にする。
 
 ## 用語
@@ -22,7 +22,7 @@
 | ログ | タンク操作の履歴。`logs` に追記型で保存する。 |
 | 取引 | 顧客からの発注、返却申請、未充填報告。`transactions` に保存する。 |
 | 貸出先 | タンクの貸出・請求の単位となる会社・店舗。正本は `customers`。 |
-| ポータル利用者 | 顧客ポータルにログインする個人。将来は `customerUsers/{uid}` で管理する予定。現行mainの portal は旧 `customerSession` 方式。 |
+| ポータル利用者 | 顧客ポータルにログインする個人。Firebase Auth uid と `customerUsers/{uid}` で管理する。 |
 
 ## コレクション一覧
 
@@ -32,7 +32,7 @@
 | `logs` | タンク操作履歴・監査 | 自動ID | 主要 |
 | `transactions` | 顧客申請・受注・返却 | 自動ID | 主要 |
 | `customers` | 貸出先マスタ | 自動ID | 主要 |
-| `customerUsers` | ポータル利用者 | Firebase Auth uid 想定 | 既存。admin/settings の紐付け処理で利用。portal Auth 本番化は未実装 |
+| `customerUsers` | ポータル利用者 | Firebase Auth uid | 主要。Portal Auth Phase 0 本番確認済み。Rules 正式deployは未実施 |
 | `destinations` | 旧貸出先・料金マスタ | 自動IDまたは uid | 廃止済み（コード参照・管理UI削除済み。Firestoreデータ削除は別作業） |
 | `staff` | スタッフマスタ | 自動ID | 主要 |
 | `staffByEmail` | スタッフ認証ミラー | email | 主要 |
@@ -145,6 +145,22 @@ B-12
 - 通常のタンク操作ログは `src/lib/tank-operation.ts` を通して作成する。
 - 修正・取消も `src/lib/tank-operation.ts` の revision 機構を使う。
 - 資材発注やタンク購入など、タンク状態遷移でないイベントも `logKind` を分けて保存している。
+
+### 必要な composite index
+
+2026-04-29 に、`portal` の履歴表示で利用する `getActiveLogs()` 向けの composite index を Firebase Console で手動作成済み。
+
+| collection | query scope | fields |
+|---|---|---|
+| `logs` | Collection | `logStatus` Ascending, `location` Ascending, `timestamp` Descending, `__name__` Descending |
+
+対応するクエリ条件:
+
+- `logStatus == "active"`
+- `location == customerName`
+- `orderBy("timestamp", "desc")`
+
+この対応は Firestore index の手動設定であり、`firestore.rules` の deploy ではない。
 
 ## `transactions`
 
@@ -266,7 +282,9 @@ B-12
 
 顧客ポータルにログインする個人アカウント。
 
-現行mainでは、portal login/register/setup の Firebase Auth + `customerUsers` 完全移行は未実装。`src/lib/firebase/customer-user.ts` が存在する場合は未commit WIP として扱い、Firestore Rules 本番化と合わせて別レビューする。
+Portal Auth Phase 0 で、`portal/login` / `register` / `setup` / `layout` は Firebase Auth + `customerUsers` ベースに移行済み。2026-04-29 の本番確認で Email/Password 新規登録、`customerUsers/{uid}` の作成・読み取り・setup 更新が成功した。
+
+Firestore Rules はまだ正式deployしていない。`customerUsers` の Rules 制御は別途レビューする。
 
 ### ドキュメントID
 
@@ -284,8 +302,9 @@ Firebase Auth uid。
 | `lineName` | string | no | LINE名など。 |
 | `customerId` | string/null | no | 紐付け先 `customers/{id}`。 |
 | `customerName` | string | no | 紐付け先の表示名。 |
-| `status` | string | yes | `pending_setup`, `pending`, `active`, `disabled`。 |
+| `status` | string | no | 保存しない。`computeCustomerUserStatus` で派生する値。 |
 | `setupCompleted` | boolean | yes | 初期設定完了フラグ。 |
+| `disabled` | boolean | yes | 利用停止フラグ。顧客自身の setup からは更新しない。 |
 | `createdAt` | Timestamp | no | 作成日時。 |
 | `lastLoginAt` | Timestamp | no | 最終ログイン日時。 |
 | `updatedAt` | Timestamp | no | 更新日時。 |
@@ -298,6 +317,13 @@ Firebase Auth uid。
 | `pending` | 初期設定済み、貸出先未紐付け |
 | `active` | 利用可能 |
 | `disabled` | 無効 |
+
+### setup 更新責任
+
+- `portal/setup` は `selfCompanyName` / `selfName` / `lineName` / `setupCompleted` / `updatedAt` のみを保存する。
+- `customerId` / `customerName` / `disabled` は顧客自身の setup から保存しない。
+- `status` は保存フィールドではなく、`disabled`, `setupCompleted`, `customerId` から計算する。
+- 旧 `customers.passcode` 経路は Portal Auth Phase 0 で廃止済み。
 
 ## `destinations`（廃止済み）
 
@@ -581,7 +607,7 @@ erDiagram
 方針:
 
 - `customers`: 貸出先・請求単位の正本。
-- `customerUsers`: ポータル利用者。portal Auth 本番化は未実装だが、admin/settings の紐付け処理と将来設計で利用する。
+- `customerUsers`: ポータル利用者。Portal Auth Phase 0 で本番利用開始済み。admin/settings の紐付け処理でも利用する。Rules 正式deployは未実施。
 - `destinations`: 廃止済み。コードからの参照・書き込み・管理 UI は削除済み。
 
 ### `orders` と `transactions(type="order")`
@@ -606,7 +632,7 @@ erDiagram
 - 新しいフィールドを追加する場合は、この文書を更新する。
 - 既存フィールドを削除・改名する場合は、互換読み込み期間を設ける。
 - 破壊的変更は migration スクリプトを用意する。
-- 新規書き込みは新スキーマへ寄せる。ただし portal Auth / customerUsers / Firestore Rules は未deployのため、現行mainでは旧 `customerSession` 互換を維持する。
+- 新規書き込みは新スキーマへ寄せる。Portal Auth / customerUsers は Phase 0 として本番確認済みだが、Firestore Rules は未deployのため、Rules 本番化は別途レビューする。
 - 読み込みは一定期間、旧スキーマを吸収する正規化関数を通す。
 - 本番データの直接手修正は避け、必要な場合は作業内容を `edit_history` または別途作業記録に残す。
 

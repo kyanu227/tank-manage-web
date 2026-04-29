@@ -8,18 +8,18 @@
 - スタッフ画面は `StaffAuthGuard` で保護する。
 - スタッフはパスコードログインを継続している。
 - スタッフ/管理者の権限情報は `staff` と `staffByEmail` を基準にする。
-- 顧客ポータルは localStorage `customerSession` を使う既存方式を継続している。
+- 顧客ポータルは Firebase Auth + `customerUsers/{uid}` を基準にする。画面内の互換 session として localStorage `customerSession` も保存する。
+- Email/Password provider は Firebase Console で有効化済み。
 - `portal/order` は旧 `customerSession` 方式のまま、`deliveryType` / `deliveryTargetName` / `note` などの delivery metadata を `transactions` に保存する。
-- `customerUsers` は既存コレクションとして扱うが、portal login/register/setup の Firebase Auth + `customerUsers` 完全移行は未実装・未commit。
+- `customerUsers` の create/read/update は 2026-04-29 の本番確認で通過済み。
 
 ## 未実装 / 未deploy
 
-- `src/lib/firebase/customer-user.ts` は portal Auth / customerUsers 移行用の未commit WIP が存在する場合がある。現行mainの本番実装として扱わない。
-- 顧客ポータルの Firebase Auth 本番化は未完了。
-- 旧 `customers.passcode` / passcode 方式の廃止は未完了。
 - `firestore.rules` は下書き扱いで未deploy。
 - `firebase.json` に `firestore.rules` を接続しない。
 - `firebase deploy --only firestore:rules` は実行しない。
+- `customerUsers` のセキュリティ制御は、現時点では本番 Rules として正式レビュー・deploy していない。
+- `customerUsers.customerId` / `customerUsers.customerName` / `disabled` の管理者運用と Rules 制御は次フェーズでレビューする。
 
 ## Firestore Rules 方針
 
@@ -28,10 +28,22 @@
 - 現行のまま厳格な Rules を有効化すると、Firebase Auth を通らないスタッフ/顧客フローが permission-denied になる可能性がある。
 - Rules 案を docs や下書きとして管理する場合も、deploy 済みと書かない。
 
+## 2026-04-29 本番確認メモ
+
+- `a2c2f0d feat: migrate portal auth to firebase auth and customerUsers` は Hosting deploy 済み。
+- Email/Password 新規登録は成功。
+- `customerUsers/{uid}` の作成、読み取り、setup 更新は現行本番環境で成功。
+- setup 保存は `selfCompanyName` / `selfName` / `lineName` / `setupCompleted` / `updatedAt` のみを更新する。
+- `status` は保存せず、`computeCustomerUserStatus` による派生値として扱う。
+- 顧客自身の setup から `customerId` / `customerName` / `disabled` は保存しない。
+- 旧 `customers.passcode` 経路は Phase 0 で廃止済み。
+- 確認用 Auth user と `customerUsers` doc は Firebase Console から手動削除済み。
+- `firestore.rules` はこの確認では deploy していない。
+
 ## 次に必要な作業
 
-1. portal Auth / customerUsers 移行を本番化するか判断する。
-2. 移行する場合は、旧 `customerSession` / `customers.passcode` 互換、`customerUsers` 作成、Firestore Rules を一括で設計する。
+1. `firestore.rules` の正式レビューと本番 deploy 手順を確定する。
+2. `customerUsers.customerId` / `customerUsers.customerName` / `disabled` の管理者更新権限を Rules と service 境界で設計する。
 3. 管理画面で `staff` と `staffByEmail` の同期を安定させる。
 4. スタッフのパスコードログインを残す範囲を決める。
 5. Rules 本番化前に `firebase.json` の接続方針と deploy 手順をレビューする。

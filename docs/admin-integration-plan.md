@@ -4,7 +4,7 @@
 
 この文書は設計のみを扱う。既存コードの変更、repository 移行、Security Rules 変更、`tank-operation.ts` 変更は行わない。
 
-2026-04-29 時点の現行mainでは、`destinations` 管理UI・read/write は削除済み。Firestore 上の旧 `destinations` データ削除は別作業。portal Auth / customerUsers 本番化と Firestore Rules 本番反映は未実装・未deployであり、本書では設計予定として扱う。
+2026-04-29 時点の現行mainでは、`destinations` 管理UI・read/write は削除済み。Firestore 上の旧 `destinations` データ削除は別作業。Portal Auth Phase 0 は Firebase Auth + `customerUsers` ベースで本番確認済み。Firestore Rules 本番反映は未deployであり、本書では次フェーズの設計予定として扱う。
 
 ## 調査メモ
 
@@ -41,7 +41,7 @@
 | タンク種別候補 | 現状は `orderMaster(category=="tank")` + code fallback | `staff/tank-purchase`, `staff/tank-register`, `TankEntryScreen` | 当面は `orderMaster` に寄せる。将来は `tankTypeMaster` 検討 | 推奨 | 現場入力に直結するため変更履歴推奨 | P1 |
 | 貸出先名・有効/無効 | `customers` | `OperationsTerminal` の貸出先候補, `staff/dashboard`, billing/admin | service 推奨。正本は `customers`。`destinations` は廃止済み | 必須 | 準管理者可でもよいが名称変更は注意 | P0 |
 | 貸出先別単価 | `customers.price10/price12/priceAluminum` | `admin/billing`, 将来の請求計算 | service 推奨。正本は `customers` | 必須 | 金銭権限者のみ | P1 |
-| ポータル利用者と貸出先の紐付け | `customerUsers.customerId/customerName/status`, `transactions` pending link 更新 | `admin/settings` customer tab, 将来の portal Auth | service 必須。pending transaction 更新を伴う | 必須 | 管理者/準管理者可。誤紐付けは業務影響大 | P0 |
+| ポータル利用者と貸出先の紐付け | `customerUsers.customerId/customerName`, 派生 status, `transactions` pending link 更新 | `admin/settings` customer tab, portal Auth Phase 0 | service 必須。pending transaction 更新を伴う | 必須 | 管理者/準管理者可。誤紐付けは業務影響大 | P0 |
 | 操作単価 | `priceMaster` | `admin/money`, `incentive-rules.ts` の設計上の入力 | 単純マスタ更新。ただし計算側接続は別確認 | 必須 | 金銭権限者のみ | P1 |
 | ランク条件 | `rankMaster` | `admin/money`, `incentive-rules.ts` の設計上の入力 | 単純マスタ更新 | 必須 | 金銭権限者のみ | P1 |
 | 通知先メール | `notifySettings/config.emails` | `admin/notifications` | 単純設定更新 | 推奨 | 管理者/準管理者可。個人情報扱い | P2 |
@@ -64,7 +64,7 @@
 | `orderMaster` | 発注品目・タンク種別候補 | 既存 | 当面継続。タンク種別候補としても利用 |
 | `customers` | 貸出先・請求単位 | 既存 | 正本に寄せる |
 | `destinations` | 旧貸出先/料金 | 廃止済み | コード参照・書き込み・管理 UI は削除済み。Firestore データ削除は別作業 |
-| `customerUsers` | ポータル利用者 | 既存。ただし portal Auth 本番化は未実装 | 貸出先紐付けは service 化。portal 移行は Rules とセットで別レビュー |
+| `customerUsers` | ポータル利用者 | Portal Auth Phase 0 本番確認済み | 貸出先紐付けは service 化。Rules 正式deployは別レビュー |
 | `priceMaster` | 操作単価 | 既存 | 金銭権限者のみ編集 |
 | `rankMaster` | ランク条件 | 既存 | 金銭権限者のみ編集 |
 | `notifySettings` | 通知設定 | 既存 | P2。staff 現場設定とは分離 |
@@ -155,7 +155,7 @@
 | adminPermissions | 必須 | 管理機能アクセスに直結 | `edit_history` |
 | inspection settings | 必須 | 対象タンク・期限計算が変わる | `edit_history` |
 | customers name/prices/isActive | 必須 | 請求・貸出先候補に影響 | `edit_history` |
-| customerUsers link/status | 必須 | 顧客申請の紐付けに影響 | `edit_history` |
+| customerUsers link/derived status | 必須 | 顧客申請の紐付けに影響 | `edit_history` |
 | priceMaster/rankMaster | 必須 | 金銭・スコアに影響 | `edit_history` |
 | orderMaster | 推奨 | 発注・タンク種別候補に影響 | `edit_history`, 削除時 `delete_history` |
 | notifySettings/lineConfigs | 推奨/必須 | 通知漏れ・token 管理に影響 | `edit_history` |

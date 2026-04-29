@@ -20,7 +20,7 @@
 | 用語 | 意味 |
 |---|---|
 | 貸出先 | タンクの貸出・請求の単位となる会社・店舗 |
-| ポータル利用者 | 顧客ポータルにログインする個人。将来は Firebase Auth + `customerUsers` を正本にする予定だが、現行mainの portal は旧 `customerSession` 方式 |
+| ポータル利用者 | 顧客ポータルにログインする個人。Portal Auth Phase 0 以降は Firebase Auth + `customerUsers` を正本にする |
 | 正本 | データの真の出所。同じ概念が複数あるとき、どれを信じるかの基準 |
 | 履歴表示用名 | 当時の名前を保存しておくフィールド（後で正本側の名前を変えても過去表示に影響しない） |
 
@@ -34,7 +34,7 @@
 |---|---|---|---|
 | `customers` | 貸出先マスタ（請求・受注・返却の単位） | 自動 ID | **正本候補** |
 | `destinations` | 旧 貸出先・料金マスタ | `customerUsers.uid` ベース | **廃止済み / コード参照削除済み** |
-| `customerUsers` | ポータル利用者個人 | Firebase Auth uid 想定 | admin/settings の紐付け処理で利用。portal Auth 本番化は未commit / 未deploy |
+| `customerUsers` | ポータル利用者個人 | Firebase Auth uid | Portal Auth Phase 0 本番確認済み。admin/settings の紐付け処理でも利用 |
 | `transactions` | 顧客申請・受注・返却 | 自動 ID | `customerId` / `customerName` / `createdByUid` を保持 |
 | `logs` | タンク操作履歴 | 自動 ID | `location` 文字列保存（顧客名）+ `customerId`（任意） |
 | `tanks` | タンク現在状態 | 正規化済み tankId | `location` 文字列保存（顧客名） |
@@ -76,7 +76,9 @@
 
 ### 1.4 customerUsers のフィールド（実態）
 
-`customerUsers` は管理画面の紐付け処理と将来の portal Auth 設計で使うコレクション。現行mainでは、`portal/login` / `register` / `setup` の Firebase Auth + customerUsers 完全移行は未実装・未commit。
+`customerUsers` は portal user の正本。`portal/login` / `register` / `setup` / `layout` は Portal Auth Phase 0 で Firebase Auth + `customerUsers` ベースに移行済み。2026-04-29 の本番確認で create/read/update が成功した。
+
+Firestore Rules はまだ正式deployしていない。Rules による `customerUsers` の正式保護は次フェーズでレビューする。
 
 ```ts
 {
@@ -88,17 +90,26 @@
   lineName?: string;
   customerId?: string | null; // 紐付け先 customers/{id}
   customerName?: string;      // 紐付け先の表示名（保存）
-  status: "pending_setup" | "pending" | "active" | "disabled";
+  // status は保存しない。computeCustomerUserStatus で派生する。
   setupCompleted: boolean;
+  disabled: boolean;
 }
 ```
+
+status の派生ルール:
+
+- `disabled === true` → `disabled`
+- `setupCompleted !== true` → `pending_setup`
+- `setupCompleted === true && !customerId` → `pending`
+- `setupCompleted === true && customerId` → `active`
 
 ### 1.5 既存ヘルパーの実態
 
 #### `src/lib/firebase/customer-user.ts`
-- portal Auth / customerUsers 移行用の未commit WIP
-- 現行mainの本番実装として扱わない
-- commit する場合は portal login/register/setup、Firestore Rules、既存 `customerSession` 互換と一括で設計レビューする
+- Portal Auth Phase 0 の本番実装
+- `ensureCustomerUser`, `normalizeCustomerUser`, `needsCustomerUserSetup`, `saveCustomerPortalSession`, `computeCustomerUserStatus` を提供
+- `status` は Firestore に保存せず派生値として扱う
+- `customerId` / `customerName` / `disabled` は顧客自身の setup から保存しない
 
 #### `src/lib/firebase/customer-destination.ts`
 - 2026-04-26 に削除済み
@@ -116,9 +127,9 @@
 | `admin/billing/page.tsx` | `customers` 全件 | — | 単価参照 |
 | `useDestinations`（`features/staff-operations/hooks/`） | **`customers` 全件**（名前は destinations だが実は customers を読む） | — | staff 操作画面の貸出先候補 |
 | `staff/dashboard/page.tsx` | `customers` 全件 | — | 一括貸出先変更モーダル候補 |
-| `portal/login` / `register` / `setup` / `layout` | 旧 `customerSession` 中心 | localStorage session | Firebase Auth + customerUsers 移行は未commit WIP |
+| `portal/login` / `register` / `setup` / `layout` | Firebase Auth + `customerUsers` | localStorage `customerSession` 互換 session | Portal Auth Phase 0 本番確認済み |
 | `portal/order` | `customerSession.uid/name` | `transactions` 作成（`status: "pending"`、delivery metadata 保存） | 旧ログイン方式のまま delivery 情報だけ追加済み |
-| `portal/return` / `unfilled` | 旧 `customerSession` 中心 | `transactions` 作成 | customerUsers 移行は未commit WIP |
+| `portal/return` / `unfilled` | localStorage `customerSession` 互換 session | `transactions` 作成 | Portal Auth 後の互換 session を利用。個別schema整理は後続 |
 | `useReturnApprovals.fulfillReturns` | — | `applyBulkTankOperations` の `logExtra: { customerId }` | logs に customerId を付与 |
 | `useOrderFulfillment.fulfillOrder` | — | 同上 | logs に customerId を付与 |
 
@@ -159,7 +170,7 @@
 | C6 | `logs.location` も顧客名文字列 + 任意の `customerId` 併存 | 集計時にどちらを軸にするか不統一 |
 | C7 | `transactions.customerNameInput` は portal Auth/customerUsers WIP 側のフィールド | 現行mainの portal/order では追加しない |
 | C8 | `customerUsers.customerName` は紐付け確定時に保存するスナップショット | customer の name 変更時に同期するかどうかが未定 |
-| C9 | portal session は現行mainでは旧 `customerSession` | Firebase Auth + customerUsers 移行時に互換設計が必要 |
+| C9 | portal session は Firebase Auth + `customerUsers` を正としつつ、画面互換用に localStorage `customerSession` を保存 | `portal/order` 等の旧 session 参照を後続で整理する |
 
 ---
 
@@ -186,6 +197,7 @@
 - **`admin/settings` の destinations タブは削除済み**
 - **`src/lib/firebase/customer-destination.ts` は削除済み**
 - **`portal/order` は旧 customerSession 方式のまま delivery metadata を保存**
+- **Portal Auth Phase 0 は Firebase Auth + customerUsers ベースで本番確認済み**
 - **`order-types` は delivery metadata を fallback 付きで読める**
 - **staff operations は delivery / pickup 情報を表示できる**
 
@@ -194,8 +206,32 @@
 - `customers.name` vs `companyName` の役割
 - `tanks.location` / `logs.location` の文字列依存
 - `useDestinations` の命名（実体は `customers` 読み取り）
-- portal Auth / customerUsers 本番化（未commit WIP）
 - Firestore Rules 本番化（未deploy）
+
+### 2.4 Portal Auth Phase 0 本番確認
+
+2026-04-29 に本番 Hosting 上で以下を確認済み。
+
+- Email/Password provider は Firebase Console で有効化済み。
+- Email/Password 新規登録により Firebase Auth user が作成された。
+- `customerUsers/{uid}` の create/read/update が現行本番環境で成功した。
+- `/portal/setup` へ誘導され、`selfCompanyName` / `selfName` / `lineName` を保存できた。
+- setup 完了後に `/portal` へ戻り、`customerId` 未紐付け状態でも画面は壊れなかった。
+- `/portal/order` に到達できた。
+- `permission-denied` は発生しなかった。
+- `status` field が保存されていないことを確認した。
+- 確認用 Auth user と `customerUsers` doc は Firebase Console から手動削除済み。
+
+同時に、`/portal` の `getActiveLogs()` 用に以下の Firestore composite index を Firebase Console で手動作成済み。
+
+- collection: `logs`
+- query scope: Collection
+- `logStatus` Ascending
+- `location` Ascending
+- `timestamp` Descending
+- `__name__` Descending
+
+これは `logStatus == "active"` + `location == customerName` + `orderBy("timestamp", "desc")` に対応する index であり、`firestore.rules` の deploy ではない。
 
 ---
 
@@ -391,7 +427,7 @@
 
 | ファイル | 関数 | 役割 | 整理時の方針 |
 |---|---|---|---|
-| `src/lib/firebase/customer-user.ts` | `ensureCustomerUser(user)` 等 | portal Auth / customerUsers 移行用 | 未commit WIP。現行mainの本番実装ではない |
+| `src/lib/firebase/customer-user.ts` | `ensureCustomerUser(user)` 等 | portal Auth / customerUsers Phase 0 | 本番確認済み。Rules 正式deployは次フェーズ |
 | `src/lib/firebase/customer-destination.ts` | `syncCustomerDestination(payload)` | destinations への冗長コピー | 2026-04-26 に呼び出し元なしを確認し削除済み |
 
 ## Appendix B. 既存 transactions の customerId / customerName 保存パターン
