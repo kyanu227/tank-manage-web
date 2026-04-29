@@ -12,6 +12,7 @@ import {
 } from "firebase/auth";
 import { collection, getDocs, query, where } from "firebase/firestore";
 import { DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
+import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
 
 type StaffRole = "一般" | "準管理者" | "管理者";
 
@@ -81,24 +82,16 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   // Helper: look up staff by email, set session, authenticate
   const authenticateByEmail = useCallback(async (userEmail: string) => {
     try {
-      const q = query(
-        collection(db, "staff"),
-        where("email", "==", userEmail),
-        where("isActive", "==", true)
-      );
-      const snap = await getDocs(q);
+      const profile = await findActiveStaffByEmail(userEmail);
 
-      if (snap.empty) {
+      if (!profile) {
         setError("このメールアドレスはスタッフとして登録されていません。");
         localStorage.removeItem("staffSession");
         setIsAuthenticated(false);
         return false;
       }
 
-      const d = snap.docs[0];
-      const data = d.data();
-
-      if (allowedRoles && !allowedRoles.includes(data.role as StaffRole)) {
+      if (allowedRoles && !allowedRoles.includes(profile.role as StaffRole)) {
         setError("このページにアクセスする権限がありません");
         localStorage.removeItem("staffSession");
         setIsAuthenticated(false);
@@ -106,11 +99,11 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       }
 
       const userSession: StaffUser = {
-        id: d.id,
-        name: data.name,
-        role: data.role,
-        rank: data.rank || "レギュラー",
-        email: data.email,
+        id: profile.staffId,
+        name: profile.name,
+        role: profile.role,
+        rank: profile.rank,
+        email: profile.email,
       };
 
       localStorage.setItem("staffSession", JSON.stringify(userSession));

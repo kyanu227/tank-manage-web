@@ -24,7 +24,7 @@ export interface StaffAuthProfile {
 }
 
 export function staffEmailKey(email: string): string {
-  return email.trim();
+  return email.trim().toLowerCase();
 }
 
 export function buildStaffAuthProfile(staffId: string, data: DocumentData): StaffAuthProfile {
@@ -61,6 +61,7 @@ export function deleteStaffAuthMirrorInBatch(batch: WriteBatch, email: string) {
 
 export async function findActiveStaffByEmail(email: string): Promise<StaffAuthProfile | null> {
   const key = staffEmailKey(email);
+  const trimmedEmail = email.trim();
   if (!key) return null;
 
   try {
@@ -76,15 +77,24 @@ export async function findActiveStaffByEmail(email: string): Promise<StaffAuthPr
     console.warn("Staff auth mirror lookup failed, falling back to staff query:", e);
   }
 
-  const staffSnap = await getDocs(query(
-    collection(db, "staff"),
-    where("email", "==", key),
-    where("isActive", "==", true)
-  ));
-  if (staffSnap.empty) return null;
+  const emailCandidates = Array.from(new Set([key, trimmedEmail].filter(Boolean)));
+  let staffDoc = null;
 
-  const staffDoc = staffSnap.docs[0];
-  const profile = buildStaffAuthProfile(staffDoc.id, staffDoc.data());
+  for (const candidate of emailCandidates) {
+    const staffSnap = await getDocs(query(
+      collection(db, "staff"),
+      where("email", "==", candidate),
+      where("isActive", "==", true)
+    ));
+    if (!staffSnap.empty) {
+      staffDoc = staffSnap.docs[0];
+      break;
+    }
+  }
+
+  if (!staffDoc) return null;
+
+  const profile = buildStaffAuthProfile(staffDoc.id, { ...staffDoc.data(), email: key });
   try {
     await setDoc(doc(db, STAFF_BY_EMAIL_COLLECTION, key), {
       ...profile,

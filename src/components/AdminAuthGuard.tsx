@@ -14,9 +14,10 @@ import {
   User,
 } from "firebase/auth";
 import {
-  collection, getDocs, query, where, doc, getDoc,
+  doc, getDoc,
 } from "firebase/firestore";
 import { DEV_ADMIN_ALLOWED_PATHS, DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
+import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
 
 interface StaffUser {
   id: string;
@@ -105,27 +106,20 @@ export default function AdminAuthGuard({
           return;
         }
 
-        const q = query(
-          collection(db, "staff"),
-          where("email", "==", userEmail),
-          where("isActive", "==", true)
-        );
-        const snap = await getDocs(q);
+        const profile = await findActiveStaffByEmail(userEmail);
 
-        if (snap.empty) {
+        if (!profile) {
           setStaffUser(null);
           setStaffChecked(true);
           return;
         }
 
-        const d = snap.docs[0];
-        const data = d.data();
         const staff: StaffUser = {
-          id: d.id,
-          name: data.name,
-          role: data.role,
-          rank: data.rank || "レギュラー",
-          email: data.email,
+          id: profile.staffId,
+          name: profile.name,
+          role: profile.role,
+          rank: profile.rank,
+          email: profile.email,
         };
         setStaffUser(staff);
         onStaffLoaded?.(staff);
