@@ -1,17 +1,25 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { User, TrendingUp, Award, Clock } from "lucide-react";
+import { User, TrendingUp, Clock, Mail } from "lucide-react";
+import type { Timestamp } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
+import { useStaffProfile } from "@/hooks/useStaffProfile";
 
 interface LogEntry {
   tankId: string;
   action: string;
-  timestamp: any;
+  timestamp?: Timestamp;
   location: string;
 }
 
 export default function MyPage() {
+  const {
+    profile,
+    session,
+    loading: profileLoading,
+    error: profileError,
+  } = useStaffProfile();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState({ lend: 0, return: 0, fill: 0, other: 0 });
   const [loading, setLoading] = useState(true);
@@ -42,7 +50,7 @@ export default function MyPage() {
     })();
   }, []);
 
-  const formatTime = (ts: any) => {
+  const formatTime = (ts?: Timestamp) => {
     if (!ts?.toDate) return "—";
     const d = ts.toDate();
     return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
@@ -55,6 +63,18 @@ export default function MyPage() {
     { label: "その他", value: stats.other, color: "#f59e0b", bg: "#fffbeb" },
   ];
 
+  const displayName = profile?.name || session?.name || "スタッフ";
+  const displayRole = profile?.role || session?.role || "";
+  const displayRank = profile?.rank || session?.rank || "";
+  const displayEmail = profile?.email || session?.email || "";
+  const profileTitle = profileLoading && !profile && !session ? "読み込み中…" : displayName;
+  const profileDescription = profileLoading && !profile
+    ? "プロフィール確認中…"
+    : [
+        displayRole || "権限未設定",
+        displayRank ? `ランク: ${displayRank}` : "ランク未設定",
+      ].join(" / ");
+
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 24px" }}>
       {/* Profile */}
@@ -63,11 +83,23 @@ export default function MyPage() {
           <div style={{ width: 52, height: 52, borderRadius: "50%", background: "rgba(255,255,255,0.2)", display: "flex", alignItems: "center", justifyContent: "center" }}>
             <User size={26} />
           </div>
-          <div>
-            <h1 style={{ fontSize: 20, fontWeight: 800 }}>スタッフ</h1>
-            <p style={{ fontSize: 12, opacity: 0.8 }}>ランク: レギュラー</p>
+          <div style={{ minWidth: 0 }}>
+            <h1 style={{ fontSize: 20, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{profileTitle}</h1>
+            <p style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>{profileDescription}</p>
+            {displayEmail && (
+              <p
+                style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11, opacity: 0.75, marginTop: 6, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                title={displayEmail}
+              >
+                <Mail size={12} />
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{displayEmail}</span>
+              </p>
+            )}
           </div>
         </div>
+        {profileError && (
+          <p style={{ marginBottom: 12, fontSize: 11, fontWeight: 700, color: "#fee2e2" }}>{profileError}</p>
+        )}
         <div style={{ display: "flex", gap: 12 }}>
           <div style={{ flex: 1, background: "rgba(255,255,255,0.15)", borderRadius: 12, padding: "12px 14px" }}>
             <p style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>今月のスコア</p>

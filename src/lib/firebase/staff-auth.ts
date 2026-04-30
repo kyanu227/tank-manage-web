@@ -59,6 +59,54 @@ export function deleteStaffAuthMirrorInBatch(batch: WriteBatch, email: string) {
   batch.delete(doc(db, STAFF_BY_EMAIL_COLLECTION, key));
 }
 
+/**
+ * staff/{staffId} を直接読む表示用途の read-only helper。
+ * mirror 同期などの Firestore write は行わない。
+ */
+export async function getStaffProfileByIdReadOnly(staffId: string): Promise<StaffAuthProfile | null> {
+  const id = staffId.trim();
+  if (!id) return null;
+
+  const snap = await getDoc(doc(db, "staff", id));
+  if (!snap.exists()) return null;
+
+  return buildStaffAuthProfile(id, snap.data());
+}
+
+/**
+ * email から staff profile を読む表示用途の read-only helper。
+ * staffByEmail mirror を優先し、見つからなければ staff を query する。
+ * fallback 経路でも mirror は更新しない。
+ */
+export async function findStaffProfileByEmailReadOnly(email: string): Promise<StaffAuthProfile | null> {
+  const key = staffEmailKey(email);
+  const trimmedEmail = email.trim();
+  if (!key) return null;
+
+  const mirrorSnap = await getDoc(doc(db, STAFF_BY_EMAIL_COLLECTION, key));
+  if (mirrorSnap.exists()) {
+    const profile = buildStaffAuthProfile(
+      String(mirrorSnap.data().staffId || ""),
+      mirrorSnap.data()
+    );
+    if (profile.staffId) return profile;
+  }
+
+  const emailCandidates = Array.from(new Set([key, trimmedEmail].filter(Boolean)));
+  for (const candidate of emailCandidates) {
+    const staffSnap = await getDocs(query(
+      collection(db, "staff"),
+      where("email", "==", candidate)
+    ));
+    if (!staffSnap.empty) {
+      const staffDoc = staffSnap.docs[0];
+      return buildStaffAuthProfile(staffDoc.id, staffDoc.data());
+    }
+  }
+
+  return null;
+}
+
 export async function findActiveStaffByEmail(email: string): Promise<StaffAuthProfile | null> {
   const key = staffEmailKey(email);
   const trimmedEmail = email.trim();
