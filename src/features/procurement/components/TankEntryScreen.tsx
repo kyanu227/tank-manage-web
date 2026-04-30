@@ -14,7 +14,7 @@ import {
 } from "firebase/firestore";
 import ProcurementTabs from "@/components/ProcurementTabs";
 import { db } from "@/lib/firebase/config";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import { STATUS } from "@/lib/tank-rules";
 import {
@@ -156,7 +156,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
         purchaseDate,
         vendor,
         unitCost: Number(unitCostInput) || 0,
-        staff: getStaffName(),
+        actor: requireStaffIdentity(),
       });
 
       await refetch();
