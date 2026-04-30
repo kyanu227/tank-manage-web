@@ -31,14 +31,20 @@ export interface LogDoc {
   action?: string;
   status?: string;
   location?: string;
-  staff?: string;
   staffId?: string;
   staffName?: string;
   staffEmail?: string;
   customerId?: string;
   customerName?: string;
   note?: string;
+  editedByStaffId?: string;
+  editedByStaffName?: string;
+  editedByStaffEmail?: string;
   editReason?: string;
+  voidedByStaffId?: string;
+  voidedByStaffName?: string;
+  voidedByStaffEmail?: string;
+  voidReason?: string;
   /** 操作発生時刻。表示・期間集計の主軸。 */
   timestamp?: Timestamp;
   createdAt?: Timestamp;

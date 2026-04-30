@@ -50,8 +50,8 @@ export default function AdminDashboardPage() {
         // ログからユニークスタッフ数を集計
         const staffSet = new Set<string>();
         logs.forEach((log) => {
-          if (log.staff) {
-            staffSet.add(log.staff);
+          if (log.staffId) {
+            staffSet.add(log.staffId);
           }
         });
 

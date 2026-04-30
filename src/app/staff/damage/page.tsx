@@ -7,7 +7,7 @@ import { applyBulkTankOperations } from "@/lib/tank-operation";
 import TankIdInput from "@/components/TankIdInput";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
 const ACCENT = "#ef4444";
@@ -52,12 +52,12 @@ export default function DamageReportPage() {
     if (!confirm(`${queue.length}本の破損報告を送信しますか？`)) return;
     setSubmitting(true);
     try {
-      const staffName = getStaffName();
+      const context = { actor: requireStaffIdentity() };
       await applyBulkTankOperations(
         queue.map((item) => ({
           tankId: item.tankId,
           transitionAction: ACTION.DAMAGE_REPORT,
-          staff: staffName,
+          context,
           location: "倉庫",
           logNote: note,
         }))

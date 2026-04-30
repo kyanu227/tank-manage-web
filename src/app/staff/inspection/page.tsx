@@ -6,7 +6,7 @@ import { STATUS, ACTION } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import { useInspectionSettings } from "@/hooks/useInspectionSettings";
 
@@ -104,7 +104,7 @@ export default function InspectionPage() {
     if (!confirm(`耐圧検査完了：${selected.length}本を処理しますか？\n次回期限は ${settings.validityYears}年後 に更新されます。`)) return;
     setSubmitting(true);
     try {
-      const staffName = getStaffName();
+      const context = { actor: requireStaffIdentity() };
       // 次回期限 = 今日 + validityYears年。旧GAS互換で "YYYY/MM/DD" 文字列として保存
       const next = new Date();
       next.setFullYear(next.getFullYear() + settings.validityYears);
@@ -116,7 +116,7 @@ export default function InspectionPage() {
           tankId: t.id,
           transitionAction: ACTION.INSPECTION,
           currentStatus: t.status,
-          staff: staffName,
+          context,
           location: "倉庫",
           tankExtra: {
             maintenanceDate: todayStr,

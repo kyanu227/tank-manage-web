@@ -7,7 +7,7 @@ import { doc, writeBatch } from "firebase/firestore";
 import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
 import TankIdInput from "@/components/TankIdInput";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
 type TagType = "normal" | "unused" | "defect";
@@ -95,7 +95,7 @@ export default function InHousePage() {
     setReporting(true);
     setReportResult(null);
     try {
-      const staffName = getStaffName();
+      const context = { actor: requireStaffIdentity() };
       const tank = tankMap[tankId];
       if (!tank) {
         setReportResult({ success: false, message: `${tankId} は登録されていません` });
@@ -109,7 +109,7 @@ export default function InHousePage() {
         tankId,
         transitionAction: ACTION.IN_HOUSE_USE_RETRO,
         currentStatus: tank.status,
-        staff: staffName,
+        context,
         location: "自社",
         logNote: "事後報告",
       });
@@ -131,7 +131,7 @@ export default function InHousePage() {
     if (!confirm(`自社利用中のタンク全 ${inHouseTanks.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`)) return;
     setReturning(true);
     try {
-      const staffName = getStaffName();
+      const context = { actor: requireStaffIdentity() };
       await applyBulkTankOperations(
         inHouseTanks.map((tank) => {
           const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
@@ -139,7 +139,7 @@ export default function InHousePage() {
             tankId: tank.id,
             transitionAction: resolveReturnAction(tag, STATUS.IN_HOUSE),
             currentStatus: STATUS.IN_HOUSE,
-            staff: staffName,
+            context,
             location: "倉庫",
           };
         })

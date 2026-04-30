@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { db } from "@/lib/firebase/config";
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import {
@@ -102,11 +102,11 @@ export function useOrderFulfillment({
 
     setApprovingOrderId(order.id);
     try {
-      const staffName = getStaffName();
+      const actor = requireStaffIdentity();
       await updateDoc(doc(db, "transactions", order.id), {
         status: "approved",
         approvedAt: serverTimestamp(),
-        approvedBy: staffName,
+        approvedBy: actor.staffName,
         updatedAt: serverTimestamp(),
       });
       await fetchOrders();
@@ -229,8 +229,15 @@ export function useOrderFulfillment({
     }
     setOrderSubmitting(true);
     try {
-      const staffName = getStaffName();
+      const actor = requireStaffIdentity();
       const orderNote = `受注ID: ${selectedOrder.id}`;
+      const context = {
+        actor,
+        customer: {
+          customerId: selectedOrder.customerId,
+          customerName: selectedOrder.customerName,
+        },
+      };
 
       await applyBulkTankOperations(
         validTanks.map((tank) => ({
@@ -238,17 +245,16 @@ export function useOrderFulfillment({
           transitionAction: ACTION.LEND,
           logAction: "受注貸出",
           currentStatus: allTanks[tank.id]?.status ?? "",
-          staff: staffName,
+          context,
           location: selectedOrder.customerName,
           tankNote: orderNote,
           logNote: orderNote,
-          logExtra: { customerId: selectedOrder.customerId },
         })),
         (batch) => {
           batch.update(doc(db, "transactions", selectedOrder.id), {
             status: "completed",
             fulfilledAt: serverTimestamp(),
-            fulfilledBy: staffName,
+            fulfilledBy: actor.staffName,
             updatedAt: serverTimestamp(),
           });
         }

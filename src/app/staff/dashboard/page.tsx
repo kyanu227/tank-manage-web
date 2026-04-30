@@ -25,7 +25,7 @@ import {
 } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
-import { getStaffName, useStaffSession } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffSession } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import {
   applyLogCorrection,
@@ -34,6 +34,7 @@ import {
   type StaffCorrectionRole,
   type TankSnapshot,
 } from "@/lib/tank-operation";
+import type { CustomerSnapshot } from "@/lib/operation-context";
 import { db } from "@/lib/firebase/config";
 import {
   ACTION,
@@ -56,7 +57,11 @@ interface LogEntry {
   tankId: string;
   action: string;
   transitionAction?: string;
-  staff?: string;
+  staffId?: string;
+  staffName?: string;
+  staffEmail?: string;
+  customerId?: string;
+  customerName?: string;
   location?: string;
   timestamp?: DateValue;
   originalAt?: DateValue;
@@ -67,9 +72,13 @@ interface LogEntry {
   logKind?: string;
   rootLogId?: string;
   revision?: number;
-  editedBy?: string;
+  editedByStaffId?: string;
+  editedByStaffName?: string;
+  editedByStaffEmail?: string;
   editReason?: string;
-  voidedBy?: string;
+  voidedByStaffId?: string;
+  voidedByStaffName?: string;
+  voidedByStaffEmail?: string;
   voidReason?: string;
   voidedAt?: DateValue;
   prevTankSnapshot?: TankSnapshot;
@@ -80,8 +89,16 @@ interface EditForm {
   tankId: string | null;
   reason: string;
 }
+
+type BulkLocationOption = {
+  value: string;
+  location: string;
+  customer: CustomerSnapshot | null;
+};
+
 const LIMIT_MS = 72 * 60 * 60 * 1000;
 const ACTION_OPTIONS = Object.values(ACTION) as TankAction[];
+const IN_HOUSE_LOCATION_VALUE = "__inhouse__";
 
 export default function StaffDashboard() {
   const session = useStaffSession();
@@ -93,7 +110,7 @@ export default function StaffDashboard() {
   const tankIds = useMemo(() => tanks.map((t) => t.id), [tanks]);
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
-  const [customerDestinations, setCustomerDestinations] = useState<string[]>([]);
+  const [customerOptions, setCustomerOptions] = useState<CustomerSnapshot[]>([]);
   const [logSortOrder, setLogSortOrder] = useState<LogSortOrder>("desc");
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [isEditMode, setIsEditMode] = useState(false);
@@ -135,18 +152,15 @@ export default function StaffDashboard() {
       const entries = logs as unknown as LogEntry[];
       setLogs(entries.slice(0, 200));
 
-      const destinationSet = new Set<string>(["倉庫", "自社"]);
+      const customers: CustomerSnapshot[] = [];
       customerSnap.forEach((d) => {
         const data = d.data();
         if (data.isActive === false) return;
         const name = String(data.name || data.companyName || "").trim();
-        if (name) destinationSet.add(name);
+        if (name) customers.push({ customerId: d.id, customerName: name });
       });
-      entries.forEach((entry) => {
-        const location = String(entry.location || "").trim();
-        if (location) destinationSet.add(location);
-      });
-      setCustomerDestinations(Array.from(destinationSet).sort((a, b) => a.localeCompare(b)));
+      customers.sort((a, b) => a.customerName.localeCompare(b.customerName));
+      setCustomerOptions(customers);
     } catch (e) {
       console.error(e);
     } finally {
@@ -252,15 +266,19 @@ export default function StaffDashboard() {
     return null;
   }, [selectedLogs]);
 
-  const bulkLocationOptions = useMemo(() => {
+  const bulkLocationOptions = useMemo<BulkLocationOption[]>(() => {
     if (bulkLocationMode === "lend") {
-      return customerDestinations.filter((location) => location !== "倉庫" && location !== "自社");
+      return customerOptions.map((customer) => ({
+        value: customer.customerId,
+        location: customer.customerName,
+        customer,
+      }));
     }
     if (bulkLocationMode === "inhouse") {
-      return ["自社"];
+      return [{ value: IN_HOUSE_LOCATION_VALUE, location: "自社", customer: null }];
     }
     return [];
-  }, [bulkLocationMode, customerDestinations]);
+  }, [bulkLocationMode, customerOptions]);
 
   const openEdit = (log: LogEntry) => {
     setEditingLog(log);
@@ -284,7 +302,7 @@ export default function StaffDashboard() {
         mode: "replace",
         patch,
         reason: editForm.reason,
-        editedBy: getStaffName(),
+        editor: requireStaffIdentity(),
         editedByRole: correctionRole,
       });
       setEditingLog(null);
@@ -306,7 +324,7 @@ export default function StaffDashboard() {
     try {
       await voidLog({
         logId: voidingLog.id,
-        voidedBy: getStaffName(),
+        voider: requireStaffIdentity(),
         voidedByRole: correctionRole,
         reason: voidReason,
       });
@@ -350,8 +368,8 @@ export default function StaffDashboard() {
   const openBulkLocationModal = () => {
     if (bulkLocationOptions.length === 0) return;
     setBulkLocationValue((prev) => {
-      if (prev && bulkLocationOptions.includes(prev)) return prev;
-      return bulkLocationOptions[0] ?? "";
+      if (prev && bulkLocationOptions.some((option) => option.value === prev)) return prev;
+      return bulkLocationOptions[0]?.value ?? "";
     });
     setBulkLocationReason("");
     setBulkLocationModalOpen(true);
@@ -362,15 +380,20 @@ export default function StaffDashboard() {
 
     setSavingBulkLocation(true);
     try {
+      const selectedOption = bulkLocationOptions.find((option) => option.value === bulkLocationValue);
+      if (!selectedOption) {
+        alert("貸出先が選択されていません");
+        return;
+      }
       const failures: string[] = [];
       for (const log of selectedLogs) {
         try {
           await applyLogCorrection({
             targetLogId: log.id,
             mode: "replace",
-            patch: { location: bulkLocationValue },
+            patch: { location: selectedOption.location, customer: selectedOption.customer },
             reason: bulkLocationReason,
-            editedBy: getStaffName(),
+            editor: requireStaffIdentity(),
             editedByRole: correctionRole,
           });
         } catch (e: unknown) {
@@ -404,7 +427,7 @@ export default function StaffDashboard() {
         try {
           await voidLog({
             logId: log.id,
-            voidedBy: getStaffName(),
+            voider: requireStaffIdentity(),
             voidedByRole: correctionRole,
             reason: bulkVoidReason,
           });
@@ -820,7 +843,7 @@ export default function StaffDashboard() {
                               {log.location || "-"}
                             </span>
                             <span style={{ fontSize: 11, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {log.staff || "-"}
+                              {log.staffName || "-"}
                             </span>
                           </div>
                           <span
@@ -891,14 +914,14 @@ export default function StaffDashboard() {
                                           <span style={{ fontSize: 12, color: "#64748b" }}>{rev.action}</span>
                                           <span style={{ fontSize: 12, color: "#94a3b8" }}>{formatTime(rev.revisionCreatedAt)}</span>
                                         </div>
-                                        {(rev.editedBy || rev.editReason) && (
+                                        {(rev.editedByStaffName || rev.editReason) && (
                                           <div style={{ marginTop: 4, fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                            {rev.editedBy || "-"} / {rev.editReason || "-"}
+                                            {rev.editedByStaffName || "-"} / {rev.editReason || "-"}
                                           </div>
                                         )}
                                         {rev.logStatus === "voided" && (
                                           <div style={{ marginTop: 4, fontSize: 11, color: "#dc2626", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                            {rev.voidedBy || "-"} / {rev.voidReason || "-"}
+                                            {rev.voidedByStaffName || "-"} / {rev.voidReason || "-"}
                                           </div>
                                         )}
                                       </div>
@@ -1017,9 +1040,9 @@ export default function StaffDashboard() {
                 onChange={(e) => setBulkLocationValue(e.target.value)}
                 style={inputStyle}
               >
-                {bulkLocationOptions.map((location) => (
-                  <option key={location} value={location}>
-                    {location}
+                {bulkLocationOptions.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.location}
                   </option>
                 ))}
               </select>

@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { doc, writeBatch } from "firebase/firestore";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { db } from "@/lib/firebase/config";
 import { tanksRepository } from "@/lib/firebase/repositories";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
@@ -87,7 +87,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
 
     setReturning(prev => ({ ...prev, [loc]: true }));
     try {
-      const staffName = getStaffName();
+      const context = { actor: requireStaffIdentity() };
 
       await applyBulkTankOperations(
         tanksToReturn.map((tank) => {
@@ -96,7 +96,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
             tankId: tank.id,
             transitionAction: resolveReturnAction(tag, tank.status),
             currentStatus: tank.status,
-            staff: staffName,
+            context,
             location: "倉庫",
           };
         })

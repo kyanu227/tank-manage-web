@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import {
   RETURN_TAG,
@@ -147,12 +147,22 @@ export function useManualTankOperation({
       alert("貸出先を選択してください。");
       return;
     }
+    if (mode === "lend" && !selectedCustomerId) {
+      alert("貸出先IDを取得できませんでした。貸出先を選び直してください。");
+      return;
+    }
 
     if (!skipConfirm && !confirm(`${config.label}：${validItems.length}本を処理しますか？`)) return;
 
     setSubmitting(true);
     try {
-      const staffName = getStaffName();
+      const actor = requireStaffIdentity();
+      const context = {
+        actor,
+        ...(mode === "lend" && selectedCustomerId
+          ? { customer: { customerId: selectedCustomerId, customerName: selectedDest } }
+          : {}),
+      };
 
       await applyBulkTankOperations(
         validItems.map((item) => {
@@ -175,13 +185,10 @@ export function useManualTankOperation({
             tankId: item.tankId,
             transitionAction: resolvedAction,
             currentStatus: item.status || "",
-            staff: staffName,
+            context,
             location: finalLocation,
             tankNote: finalNote,
             logNote: finalNote,
-            ...(mode === "lend" && selectedCustomerId
-              ? { logExtra: { customerId: selectedCustomerId } }
-              : {}),
           };
         })
       );
