@@ -32,6 +32,11 @@ export interface LogDoc {
   status?: string;
   location?: string;
   staff?: string;
+  staffId?: string;
+  staffName?: string;
+  staffEmail?: string;
+  customerId?: string;
+  customerName?: string;
   note?: string;
   editReason?: string;
   /** 操作発生時刻。表示・期間集計の主軸。 */
