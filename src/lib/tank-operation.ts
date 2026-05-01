@@ -192,6 +192,23 @@ const META_LOG_FIELDS = new Set([
   "newStatus",
 ]);
 
+const RESERVED_LOG_EXTRA_FIELDS = new Set([
+  ...META_LOG_FIELDS,
+  "tankId",
+  "action",
+  "transitionAction",
+  "location",
+  "staff",
+  "customer",
+  "staffId",
+  "staffName",
+  "staffEmail",
+  "customerId",
+  "customerName",
+  "note",
+  "logNote",
+]);
+
 const PRIVILEGED_CORRECTION_ROLES: StaffCorrectionRole[] = ["管理者", "準管理者"];
 const CORRECTION_LIMIT_MS = 72 * 60 * 60 * 1000;
 
@@ -299,7 +316,7 @@ async function commitPlannedOperations(
     const now = serverTimestamp();
 
     tx.set(op.logRef, {
-      ...(op.input.logExtra ?? {}),
+      ...sanitizeLogExtra(op.input.logExtra),
       tankId: op.input.tankId,
       action: logAction,
       transitionAction: op.input.transitionAction,
@@ -696,6 +713,15 @@ function copyBodyExtraFields(log: TankLogData): Record<string, unknown> {
   delete extra.customerName;
   delete extra.note;
   delete extra.logNote;
+  return extra;
+}
+
+function sanitizeLogExtra(logExtra?: Record<string, unknown>): Record<string, unknown> {
+  if (!logExtra) return {};
+  const extra: Record<string, unknown> = {};
+  Object.entries(logExtra).forEach(([key, value]) => {
+    if (!RESERVED_LOG_EXTRA_FIELDS.has(key)) extra[key] = value;
+  });
   return extra;
 }
 
