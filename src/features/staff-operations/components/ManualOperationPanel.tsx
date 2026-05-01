@@ -3,6 +3,7 @@
 import { AlertCircle, ArrowLeft, Droplets, Loader2, Send, X } from "lucide-react";
 import DrumRoll from "@/components/DrumRoll";
 import QuickSelect from "@/components/QuickSelect";
+import type { QuickSelectOption } from "@/components/QuickSelect";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
 import type { ModeConfigItem, OpMode, TagType } from "../types";
 
@@ -10,9 +11,9 @@ interface ManualOperationPanelProps {
   mode: OpMode;
   config: ModeConfigItem;
   prefixes: string[];
-  destinations?: string[];
-  selectedDest?: string;
-  setSelectedDest?: (dest: string) => void;
+  customerOptions?: QuickSelectOption[];
+  selectedCustomerId?: string;
+  setSelectedCustomerId?: (customerId: string) => void;
   manual: UseManualTankOperationResult;
   onBack?: () => void;
 }
@@ -21,9 +22,9 @@ export default function ManualOperationPanel({
   mode,
   config,
   prefixes,
-  destinations = [],
-  selectedDest = "",
-  setSelectedDest,
+  customerOptions = [],
+  selectedCustomerId = "",
+  setSelectedCustomerId,
   manual,
   onBack,
 }: ManualOperationPanelProps) {
@@ -145,15 +146,15 @@ export default function ManualOperationPanel({
           )}
         </div>
 
-        {isLend && setSelectedDest && (
+        {isLend && setSelectedCustomerId && (
           <div style={{
             padding: "8px 16px", background: "#fff", borderTop: "1px solid #e2e8f0",
             flexShrink: 0, zIndex: 20,
           }}>
             <QuickSelect
-              options={destinations}
-              value={selectedDest}
-              onChange={setSelectedDest}
+              options={customerOptions}
+              value={selectedCustomerId}
+              onChange={setSelectedCustomerId}
               onConfirm={() => handleSubmit(true)}
               color={config.color}
               placeholder="貸出先を選択して実行..."

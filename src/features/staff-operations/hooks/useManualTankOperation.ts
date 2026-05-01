@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
+import type { CustomerSnapshot } from "@/lib/operation-context";
 import {
   RETURN_TAG,
   resolveReturnAction,
@@ -17,8 +18,7 @@ interface UseManualTankOperationParams {
   mode: OpMode;
   config: ModeConfigItem;
   allTanks: TankMap;
-  selectedDest: string;
-  selectedCustomerId?: string | null;
+  selectedCustomer?: CustomerSnapshot | null;
   fetchData: () => Promise<void>;
 }
 
@@ -45,8 +45,7 @@ export function useManualTankOperation({
   mode,
   config,
   allTanks,
-  selectedDest,
-  selectedCustomerId,
+  selectedCustomer,
   fetchData,
 }: UseManualTankOperationParams): UseManualTankOperationResult {
   const [returnTag, setReturnTag] = useState<TagType>("normal");
@@ -143,12 +142,8 @@ export function useManualTankOperation({
     const validItems = opQueue.filter((q) => q.valid);
     if (validItems.length === 0) return;
 
-    if (mode === "lend" && !selectedDest) {
+    if (mode === "lend" && !selectedCustomer) {
       alert("貸出先を選択してください。");
-      return;
-    }
-    if (mode === "lend" && !selectedCustomerId) {
-      alert("貸出先IDを取得できませんでした。貸出先を選び直してください。");
       return;
     }
 
@@ -159,8 +154,8 @@ export function useManualTankOperation({
       const actor = requireStaffIdentity();
       const context = {
         actor,
-        ...(mode === "lend" && selectedCustomerId
-          ? { customer: { customerId: selectedCustomerId, customerName: selectedDest } }
+        ...(mode === "lend" && selectedCustomer
+          ? { customer: selectedCustomer }
           : {}),
       };
 
@@ -175,7 +170,7 @@ export function useManualTankOperation({
           let finalNote = "";
 
           if (mode === "lend") {
-            finalLocation = selectedDest;
+            finalLocation = selectedCustomer?.customerName ?? "";
           } else if (mode === "return") {
             if (tag === RETURN_TAG.UNUSED) finalNote = "[TAG:unused]";
             else if (tag === RETURN_TAG.DEFECT) finalNote = "[TAG:defect]";
@@ -201,7 +196,7 @@ export function useManualTankOperation({
     } finally {
       setSubmitting(false);
     }
-  }, [config.action, config.label, fetchData, mode, opQueue, selectedCustomerId, selectedDest]);
+  }, [config.action, config.label, fetchData, mode, opQueue, selectedCustomer]);
 
   const validCount = useMemo(() => opQueue.filter(q => q.valid).length, [opQueue]);
 

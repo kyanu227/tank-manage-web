@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { collection, getDocs } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import type { CustomerSnapshot } from "@/lib/operation-context";
 
 interface CustomerOption {
   id: string;
@@ -11,15 +12,20 @@ interface CustomerOption {
 }
 
 export function useDestinations() {
-  const [destinations, setDestinations] = useState<string[]>([]);
   const [customerOptions, setCustomerOptions] = useState<CustomerOption[]>([]);
-  const [selectedDest, setSelectedDest] = useState<string>("");
+  const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [loading, setLoading] = useState(true);
 
-  const selectedCustomerId = useMemo(() => {
-    if (!selectedDest) return null;
-    return customerOptions.find((customer) => customer.name === selectedDest)?.id ?? null;
-  }, [customerOptions, selectedDest]);
+  const selectedCustomer = useMemo<CustomerSnapshot | null>(() => {
+    if (!selectedCustomerId) return null;
+    const customer = customerOptions.find((option) => option.id === selectedCustomerId);
+    return customer ? { customerId: customer.id, customerName: customer.name } : null;
+  }, [customerOptions, selectedCustomerId]);
+
+  const customerSelectOptions = useMemo(
+    () => customerOptions.map((customer) => ({ value: customer.id, label: customer.name })),
+    [customerOptions]
+  );
 
   const fetchDestinations = useCallback(async () => {
     setLoading(true);
@@ -33,14 +39,13 @@ export function useDestinations() {
           customers.push({ id: d.id, name, isActive: true });
         }
       });
-      const dests = customers.map((customer) => customer.name);
       setCustomerOptions(customers);
-      setDestinations(dests);
+      const customerIds = customers.map((customer) => customer.id);
       // 現在の選択先が削除された／まだ未選択な場合のみ先頭にリセット。
       // 既に有効な選択先が入っていればユーザーの選択を維持する。
-      setSelectedDest((prev) => {
-        if (prev && dests.includes(prev)) return prev;
-        return dests[0] ?? "";
+      setSelectedCustomerId((prev) => {
+        if (prev && customerIds.includes(prev)) return prev;
+        return customerIds[0] ?? "";
       });
     } catch (e) {
       console.error(e);
@@ -54,11 +59,12 @@ export function useDestinations() {
   }, [fetchDestinations]);
 
   return {
-    destinations,
     customerOptions,
-    selectedDest,
+    customerSelectOptions,
     selectedCustomerId,
-    setSelectedDest,
+    selectedCustomer,
+    selectedCustomerName: selectedCustomer?.customerName ?? "",
+    setSelectedCustomerId,
     loading,
     fetchDestinations,
   };
