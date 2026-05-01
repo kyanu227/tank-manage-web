@@ -13,7 +13,7 @@ import {
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import {
   deleteStaffAuthMirrorInBatch,
-  findActiveStaffByEmail,
+  findStaffProfileByEmailReadOnly,
   setStaffAuthMirrorInBatch,
   staffEmailKey,
 } from "@/lib/firebase/staff-auth";
@@ -1047,8 +1047,8 @@ async function resolveAdminOperationActor(): Promise<OperationActor> {
     throw new Error("操作者を取得できませんでした。再ログインしてください。");
   }
 
-  const profile = await findActiveStaffByEmail(email);
-  if (!profile) {
+  const profile = await findStaffProfileByEmailReadOnly(email);
+  if (!profile || !profile.isActive) {
     throw new Error("操作者を取得できませんでした。再ログインしてください。");
   }
 
