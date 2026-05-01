@@ -123,6 +123,9 @@ export function useReturnApprovals({
               finalCondition: condition,
               fulfilledAt: serverTimestamp(),
               fulfilledBy: actor.staffName,
+              fulfilledByStaffId: actor.staffId,
+              fulfilledByStaffName: actor.staffName,
+              ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
             });
           });
         }

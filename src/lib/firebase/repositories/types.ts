@@ -64,6 +64,18 @@ export interface TransactionDoc {
   id: string;
   type: TransactionType;
   status: string;
+  customerId?: string;
+  customerName?: string;
+  createdByUid?: string;
+  approvedByStaffId?: string;
+  approvedByStaffName?: string;
+  approvedByStaffEmail?: string;
+  fulfilledByStaffId?: string;
+  fulfilledByStaffName?: string;
+  fulfilledByStaffEmail?: string;
+  linkedByStaffId?: string;
+  linkedByStaffName?: string;
+  linkedByStaffEmail?: string;
   createdAt?: unknown;
   updatedAt?: unknown;
 }

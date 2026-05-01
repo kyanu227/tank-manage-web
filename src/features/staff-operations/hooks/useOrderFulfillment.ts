@@ -107,6 +107,9 @@ export function useOrderFulfillment({
         status: "approved",
         approvedAt: serverTimestamp(),
         approvedBy: actor.staffName,
+        approvedByStaffId: actor.staffId,
+        approvedByStaffName: actor.staffName,
+        ...(actor.staffEmail ? { approvedByStaffEmail: actor.staffEmail } : {}),
         updatedAt: serverTimestamp(),
       });
       await fetchOrders();
@@ -255,6 +258,9 @@ export function useOrderFulfillment({
             status: "completed",
             fulfilledAt: serverTimestamp(),
             fulfilledBy: actor.staffName,
+            fulfilledByStaffId: actor.staffId,
+            fulfilledByStaffName: actor.staffName,
+            ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
             updatedAt: serverTimestamp(),
           });
         }
