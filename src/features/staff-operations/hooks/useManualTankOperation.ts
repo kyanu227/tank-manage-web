@@ -37,7 +37,7 @@ export interface UseManualTankOperationResult {
   handleInputChange: (e: ChangeEvent<HTMLInputElement>) => void;
   handleManualOkTrigger: () => void;
   removeFromQueue: (uid: string) => void;
-  handleSubmit: (skipConfirm?: boolean) => Promise<void>;
+  handleSubmit: (skipConfirm?: boolean, customerOverride?: CustomerSnapshot | null) => Promise<void>;
   reset: () => void;
 }
 
@@ -138,11 +138,16 @@ export function useManualTankOperation({
     setOpQueue((prev) => prev.filter((q) => q.uid !== uid));
   }, []);
 
-  const handleSubmit = useCallback(async (skipConfirm = false) => {
+  const handleSubmit = useCallback(async (
+    skipConfirm = false,
+    customerOverride?: CustomerSnapshot | null
+  ) => {
     const validItems = opQueue.filter((q) => q.valid);
     if (validItems.length === 0) return;
 
-    if (mode === "lend" && !selectedCustomer) {
+    const effectiveCustomer = customerOverride ?? selectedCustomer ?? null;
+
+    if (mode === "lend" && !effectiveCustomer) {
       alert("貸出先を選択してください。");
       return;
     }
@@ -154,8 +159,8 @@ export function useManualTankOperation({
       const actor = requireStaffIdentity();
       const context = {
         actor,
-        ...(mode === "lend" && selectedCustomer
-          ? { customer: selectedCustomer }
+        ...(mode === "lend" && effectiveCustomer
+          ? { customer: effectiveCustomer }
           : {}),
       };
 
@@ -170,7 +175,7 @@ export function useManualTankOperation({
           let finalNote = "";
 
           if (mode === "lend") {
-            finalLocation = selectedCustomer?.customerName ?? "";
+            finalLocation = effectiveCustomer?.customerName ?? "";
           } else if (mode === "return") {
             if (tag === RETURN_TAG.UNUSED) finalNote = "[TAG:unused]";
             else if (tag === RETURN_TAG.DEFECT) finalNote = "[TAG:defect]";
