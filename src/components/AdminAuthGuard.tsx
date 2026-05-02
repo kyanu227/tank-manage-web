@@ -16,6 +16,7 @@ import {
 import {
   doc, getDoc,
 } from "firebase/firestore";
+import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
 import { DEV_ADMIN_ALLOWED_PATHS, DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
 
@@ -148,11 +149,9 @@ export default function AdminAuthGuard({
         if (staffUser.role === "管理者") {
           setHasAccess(true);
           // Report all admin paths as allowed
-          const allPaths = [
-            "/admin", "/admin/settings", "/admin/notifications",
-            "/admin/sales", "/admin/staff-analytics", "/admin/money",
-            "/admin/billing", "/admin/permissions",
-          ];
+          const allPaths = ADMIN_PAGES
+            .filter((page) => !page.devOnly && !page.hidden)
+            .map((page) => page.path);
           onPermissionsLoaded?.(allPaths);
           setPermChecked(true);
           return;
@@ -171,7 +170,11 @@ export default function AdminAuthGuard({
 
             // Check if current pathname is allowed
             const isAllowed = allowedPaths.some(
-              (p) => pathname === p || (p !== "/admin" && pathname.startsWith(p + "/"))
+              (p) => (
+                pathname === p
+                || (p !== "/admin" && pathname.startsWith(p + "/"))
+                || (pathname === "/admin/settings" && p === "/admin/settings/portal")
+              )
             );
             setHasAccess(isAllowed);
           } else {

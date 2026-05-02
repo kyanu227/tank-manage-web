@@ -10,6 +10,7 @@ import {
   BarChart3,
   Users,
   Wallet,
+  Package,
   FileText,
   Menu,
   X,
@@ -20,6 +21,7 @@ import {
   Building2,
   ExternalLink,
   Workflow,
+  ShieldCheck,
 } from "lucide-react";
 import AdminAuthGuard from "@/components/AdminAuthGuard";
 import { auth } from "@/lib/firebase/config";
@@ -55,6 +57,7 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     label: "スタッフ・権限",
     items: [
+      { href: "/admin/staff", label: "担当者", icon: Users },
       { href: "/admin/permissions", label: "ページ権限", icon: Shield, adminOnly: true },
     ],
   },
@@ -62,12 +65,14 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     label: "マスタ・料金",
     items: [
       { href: "/admin/money", label: "金銭・ランク", icon: Wallet },
-      { href: "/admin/settings", label: "設定変更", icon: Settings },
+      { href: "/admin/order-master", label: "発注品目", icon: Package },
     ],
   },
   {
-    label: "通知・外部連携",
+    label: "設定",
     items: [
+      { href: "/admin/settings/portal", label: "ポータル設定", icon: Settings },
+      { href: "/admin/settings/inspection", label: "耐圧検査設定", icon: ShieldCheck },
       { href: "/admin/notifications", label: "通知設定", icon: Bell },
     ],
   },
