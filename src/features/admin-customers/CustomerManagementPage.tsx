@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Building2, Plus, Save, Search, X, RefreshCw, ToggleLeft, ToggleRight } from "lucide-react";
+import Link from "next/link";
+import { Building2, Plus, Save, Search, X, RefreshCw, ToggleLeft, ToggleRight, Users } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { addDoc, collection, doc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
 import PortalUsersPanel from "./PortalUsersPanel";
@@ -115,16 +116,59 @@ const buildCustomerPayload = (customer: Customer) => {
 
 export type AdminCustomersInitialTab = "customers" | "portalUsers";
 
+const customerTabs: readonly {
+  key: AdminCustomersInitialTab;
+  href: string;
+  label: string;
+  icon: typeof Building2;
+}[] = [
+  { key: "customers", href: "/admin/customers", label: "顧客管理", icon: Building2 },
+  { key: "portalUsers", href: "/admin/customers/users", label: "ポータル利用者", icon: Users },
+];
+
+const customerTabStyle = (active: boolean): React.CSSProperties => ({
+  padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 700,
+  display: "inline-flex", alignItems: "center", gap: 6,
+  textDecoration: "none", whiteSpace: "nowrap", transition: "all 0.2s",
+  background: active ? "#fff" : "transparent",
+  color: active ? "#0f172a" : "#64748b",
+  boxShadow: active ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
+});
+
 export default function CustomerManagementPage({
   initialTab,
 }: {
   initialTab: AdminCustomersInitialTab;
 }) {
-  if (initialTab === "portalUsers") {
-    return <PortalUsersPanel />;
-  }
+  const content = initialTab === "portalUsers" ? <PortalUsersPanel /> : <CustomersPanel />;
 
-  return <CustomersPanel />;
+  return (
+    <div>
+      <div
+        style={{
+          display: "flex", background: "#f1f5f9", padding: 4, borderRadius: 12,
+          width: "fit-content", maxWidth: "100%", overflowX: "auto", marginBottom: 20,
+        }}
+      >
+        {customerTabs.map((tab) => {
+          const Icon = tab.icon;
+          const active = initialTab === tab.key;
+          return (
+            <Link
+              key={tab.key}
+              href={tab.href}
+              aria-current={active ? "page" : undefined}
+              style={customerTabStyle(active)}
+            >
+              <Icon size={16} />
+              {tab.label}
+            </Link>
+          );
+        })}
+      </div>
+      {content}
+    </div>
+  );
 }
 
 function CustomersPanel() {
