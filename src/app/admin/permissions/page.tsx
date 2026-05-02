@@ -4,18 +4,11 @@ import { useState, useEffect, useCallback } from "react";
 import { Shield, Save, RefreshCw, Check } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { doc, getDoc, setDoc } from "firebase/firestore";
+import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
 
-/** All admin pages that can be permission-controlled */
-const ADMIN_PAGES = [
-  { path: "/admin", label: "ダッシュボード" },
-  { path: "/admin/settings", label: "設定変更" },
-  { path: "/admin/notifications", label: "通知設定" },
-  { path: "/admin/sales", label: "売上統計" },
-  { path: "/admin/staff-analytics", label: "スタッフ実績" },
-  { path: "/admin/money", label: "金銭・ランク" },
-  { path: "/admin/billing", label: "請求書発行" },
-  { path: "/admin/customers", label: "顧客管理" },
-];
+const PERMISSION_CONTROLLED_ADMIN_PAGES = ADMIN_PAGES.filter(
+  (page) => !page.adminOnly && !page.devOnly && !page.hidden
+);
 
 const ROLES = ["管理者", "準管理者"] as const;
 
@@ -36,7 +29,7 @@ export default function PermissionsPage() {
       } else {
         // Initialize with defaults: 管理者 gets everything, 準管理者 gets dashboard only
         const defaults: PermMap = {};
-        ADMIN_PAGES.forEach((p) => {
+        PERMISSION_CONTROLLED_ADMIN_PAGES.forEach((p) => {
           defaults[p.path] = ["管理者"];
         });
         // Default: give 準管理者 access to dashboard
@@ -160,7 +153,7 @@ export default function PermissionsPage() {
               </tr>
             </thead>
             <tbody>
-              {ADMIN_PAGES.map((page) => {
+              {PERMISSION_CONTROLLED_ADMIN_PAGES.map((page) => {
                 const roles = permissions[page.path] || ["管理者"];
                 return (
                   <tr key={page.path} style={{ borderBottom: "1px solid #f1f5f9" }}>

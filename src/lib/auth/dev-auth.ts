@@ -1,3 +1,5 @@
+import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
+
 export function isDevAuthBypassEnabled(): boolean {
   return process.env.NODE_ENV !== "production"
     && process.env.NEXT_PUBLIC_DEV_AUTH_BYPASS === "true";
@@ -11,14 +13,6 @@ export const DEV_STAFF_SESSION = {
   email: "dev@example.local",
 } as const;
 
-export const DEV_ADMIN_ALLOWED_PATHS = [
-  "/admin",
-  "/admin/settings",
-  "/admin/notifications",
-  "/admin/sales",
-  "/admin/staff-analytics",
-  "/admin/money",
-  "/admin/billing",
-  "/admin/permissions",
-  "/admin/state-diagram",
-];
+export const DEV_ADMIN_ALLOWED_PATHS = ADMIN_PAGES
+  .filter((page) => !page.hidden)
+  .map((page) => page.path);
