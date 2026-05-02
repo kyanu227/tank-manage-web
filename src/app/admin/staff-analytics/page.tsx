@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { Users, Award, TrendingUp } from "lucide-react";
 import { logsRepository } from "@/lib/firebase/repositories";
 
-interface StaffStat { name: string; lend: number; return_: number; fill: number; total: number; }
+interface StaffStat { key: string; name: string; lend: number; return_: number; fill: number; total: number; }
 
 export default function StaffAnalyticsPage() {
   const [stats, setStats] = useState<StaffStat[]>([]);
@@ -14,16 +14,16 @@ export default function StaffAnalyticsPage() {
     (async () => {
       try {
         const logs = await logsRepository.getActiveLogs();
-        const staffMap: Record<string, { lend: number; return_: number; fill: number }> = {};
+        const staffMap: Record<string, { name: string; lend: number; return_: number; fill: number }> = {};
         logs.forEach((log) => {
-          const name = log.staff || "不明";
-          if (!staffMap[name]) staffMap[name] = { lend: 0, return_: 0, fill: 0 };
-          if (log.action === "貸出") staffMap[name].lend++;
-          else if (log.action?.includes("返却")) staffMap[name].return_++;
-          else if (log.action === "充填") staffMap[name].fill++;
+          const key = log.staffId || "不明";
+          if (!staffMap[key]) staffMap[key] = { name: log.staffName || "不明", lend: 0, return_: 0, fill: 0 };
+          if (log.action === "貸出") staffMap[key].lend++;
+          else if (log.action?.includes("返却")) staffMap[key].return_++;
+          else if (log.action === "充填") staffMap[key].fill++;
         });
         const sorted = Object.entries(staffMap)
-          .map(([name, v]) => ({ name, ...v, total: v.lend + v.return_ + v.fill }))
+          .map(([key, v]) => ({ name: v.name, key, lend: v.lend, return_: v.return_, fill: v.fill, total: v.lend + v.return_ + v.fill }))
           .sort((a, b) => b.total - a.total);
         setStats(sorted);
       } catch (e) { console.error(e); }
@@ -43,7 +43,7 @@ export default function StaffAnalyticsPage() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {stats.map((s, i) => (
-            <div key={s.name} style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "18px 20px", display: "flex", alignItems: "center", gap: 14 }}>
+            <div key={s.key} style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "18px 20px", display: "flex", alignItems: "center", gap: 14 }}>
               <div style={{
                 width: 36, height: 36, borderRadius: 10, display: "flex", alignItems: "center", justifyContent: "center",
                 background: i === 0 ? "#fef3c7" : i === 1 ? "#f1f5f9" : i === 2 ? "#fef2f2" : "#f8fafc",

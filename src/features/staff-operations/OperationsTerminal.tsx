@@ -76,8 +76,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     mode,
     config,
     allTanks,
-    selectedDest: destinations.selectedDest,
-    selectedCustomerId: destinations.selectedCustomerId,
+    selectedCustomer: destinations.selectedCustomer,
     fetchData,
   });
 
@@ -142,9 +141,9 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           mode={mode}
           config={config}
           prefixes={prefixes}
-          destinations={destinations.destinations}
-          selectedDest={destinations.selectedDest}
-          setSelectedDest={destinations.setSelectedDest}
+          customerOptions={destinations.customerSelectOptions}
+          selectedCustomerId={destinations.selectedCustomerId}
+          setSelectedCustomerId={destinations.setSelectedCustomerId}
           manual={manual}
         />
       )}

@@ -33,6 +33,14 @@ export type PendingOrder = {
   deliveryNote?: string;
   note?: string;
   createdByUid?: string;
+  approvedBy?: string;
+  approvedByStaffId?: string;
+  approvedByStaffName?: string;
+  approvedByStaffEmail?: string;
+  fulfilledBy?: string;
+  fulfilledByStaffId?: string;
+  fulfilledByStaffName?: string;
+  fulfilledByStaffEmail?: string;
   // Firestore Timestamp（UI側で toMillis() を呼び出す）
   createdAt: TimestampLike | undefined;
 };
@@ -90,6 +98,14 @@ export function normalizeOrderDoc(
     deliveryNote: String(data.deliveryNote ?? ""),
     note: String(data.note ?? data.orderNote ?? data.deliveryNote ?? ""),
     createdByUid: String(data.createdByUid ?? ""),
+    approvedBy: String(data.approvedBy ?? ""),
+    approvedByStaffId: String(data.approvedByStaffId ?? ""),
+    approvedByStaffName: String(data.approvedByStaffName ?? ""),
+    approvedByStaffEmail: String(data.approvedByStaffEmail ?? ""),
+    fulfilledBy: String(data.fulfilledBy ?? ""),
+    fulfilledByStaffId: String(data.fulfilledByStaffId ?? ""),
+    fulfilledByStaffName: String(data.fulfilledByStaffName ?? ""),
+    fulfilledByStaffEmail: String(data.fulfilledByStaffEmail ?? ""),
     createdAt: data.createdAt,
   };
 }

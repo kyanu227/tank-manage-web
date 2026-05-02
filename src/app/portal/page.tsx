@@ -6,7 +6,7 @@ import Link from "next/link";
 import { logsRepository, tanksRepository } from "@/lib/firebase/repositories";
 import { STATUS } from "@/lib/tank-rules";
 
-interface LogEntry { action: string; timestamp: any; tankId: string; staff: string; }
+interface LogEntry { action: string; timestamp: any; tankId: string; staffName?: string; }
 
 export default function PortalPage() {
   const [rentedTanks, setRentedTanks] = useState<string[]>([]);
@@ -159,7 +159,7 @@ export default function PortalPage() {
                   {log.action}
                 </span>
                 <span style={{ flex: 1, fontFamily: "monospace", fontSize: "clamp(11px, 3vw, 13px)", fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{log.tankId}</span>
-                <span style={{ fontSize: "clamp(9px, 2.4vw, 10px)", color: "#cbd5e1", flexShrink: 0, whiteSpace: "nowrap" }}>{log.staff}</span>
+                <span style={{ fontSize: "clamp(9px, 2.4vw, 10px)", color: "#cbd5e1", flexShrink: 0, whiteSpace: "nowrap" }}>{log.staffName || "-"}</span>
               </div>
             ))
           )}

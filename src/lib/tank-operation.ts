@@ -23,6 +23,11 @@ import {
   validateTransition,
   type TankAction,
 } from "./tank-rules";
+import type {
+  CustomerSnapshot,
+  OperationActor,
+  OperationContext,
+} from "./operation-context";
 
 /* ════════════════════════════════════════════
    型定義
@@ -48,8 +53,8 @@ export interface TankOperationInput {
   /** UI 側の参考値。実際の検証は transaction 内で読んだ tanks の現在値で行う。 */
   currentStatus?: string;
 
-  /** 操作を行ったスタッフ名 */
-  staff: string;
+  /** 操作者・顧客 snapshot。logs の identity field はここから正規化する。 */
+  context: OperationContext;
 
   /** 遷移後の場所。省略時は "倉庫" */
   location?: string;
@@ -60,7 +65,7 @@ export interface TankOperationInput {
   /** ログドキュメントに記録する note（自由メモ）。省略時は空。 */
   logNote?: string;
 
-  /** ログに追加したい任意フィールド（customerId など） */
+  /** ログに追加したい任意フィールド（transactionId などの業務メタ情報） */
   logExtra?: Record<string, unknown>;
 
   /** タンクドキュメントに追加したい任意フィールド */
@@ -90,7 +95,7 @@ export type LogCorrectionPatch = {
   transitionAction?: TankAction;
   logAction?: string;
   location?: string;
-  staff?: string;
+  customer?: CustomerSnapshot | null;
   note?: string;
   logNote?: string;
 };
@@ -101,13 +106,13 @@ export interface ApplyLogCorrectionInput {
   sourceLogId?: string;
   patch?: LogCorrectionPatch;
   reason: string;
-  editedBy: string;
+  editor: OperationActor;
   editedByRole?: StaffCorrectionRole;
 }
 
 export interface VoidLogInput {
   logId: string;
-  voidedBy: string;
+  voider: OperationActor;
   voidedByRole?: StaffCorrectionRole;
   reason: string;
 }
@@ -117,7 +122,11 @@ type TankLogData = DocumentData & {
   action?: unknown;
   transitionAction?: unknown;
   location?: unknown;
-  staff?: unknown;
+  staffId?: unknown;
+  staffName?: unknown;
+  staffEmail?: unknown;
+  customerId?: unknown;
+  customerName?: unknown;
   note?: unknown;
   logNote?: unknown;
   logStatus?: unknown;
@@ -131,6 +140,21 @@ type TankLogData = DocumentData & {
   prevTankSnapshot?: unknown;
   nextTankSnapshot?: unknown;
   previousLogIdOnSameTank?: unknown;
+};
+
+type TankLogContent = {
+  tankId: string;
+  action: string;
+  transitionAction: TankAction;
+  location: string;
+  staffId: string;
+  staffName: string;
+  staffEmail?: string;
+  customerId?: string;
+  customerName?: string;
+  note: string;
+  logNote: string;
+  extraFields: Record<string, unknown>;
 };
 
 type PlannedTankOperation = {
@@ -150,6 +174,9 @@ const META_LOG_FIELDS = new Set([
   "revisionCreatedAt",
   "timestamp",
   "editedBy",
+  "editedByStaffId",
+  "editedByStaffName",
+  "editedByStaffEmail",
   "editReason",
   "prevTankSnapshot",
   "nextTankSnapshot",
@@ -157,9 +184,29 @@ const META_LOG_FIELDS = new Set([
   "voidReason",
   "voidedAt",
   "voidedBy",
+  "voidedByStaffId",
+  "voidedByStaffName",
+  "voidedByStaffEmail",
   "voided",
   "prevStatus",
   "newStatus",
+]);
+
+const RESERVED_LOG_EXTRA_FIELDS = new Set([
+  ...META_LOG_FIELDS,
+  "tankId",
+  "action",
+  "transitionAction",
+  "location",
+  "staff",
+  "customer",
+  "staffId",
+  "staffName",
+  "staffEmail",
+  "customerId",
+  "customerName",
+  "note",
+  "logNote",
 ]);
 
 const PRIVILEGED_CORRECTION_ROLES: StaffCorrectionRole[] = ["管理者", "準管理者"];
@@ -259,22 +306,24 @@ async function commitPlannedOperations(
     const tankLogNote = op.input.tankNote ?? "";
     const logNote = op.input.logNote ?? "";
     const logAction = op.input.logAction ?? op.input.transitionAction;
+    const actor = op.input.context.actor;
     const nextSnapshot: TankSnapshot = {
       status: nextStatus,
       location,
-      staff: op.input.staff,
+      staff: actor.staffName,
       logNote: tankLogNote,
     };
     const now = serverTimestamp();
 
     tx.set(op.logRef, {
+      ...sanitizeLogExtra(op.input.logExtra),
       tankId: op.input.tankId,
       action: logAction,
       transitionAction: op.input.transitionAction,
       prevStatus: prevSnapshot.status,
       newStatus: nextStatus,
       location,
-      staff: op.input.staff,
+      ...operationIdentityFields(op.input.context),
       note: logNote,
       logNote: tankLogNote,
       timestamp: now,
@@ -287,7 +336,6 @@ async function commitPlannedOperations(
       prevTankSnapshot: prevSnapshot,
       nextTankSnapshot: nextSnapshot,
       previousLogIdOnSameTank: stringOrNull(tankData.latestLogId),
-      ...(op.input.logExtra ?? {}),
     });
 
     tx.update(op.tankRef, {
@@ -412,7 +460,7 @@ export async function applyLogCorrection(
       action: content.action,
       transitionAction: content.transitionAction,
       location: content.location,
-      staff: content.staff,
+      ...tankLogContentIdentityFields(content),
       note: content.note,
       logNote: content.logNote,
       prevStatus: prevSnapshot.status,
@@ -425,7 +473,7 @@ export async function applyLogCorrection(
       originalAt,
       timestamp: inheritedTimestamp,
       revisionCreatedAt: serverTimestamp(),
-      editedBy: input.editedBy,
+      ...editorAuditFields(input.editor),
       editReason: reason,
       prevTankSnapshot: prevSnapshot,
       nextTankSnapshot: nextSnapshot,
@@ -481,7 +529,7 @@ export async function voidLog(input: VoidLogInput): Promise<void> {
       logStatus: "voided",
       voidReason: reason,
       voidedAt: serverTimestamp(),
-      voidedBy: input.voidedBy,
+      ...voiderAuditFields(input.voider),
     });
     tx.update(tankRef, tankUpdateFromSnapshot(prevSnapshot, stringOrNull(log.previousLogIdOnSameTank)));
   });
@@ -519,20 +567,81 @@ function tankUpdateFromSnapshot(
   };
 }
 
+function operationIdentityFields(context: OperationContext): DocumentData {
+  const actor = context.actor;
+  return {
+    staffId: actor.staffId,
+    staffName: actor.staffName,
+    ...(actor.staffEmail ? { staffEmail: actor.staffEmail } : {}),
+    ...(context.customer
+      ? {
+          customerId: context.customer.customerId,
+          customerName: context.customer.customerName,
+        }
+      : {}),
+  };
+}
+
+function tankLogContentIdentityFields(content: TankLogContent): DocumentData {
+  return {
+    staffId: content.staffId,
+    staffName: content.staffName,
+    ...(content.staffEmail ? { staffEmail: content.staffEmail } : {}),
+    ...(content.customerId && content.customerName
+      ? { customerId: content.customerId, customerName: content.customerName }
+      : {}),
+  };
+}
+
+function tankLogIdentityFromLog(log: TankLogData, label: string): OperationContext {
+  const staffEmail = stringOrUndefined(log.staffEmail);
+  const actor: OperationActor = {
+    staffId: requireString(log.staffId, `${label}のstaffId`),
+    staffName: requireString(log.staffName, `${label}のstaffName`),
+    ...(staffEmail ? { staffEmail } : {}),
+  };
+
+  const customerId = stringOrUndefined(log.customerId);
+  const customerName = stringOrUndefined(log.customerName);
+  if (customerId || customerName) {
+    if (!customerId) throw new Error(`${label}のcustomerIdがありません`);
+    if (!customerName) throw new Error(`${label}のcustomerNameがありません`);
+    return { actor, customer: { customerId, customerName } };
+  }
+
+  return { actor };
+}
+
+function editorAuditFields(actor: OperationActor): DocumentData {
+  return {
+    editedByStaffId: actor.staffId,
+    editedByStaffName: actor.staffName,
+    ...(actor.staffEmail ? { editedByStaffEmail: actor.staffEmail } : {}),
+  };
+}
+
+function voiderAuditFields(actor: OperationActor): DocumentData {
+  return {
+    voidedByStaffId: actor.staffId,
+    voidedByStaffName: actor.staffName,
+    ...(actor.staffEmail ? { voidedByStaffEmail: actor.staffEmail } : {}),
+  };
+}
+
 function nextSnapshotFromContent(
   prevSnapshot: TankSnapshot,
-  content: ReturnType<typeof mergeTankLogContent>
+  content: TankLogContent
 ): TankSnapshot {
   return {
     ...prevSnapshot,
     status: getNextStatus(content.transitionAction),
     location: content.location,
-    staff: content.staff,
+    staff: content.staffName,
     logNote: content.logNote,
   };
 }
 
-function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch) {
+function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch): TankLogContent {
   const oldTransitionAction = requireTankAction(
     oldLog.transitionAction ?? oldLog.action,
     "対象ログのtransitionAction"
@@ -541,30 +650,46 @@ function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch) {
   const transitionChanged = patch.transitionAction !== undefined && patch.transitionAction !== oldTransitionAction;
   const action = patch.logAction ?? (transitionChanged ? transitionAction : stringOrDefault(oldLog.action, transitionAction));
   const tankId = patch.tankId != null ? normalizeTankId(patch.tankId) : requireString(oldLog.tankId, "対象ログのtankId");
+  const identity = tankLogIdentityFromLog(oldLog, "対象ログ");
+  const customer =
+    patch.customer === undefined
+      ? identity.customer
+      : patch.customer ?? undefined;
 
   return {
     tankId,
     action,
     transitionAction,
     location: patch.location ?? stringOrDefault(oldLog.location, "倉庫"),
-    staff: patch.staff ?? stringOrDefault(oldLog.staff, ""),
+    staffId: identity.actor.staffId,
+    staffName: identity.actor.staffName,
+    ...(identity.actor.staffEmail ? { staffEmail: identity.actor.staffEmail } : {}),
+    ...(customer
+      ? { customerId: customer.customerId, customerName: customer.customerName }
+      : {}),
     note: patch.note ?? stringOrDefault(oldLog.note, ""),
     logNote: patch.logNote ?? stringOrDefault(oldLog.logNote, ""),
     extraFields: copyBodyExtraFields(oldLog),
   };
 }
 
-function tankLogContentFromSource(sourceLog: TankLogData) {
+function tankLogContentFromSource(sourceLog: TankLogData): TankLogContent {
   const transitionAction = requireTankAction(
     sourceLog.transitionAction ?? sourceLog.action,
     "復元元ログのtransitionAction"
   );
+  const identity = tankLogIdentityFromLog(sourceLog, "復元元ログ");
   return {
     tankId: requireString(sourceLog.tankId, "復元元ログのtankId"),
     action: stringOrDefault(sourceLog.action, transitionAction),
     transitionAction,
     location: stringOrDefault(sourceLog.location, "倉庫"),
-    staff: stringOrDefault(sourceLog.staff, ""),
+    staffId: identity.actor.staffId,
+    staffName: identity.actor.staffName,
+    ...(identity.actor.staffEmail ? { staffEmail: identity.actor.staffEmail } : {}),
+    ...(identity.customer
+      ? { customerId: identity.customer.customerId, customerName: identity.customer.customerName }
+      : {}),
     note: stringOrDefault(sourceLog.note, ""),
     logNote: stringOrDefault(sourceLog.logNote, ""),
     extraFields: copyBodyExtraFields(sourceLog),
@@ -581,8 +706,22 @@ function copyBodyExtraFields(log: TankLogData): Record<string, unknown> {
   delete extra.transitionAction;
   delete extra.location;
   delete extra.staff;
+  delete extra.staffId;
+  delete extra.staffName;
+  delete extra.staffEmail;
+  delete extra.customerId;
+  delete extra.customerName;
   delete extra.note;
   delete extra.logNote;
+  return extra;
+}
+
+function sanitizeLogExtra(logExtra?: Record<string, unknown>): Record<string, unknown> {
+  if (!logExtra) return {};
+  const extra: Record<string, unknown> = {};
+  Object.entries(logExtra).forEach(([key, value]) => {
+    if (!RESERVED_LOG_EXTRA_FIELDS.has(key)) extra[key] = value;
+  });
   return extra;
 }
 
@@ -650,6 +789,12 @@ function requireNumber(value: unknown, label: string): number {
 
 function stringOrDefault(value: unknown, fallback: string): string {
   return typeof value === "string" ? value : fallback;
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function stringOrNull(value: unknown): string | null {

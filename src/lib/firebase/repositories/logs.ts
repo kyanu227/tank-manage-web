@@ -39,6 +39,13 @@ export interface GetActiveLogsOptions {
   orderBy?: "timestamp" | null;
 }
 
+/** staffId / customerId など identity field で active ログを取得するオプション。 */
+export interface GetActiveLogsByIdentityOptions {
+  from?: Date;
+  to?: Date;
+  limit?: number;
+}
+
 /** Firestore ドキュメント → LogDoc に正規化する。 */
 function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
   const data = snap.data() as Record<string, unknown>;
@@ -58,9 +65,20 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     action: data.action as string | undefined,
     status: data.status as string | undefined,
     location: data.location as string | undefined,
-    staff: data.staff as string | undefined,
+    staffId: data.staffId as string | undefined,
+    staffName: data.staffName as string | undefined,
+    staffEmail: data.staffEmail as string | undefined,
+    customerId: data.customerId as string | undefined,
+    customerName: data.customerName as string | undefined,
     note: data.note as string | undefined,
+    editedByStaffId: data.editedByStaffId as string | undefined,
+    editedByStaffName: data.editedByStaffName as string | undefined,
+    editedByStaffEmail: data.editedByStaffEmail as string | undefined,
     editReason: data.editReason as string | undefined,
+    voidedByStaffId: data.voidedByStaffId as string | undefined,
+    voidedByStaffName: data.voidedByStaffName as string | undefined,
+    voidedByStaffEmail: data.voidedByStaffEmail as string | undefined,
+    voidReason: data.voidReason as string | undefined,
     timestamp: data.timestamp as Timestamp | undefined,
     createdAt: data.createdAt as Timestamp | undefined,
     revisionCreatedAt: data.revisionCreatedAt as Timestamp | undefined,
@@ -120,6 +138,28 @@ export async function getActiveLogs(
   return snap.docs.map(toLogDoc);
 }
 
+/**
+ * staffId で active ログを取得する。時系列降順。
+ * 必要 index: logs(logStatus Asc, staffId Asc, timestamp Desc, __name__ Desc)
+ */
+export async function getActiveLogsByStaffId(
+  staffId: string,
+  options?: GetActiveLogsByIdentityOptions,
+): Promise<LogDoc[]> {
+  return getActiveLogsByField("staffId", staffId, options);
+}
+
+/**
+ * customerId で active ログを取得する。時系列降順。
+ * 必要 index: logs(logStatus Asc, customerId Asc, timestamp Desc, __name__ Desc)
+ */
+export async function getActiveLogsByCustomerId(
+  customerId: string,
+  options?: GetActiveLogsByIdentityOptions,
+): Promise<LogDoc[]> {
+  return getActiveLogsByField("customerId", customerId, options);
+}
+
 /** 1件取得。 */
 export async function getLog(_logId: string): Promise<LogDoc | null> {
   throw new Error("not implemented in Phase 1");
@@ -133,12 +173,15 @@ export async function getLogsByTank(
   throw new Error("not implemented in Phase 1");
 }
 
-/** logStatus == "active" の時系列降順。 */
+/**
+ * tankId で active ログを取得する。時系列降順。
+ * 必要 index: logs(logStatus Asc, tankId Asc, timestamp Desc, __name__ Desc)
+ */
 export async function getActiveLogsByTank(
-  _tankId: string,
-  _limit?: number,
+  tankId: string,
+  limit?: number,
 ): Promise<LogDoc[]> {
-  throw new Error("not implemented in Phase 1");
+  return getActiveLogsByField("tankId", tankId, { limit });
 }
 
 /** 最新 active ログ。tank-trace や編集可否判定で使う。 */
@@ -187,4 +230,33 @@ export function listenRecentLogs(
   _limit?: number,
 ): Unsubscribe {
   throw new Error("not implemented in Phase 1");
+}
+
+type ActiveLogIdentityField = "staffId" | "customerId" | "tankId";
+
+async function getActiveLogsByField(
+  field: ActiveLogIdentityField,
+  value: string,
+  options?: GetActiveLogsByIdentityOptions,
+): Promise<LogDoc[]> {
+  const normalizedValue = value.trim();
+  if (!normalizedValue) return [];
+
+  const constraints: QueryConstraint[] = [
+    where("logStatus", "==", "active"),
+    where(field, "==", normalizedValue),
+  ];
+  if (options?.from) {
+    constraints.push(where("timestamp", ">=", Timestamp.fromDate(options.from)));
+  }
+  if (options?.to) {
+    constraints.push(where("timestamp", "<=", Timestamp.fromDate(options.to)));
+  }
+  constraints.push(orderBy("timestamp", "desc"));
+  if (options?.limit !== undefined) {
+    constraints.push(fsLimit(options.limit));
+  }
+
+  const snap = await getDocs(query(collection(db, "logs"), ...constraints));
+  return snap.docs.map(toLogDoc);
 }

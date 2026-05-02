@@ -5,6 +5,7 @@ import {
   writeBatch,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import type { OperationActor } from "@/lib/operation-context";
 
 export interface SupplyOrderItem {
   name: string;
@@ -14,7 +15,7 @@ export interface SupplyOrderItem {
 
 export interface SubmitSupplyOrderInput {
   items: SupplyOrderItem[];
-  staff: string;
+  actor: OperationActor;
 }
 
 export interface SubmitSupplyOrderResult {
@@ -25,7 +26,7 @@ export interface SubmitSupplyOrderResult {
 export async function submitSupplyOrder(
   input: SubmitSupplyOrderInput,
 ): Promise<SubmitSupplyOrderResult> {
-  const staff = String(input.staff || "").trim() || "スタッフ";
+  const actor = normalizeActor(input.actor);
   const items = input.items.map((item) => ({
     name: String(item.name || "").trim(),
     count: Number(item.count),
@@ -53,7 +54,7 @@ export async function submitSupplyOrder(
       count: item.count,
       price: item.price,
       total: item.price * item.count,
-      staff,
+      staff: actor.staffName,
       timestamp,
     });
   });
@@ -63,7 +64,9 @@ export async function submitSupplyOrder(
     action: "資材発注",
     newStatus: "-",
     location: "-",
-    staff,
+    staffId: actor.staffId,
+    staffName: actor.staffName,
+    ...(actor.staffEmail ? { staffEmail: actor.staffEmail } : {}),
     note: items.map((item) => `${item.name}×${item.count}`).join(", "),
     logStatus: "active",
     logKind: "order",
@@ -72,4 +75,20 @@ export async function submitSupplyOrder(
 
   await batch.commit();
   return { itemCount: items.length, total };
+}
+
+function normalizeActor(actor: OperationActor): OperationActor {
+  const staffId = String(actor?.staffId || "").trim();
+  const staffName = String(actor?.staffName || "").trim();
+  const staffEmail = String(actor?.staffEmail || "").trim();
+
+  if (!staffId || !staffName) {
+    throw new Error("操作者を取得できませんでした");
+  }
+
+  return {
+    staffId,
+    staffName,
+    ...(staffEmail ? { staffEmail } : {}),
+  };
 }

@@ -7,6 +7,7 @@ import {
   serverTimestamp,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import type { OperationActor } from "@/lib/operation-context";
 
 export type TankEntryMode = "purchase" | "register";
 
@@ -21,7 +22,7 @@ export interface SubmitTankEntryBatchInput {
   purchaseDate?: string;
   vendor?: string;
   unitCost?: number;
-  staff: string;
+  actor: OperationActor;
 }
 
 export interface SubmitTankEntryBatchResult {
@@ -36,7 +37,7 @@ export async function submitTankEntryBatch(
   const tankType = String(input.tankType || "").trim();
   const location = String(input.location || "").trim();
   const note = String(input.note || "").trim();
-  const staff = String(input.staff || "").trim();
+  const actor = normalizeActor(input.actor);
   const nextMaintenanceDate = normalizeDateYmd(input.nextMaintenanceDate);
   const purchaseDate = normalizeDateYmd(input.purchaseDate);
   const unitCost = input.mode === "purchase" ? Number(input.unitCost) || 0 : 0;
@@ -45,7 +46,6 @@ export async function submitTankEntryBatch(
   if (tankIds.length === 0) throw new Error("タンクIDを1件以上追加してください");
   if (!tankType) throw new Error("タンク種別を選択してください");
   if (!location) throw new Error("保管場所を選択してください");
-  if (!staff) throw new Error("操作者を取得できませんでした");
   if (input.mode === "purchase" && unitCost <= 0) {
     throw new Error("購入単価を入力してください");
   }
@@ -89,7 +89,7 @@ export async function submitTankEntryBatch(
       unitCost,
       totalCost,
       logId: logRef.id,
-      staff,
+      staff: actor.staffName,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
@@ -99,7 +99,9 @@ export async function submitTankEntryBatch(
       action: input.mode === "purchase" ? "タンク購入" : "タンク登録",
       newStatus: input.initialStatus,
       location,
-      staff,
+      staffId: actor.staffId,
+      staffName: actor.staffName,
+      ...(actor.staffEmail ? { staffEmail: actor.staffEmail } : {}),
       note: buildLogNote({
         tankIds,
         tankType,
@@ -115,6 +117,22 @@ export async function submitTankEntryBatch(
   });
 
   return { count: tankIds.length, totalCost };
+}
+
+function normalizeActor(actor: OperationActor): OperationActor {
+  const staffId = String(actor?.staffId || "").trim();
+  const staffName = String(actor?.staffName || "").trim();
+  const staffEmail = String(actor?.staffEmail || "").trim();
+
+  if (!staffId || !staffName) {
+    throw new Error("操作者を取得できませんでした");
+  }
+
+  return {
+    staffId,
+    staffName,
+    ...(staffEmail ? { staffEmail } : {}),
+  };
 }
 
 function normalizeTankId(tankId: string): string {

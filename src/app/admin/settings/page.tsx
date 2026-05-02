@@ -5,7 +5,7 @@ import {
   Users, Package, Plus, Save, RefreshCw, Trash2,
   ToggleLeft, ToggleRight, Eye, EyeOff, ChevronDown, Clock, ShieldCheck,
 } from "lucide-react";
-import { db } from "@/lib/firebase/config";
+import { auth, db } from "@/lib/firebase/config";
 import {
   collection, getDocs, doc, setDoc, getDoc,
   serverTimestamp, writeBatch,
@@ -13,10 +13,13 @@ import {
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import {
   deleteStaffAuthMirrorInBatch,
+  findStaffProfileByEmailReadOnly,
   setStaffAuthMirrorInBatch,
   staffEmailKey,
 } from "@/lib/firebase/staff-auth";
 import { assertNotChangedSinceLoad, createDocId, hasFieldChanges, isNewDocId } from "@/lib/firebase/diff-write";
+import { getStaffIdentity } from "@/hooks/useStaffSession";
+import type { OperationActor } from "@/lib/operation-context";
 
 /* ─── Types ─── */
 interface StaffMember {
@@ -394,6 +397,7 @@ export default function SettingsPage() {
       const batch = writeBatch(db);
       const customerUserSnap = await getDocs(collection(db, "customerUsers"));
       const currentCustomerUsers = new Map(customerUserSnap.docs.map((d) => [d.id, d.data()]));
+      let linkActor: OperationActor | null = null;
 
       for (const u of customerUserList) {
         if (!dirtyCustomerUserIds.includes(u.id)) continue;
@@ -430,12 +434,16 @@ export default function SettingsPage() {
         if (!customerId || previousCustomerId === customerId) continue;
 
         const pendingItems = await transactionsRepository.findPendingLinksByUid(u.uid);
+        if (pendingItems.length > 0 && !linkActor) {
+          linkActor = await resolveAdminOperationActor();
+        }
         pendingItems.forEach((item) => {
           batch.update(doc(db, "transactions", item.id), {
             customerId,
             customerName,
             status: "pending_approval",
             linkedAt: serverTimestamp(),
+            ...(linkActor ? linkedByStaffFields(linkActor) : {}),
             updatedAt: serverTimestamp(),
           });
         });
@@ -1028,4 +1036,35 @@ export default function SettingsPage() {
       `}</style>
     </div>
   );
+}
+
+async function resolveAdminOperationActor(): Promise<OperationActor> {
+  const cached = getStaffIdentity();
+  if (cached) return cached;
+
+  const email = auth.currentUser?.email?.trim();
+  if (!email) {
+    throw new Error("操作者を取得できませんでした。再ログインしてください。");
+  }
+
+  const profile = await findStaffProfileByEmailReadOnly(email);
+  if (!profile || !profile.isActive) {
+    throw new Error("操作者を取得できませんでした。再ログインしてください。");
+  }
+
+  return {
+    staffId: profile.staffId,
+    staffName: profile.name,
+    ...(profile.email ? { staffEmail: profile.email } : {}),
+    ...(profile.role ? { role: profile.role } : {}),
+    ...(profile.rank ? { rank: profile.rank } : {}),
+  };
+}
+
+function linkedByStaffFields(actor: OperationActor) {
+  return {
+    linkedByStaffId: actor.staffId,
+    linkedByStaffName: actor.staffName,
+    ...(actor.staffEmail ? { linkedByStaffEmail: actor.staffEmail } : {}),
+  };
 }

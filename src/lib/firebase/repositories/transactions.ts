@@ -11,6 +11,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { normalizeOrderDoc, type OrderStatus } from "@/lib/order-types";
+import type { OperationActor } from "@/lib/operation-context";
 import type {
   PendingOrder,
   RepositoryWriter,
@@ -217,7 +218,7 @@ export function listenReturnApprovals(
 /** 承認ショートカット（内部は update）。 */
 export async function markOrderApproved(
   _orderId: string,
-  _approvedBy: string,
+  _actor: OperationActor,
 ): Promise<void> {
   throw new Error("not implemented in Phase 1");
 }
@@ -226,7 +227,7 @@ export async function markOrderApproved(
 export function markOrderCompletedInBatch(
   _writer: RepositoryWriter,
   _orderId: string,
-  _fulfilledBy: string,
+  _actor: OperationActor,
 ): void {
   throw new Error("not implemented in Phase 1");
 }

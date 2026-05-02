@@ -2,8 +2,9 @@
 
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
+import type { CustomerSnapshot } from "@/lib/operation-context";
 import {
   RETURN_TAG,
   resolveReturnAction,
@@ -17,8 +18,7 @@ interface UseManualTankOperationParams {
   mode: OpMode;
   config: ModeConfigItem;
   allTanks: TankMap;
-  selectedDest: string;
-  selectedCustomerId?: string | null;
+  selectedCustomer?: CustomerSnapshot | null;
   fetchData: () => Promise<void>;
 }
 
@@ -37,7 +37,7 @@ export interface UseManualTankOperationResult {
   handleInputChange: (e: ChangeEvent<HTMLInputElement>) => void;
   handleManualOkTrigger: () => void;
   removeFromQueue: (uid: string) => void;
-  handleSubmit: (skipConfirm?: boolean) => Promise<void>;
+  handleSubmit: (skipConfirm?: boolean, customerOverride?: CustomerSnapshot | null) => Promise<void>;
   reset: () => void;
 }
 
@@ -45,8 +45,7 @@ export function useManualTankOperation({
   mode,
   config,
   allTanks,
-  selectedDest,
-  selectedCustomerId,
+  selectedCustomer,
   fetchData,
 }: UseManualTankOperationParams): UseManualTankOperationResult {
   const [returnTag, setReturnTag] = useState<TagType>("normal");
@@ -139,11 +138,16 @@ export function useManualTankOperation({
     setOpQueue((prev) => prev.filter((q) => q.uid !== uid));
   }, []);
 
-  const handleSubmit = useCallback(async (skipConfirm = false) => {
+  const handleSubmit = useCallback(async (
+    skipConfirm = false,
+    customerOverride?: CustomerSnapshot | null
+  ) => {
     const validItems = opQueue.filter((q) => q.valid);
     if (validItems.length === 0) return;
 
-    if (mode === "lend" && !selectedDest) {
+    const effectiveCustomer = customerOverride ?? selectedCustomer ?? null;
+
+    if (mode === "lend" && !effectiveCustomer) {
       alert("貸出先を選択してください。");
       return;
     }
@@ -152,7 +156,13 @@ export function useManualTankOperation({
 
     setSubmitting(true);
     try {
-      const staffName = getStaffName();
+      const actor = requireStaffIdentity();
+      const context = {
+        actor,
+        ...(mode === "lend" && effectiveCustomer
+          ? { customer: effectiveCustomer }
+          : {}),
+      };
 
       await applyBulkTankOperations(
         validItems.map((item) => {
@@ -165,7 +175,7 @@ export function useManualTankOperation({
           let finalNote = "";
 
           if (mode === "lend") {
-            finalLocation = selectedDest;
+            finalLocation = effectiveCustomer?.customerName ?? "";
           } else if (mode === "return") {
             if (tag === RETURN_TAG.UNUSED) finalNote = "[TAG:unused]";
             else if (tag === RETURN_TAG.DEFECT) finalNote = "[TAG:defect]";
@@ -175,13 +185,10 @@ export function useManualTankOperation({
             tankId: item.tankId,
             transitionAction: resolvedAction,
             currentStatus: item.status || "",
-            staff: staffName,
+            context,
             location: finalLocation,
             tankNote: finalNote,
             logNote: finalNote,
-            ...(mode === "lend" && selectedCustomerId
-              ? { logExtra: { customerId: selectedCustomerId } }
-              : {}),
           };
         })
       );
@@ -194,7 +201,7 @@ export function useManualTankOperation({
     } finally {
       setSubmitting(false);
     }
-  }, [config.action, config.label, fetchData, mode, opQueue, selectedCustomerId, selectedDest]);
+  }, [config.action, config.label, fetchData, mode, opQueue, selectedCustomer]);
 
   const validCount = useMemo(() => opQueue.filter(q => q.valid).length, [opQueue]);
 

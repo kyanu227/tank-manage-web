@@ -23,11 +23,26 @@ export default function MyPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState({ lend: 0, return: 0, fill: 0, other: 0 });
   const [loading, setLoading] = useState(true);
+  const staffId = profile?.staffId || session?.id?.trim() || "";
 
   useEffect(() => {
+    if (profileLoading && !staffId) return;
+
+    if (!staffId) {
+      // staffId が取れない場合は全体ログへ fallback せず、自分のログなしとして扱う。
+      setLogs([]);
+      setStats({ lend: 0, return: 0, fill: 0, other: 0 });
+      setLoading(false);
+      return;
+    }
+
+    let cancelled = false;
+
     (async () => {
+      setLoading(true);
       try {
-        const fetched = await logsRepository.getActiveLogs({ limit: 100 });
+        // 必要 index: logs(logStatus Asc, staffId Asc, timestamp Desc, __name__ Desc)
+        const fetched = await logsRepository.getActiveLogsByStaffId(staffId, { limit: 100 });
         const entries: LogEntry[] = [];
         const counts = { lend: 0, return: 0, fill: 0, other: 0 };
         fetched.forEach((log) => {
@@ -43,12 +58,19 @@ export default function MyPage() {
           else if (action === "充填") counts.fill++;
           else counts.other++;
         });
+        if (cancelled) return;
         setLogs(entries);
         setStats(counts);
       } catch (e) { console.error(e); }
-      finally { setLoading(false); }
+      finally {
+        if (!cancelled) setLoading(false);
+      }
     })();
-  }, []);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [profileLoading, staffId]);
 
   const formatTime = (ts?: Timestamp) => {
     if (!ts?.toDate) return "—";

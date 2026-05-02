@@ -3,6 +3,8 @@
 import { AlertCircle, ArrowLeft, Droplets, Loader2, Send, X } from "lucide-react";
 import DrumRoll from "@/components/DrumRoll";
 import QuickSelect from "@/components/QuickSelect";
+import type { QuickSelectOption } from "@/components/QuickSelect";
+import type { CustomerSnapshot } from "@/lib/operation-context";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
 import type { ModeConfigItem, OpMode, TagType } from "../types";
 
@@ -10,9 +12,9 @@ interface ManualOperationPanelProps {
   mode: OpMode;
   config: ModeConfigItem;
   prefixes: string[];
-  destinations?: string[];
-  selectedDest?: string;
-  setSelectedDest?: (dest: string) => void;
+  customerOptions?: QuickSelectOption[];
+  selectedCustomerId?: string;
+  setSelectedCustomerId?: (customerId: string) => void;
   manual: UseManualTankOperationResult;
   onBack?: () => void;
 }
@@ -21,9 +23,9 @@ export default function ManualOperationPanel({
   mode,
   config,
   prefixes,
-  destinations = [],
-  selectedDest = "",
-  setSelectedDest,
+  customerOptions = [],
+  selectedCustomerId = "",
+  setSelectedCustomerId,
   manual,
   onBack,
 }: ManualOperationPanelProps) {
@@ -47,6 +49,21 @@ export default function ManualOperationPanel({
   const isLend = mode === "lend";
   const isReturn = mode === "return";
   const isFill = mode === "fill";
+
+  const customerSnapshotFromOption = (customerId: string): CustomerSnapshot | null => {
+    const option = customerOptions.find((item) => typeof item !== "string" && item.value === customerId);
+    if (!option || typeof option === "string") return null;
+    return { customerId: option.value, customerName: option.label };
+  };
+
+  const handleCustomerConfirm = (customerId: string) => {
+    const customer = customerSnapshotFromOption(customerId);
+    if (!customer) {
+      alert("貸出先を取得できませんでした。貸出先を選び直してください。");
+      return;
+    }
+    void handleSubmit(true, customer);
+  };
 
   return (
     <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
@@ -145,16 +162,16 @@ export default function ManualOperationPanel({
           )}
         </div>
 
-        {isLend && setSelectedDest && (
+        {isLend && setSelectedCustomerId && (
           <div style={{
             padding: "8px 16px", background: "#fff", borderTop: "1px solid #e2e8f0",
             flexShrink: 0, zIndex: 20,
           }}>
             <QuickSelect
-              options={destinations}
-              value={selectedDest}
-              onChange={setSelectedDest}
-              onConfirm={() => handleSubmit(true)}
+              options={customerOptions}
+              value={selectedCustomerId}
+              onChange={setSelectedCustomerId}
+              onConfirm={handleCustomerConfirm}
               color={config.color}
               placeholder="貸出先を選択して実行..."
             />

@@ -7,6 +7,7 @@ import { collection, getDocs } from "firebase/firestore";
 import ProcurementTabs from "@/components/ProcurementTabs";
 import { useProcurementSwipe } from "@/features/procurement/hooks/useProcurementSwipe";
 import { submitSupplyOrder } from "@/lib/firebase/supply-order";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 
 interface OrderMasterItem { colA: string; colB: string; price: number; category: string; }
 interface CartItem { uid: string; name: string; count: number; price: number; }
@@ -59,7 +60,7 @@ export default function SupplyOrderPage() {
           count: c.count,
           price: c.price,
         })),
-        staff: "スタッフ",
+        actor: requireStaffIdentity(),
       });
       setResult({ success: true, message: `${cart.length}品目の発注を完了（合計 ¥${total.toLocaleString()}）` });
       setCart([]);

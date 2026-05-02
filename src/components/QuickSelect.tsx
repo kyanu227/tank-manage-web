@@ -3,8 +3,13 @@
 import React, { useState, useRef, useEffect, useCallback } from "react";
 import { ChevronDown } from "lucide-react";
 
+export type QuickSelectOption = string | {
+  value: string;
+  label: string;
+};
+
 interface QuickSelectProps {
-  options: string[];
+  options: QuickSelectOption[];
   value: string;
   onChange: (val: string) => void;
   onConfirm?: (val: string) => void;
@@ -20,6 +25,10 @@ export default function QuickSelect({
   color,
   placeholder = "選択してください",
 }: QuickSelectProps) {
+  const normalizedOptions = options.map((option) => (
+    typeof option === "string" ? { value: option, label: option } : option
+  ));
+  const selectedLabel = normalizedOptions.find((option) => option.value === value)?.label ?? value;
   const [isOpen, setIsOpen] = useState(false);
   const [isSwipeMode, setIsSwipeMode] = useState(false);
   const [highlightedValue, setHighlightedValue] = useState<string | null>(null);
@@ -144,7 +153,7 @@ export default function QuickSelect({
         }}
       >
         <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {value || placeholder}
+          {selectedLabel || placeholder}
         </span>
         <ChevronDown size={18} style={{ opacity: 0.6, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }} />
       </button>
@@ -161,17 +170,17 @@ export default function QuickSelect({
           animation: isSwipeMode ? "none" : "slideDown 0.2s ease-out"
         }}>
           <div style={{ maxHeight: "300px", overflowY: "auto", padding: "8px" }}>
-            {options.map((opt) => {
-              const isSelected = value === opt;
-              const isHighlighted = highlightedValue === opt;
+            {normalizedOptions.map((opt) => {
+              const isSelected = value === opt.value;
+              const isHighlighted = highlightedValue === opt.value;
               
               return (
                 <div
-                  key={opt}
-                  data-quick-select-item={opt}
+                  key={opt.value}
+                  data-quick-select-item={opt.value}
                   onClick={() => {
-                    onChange(opt);
-                    if (onConfirm) onConfirm(opt);
+                    onChange(opt.value);
+                    if (onConfirm) onConfirm(opt.value);
                     setIsOpen(false);
                   }}
                   style={{
@@ -183,7 +192,7 @@ export default function QuickSelect({
                     display: "flex", alignItems: "center", justifyContent: "space-between"
                   }}
                 >
-                  {opt}
+                  {opt.label}
                   {(isHighlighted || isSelected) && (
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
                   )}

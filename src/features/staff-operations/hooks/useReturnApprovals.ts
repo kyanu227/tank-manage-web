@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { doc, serverTimestamp } from "firebase/firestore";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { db } from "@/lib/firebase/config";
 import { tanksRepository, transactionsRepository } from "@/lib/firebase/repositories";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
@@ -78,7 +78,14 @@ export function useReturnApprovals({
     }
     setApprovalSubmitting(true);
     try {
-      const staffName = getStaffName();
+      const actor = requireStaffIdentity();
+      const context = {
+        actor,
+        customer: {
+          customerId: selectedReturnGroup.customerId,
+          customerName: selectedReturnGroup.customerName,
+        },
+      };
 
       // 承認直前に tanks/{tankId} を再取得し、現在の status を使う。
       // 承認待ちの間にタンク状態が変わっている可能性があるため、STATUS.LENT 固定だと
@@ -104,11 +111,10 @@ export function useReturnApprovals({
           tankId: item.tankId,
           transitionAction: resolveReturnAction(tag, currentStatus),
           currentStatus,
-          staff: staffName,
+          context,
           location: "倉庫",
           tankNote: note,
           logNote: note,
-          logExtra: { customerId: selectedReturnGroup.customerId },
         })),
         (batch) => {
           approvedData.forEach(({ item, condition }) => {
@@ -116,7 +122,10 @@ export function useReturnApprovals({
               status: "completed",
               finalCondition: condition,
               fulfilledAt: serverTimestamp(),
-              fulfilledBy: staffName,
+              fulfilledBy: actor.staffName,
+              fulfilledByStaffId: actor.staffId,
+              fulfilledByStaffName: actor.staffName,
+              ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
             });
           });
         }

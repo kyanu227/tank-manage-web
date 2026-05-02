@@ -6,7 +6,7 @@ import { STATUS, ACTION } from "@/lib/tank-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
-import { getStaffName } from "@/hooks/useStaffSession";
+import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
 const ACCENT = "#0ea5e9"; // Sky
@@ -64,13 +64,13 @@ export default function RepairPage() {
     if (!confirm(`修理完了：${selected.length}本を処理しますか？`)) return;
     setSubmitting(true);
     try {
-      const staffName = getStaffName();
+      const context = { actor: requireStaffIdentity() };
       await applyBulkTankOperations(
         selected.map((t) => ({
           tankId: t.id,
           transitionAction: ACTION.REPAIRED,
           currentStatus: t.status,
-          staff: staffName,
+          context,
           location: "倉庫",
         }))
       );
