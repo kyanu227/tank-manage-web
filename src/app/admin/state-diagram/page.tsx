@@ -42,6 +42,7 @@ const CATEGORIES: { name: string; color: string; actions: TankAction[] }[] = [
       ACTION.RETURN,
       ACTION.RETURN_UNUSED,
       ACTION.RETURN_DEFECT,
+      ACTION.CARRY_OVER,
       ACTION.FILL,
     ],
   },
@@ -750,7 +751,10 @@ export default function StateDiagramPage() {
             <b>共同作業</b>: 複数人で作業した場合、報酬・スコアは人数で均等割り（端数切捨て）。
           </li>
           <li>
-            <b>遷移元「どの状態からでも可」</b>: 事後報告・破損報告・破棄・耐圧検査など、例外的な操作。
+            <b>持ち越し</b>: 顧客が未使用タンクを翌日以降も保持する場合に、貸出中から未返却へ移す操作。
+          </li>
+          <li>
+            <b>遷移元「どの状態からでも可」</b>: 現時点では耐圧検査完了など、画面側で対象を絞る前提の例外操作。自社利用(事後)・破損報告・破棄は現在は状態制限あり。
           </li>
         </ul>
       </div>
