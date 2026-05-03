@@ -109,7 +109,7 @@ export const OP_RULES: Record<TankAction, TransitionRule> = {
     nextStatus: STATUS.IN_HOUSE,
   },
   [ACTION.IN_HOUSE_USE_RETRO]: {
-    allowedPrev: [], // 事後報告: 制限なし
+    allowedPrev: [STATUS.FILLED],
     nextStatus: STATUS.IN_HOUSE,
   },
   [ACTION.IN_HOUSE_RETURN]: {
@@ -127,7 +127,7 @@ export const OP_RULES: Record<TankAction, TransitionRule> = {
 
   // ── 異常系・メンテナンス ──
   [ACTION.DAMAGE_REPORT]: {
-    allowedPrev: [], // 制限なし: どのステータスからでも破損報告可能
+    allowedPrev: [STATUS.EMPTY, STATUS.FILLED, STATUS.IN_HOUSE],
     nextStatus: STATUS.DAMAGED,
   },
   [ACTION.REPAIRED]: {
@@ -141,7 +141,7 @@ export const OP_RULES: Record<TankAction, TransitionRule> = {
 
   // ── 破棄 ──
   [ACTION.DISPOSE]: {
-    allowedPrev: [], // どのステータスからでも破棄可能
+    allowedPrev: [STATUS.EMPTY, STATUS.FILLED, STATUS.DAMAGED],
     nextStatus: STATUS.DISPOSED,
   },
 };
