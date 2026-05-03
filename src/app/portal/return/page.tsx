@@ -4,10 +4,10 @@ import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft, Send, CheckCircle2, Clock, RotateCcw, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase/config";
-import {
-  collection, addDoc, doc, getDoc, serverTimestamp,
-} from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
+import { createPortalReturnRequests } from "@/lib/firebase/portal-transaction-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
+import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 import { STATUS } from "@/lib/tank-rules";
 
 type Condition = "normal" | "unused" | "keep";
@@ -37,19 +37,22 @@ export default function CustomerReturnPage() {
   const [isSuccess, setIsSuccess] = useState(false);
   const [scheduleTime, setScheduleTime] = useState<string | null>(null); // "HH:MM"
   const [autoTriggered, setAutoTriggered] = useState(false);
-
-  const sessionStr = typeof window !== "undefined" ? localStorage.getItem("customerSession") : null;
-  const session = sessionStr ? JSON.parse(sessionStr) : {};
-  const customerUserUid: string = session.customerUserUid || "";
-  const customerId: string = session.customerId || session.uid || "";
-  const customerName: string = session.name || "";
+  const [identity, setIdentity] = useState<PortalIdentity | null>(null);
 
   // Fetch rented tanks + schedule
   const fetchData = useCallback(async () => {
     setLoading(true);
     try {
+      const currentIdentity = getPortalIdentityFromStorage();
+      setIdentity(currentIdentity);
+      if (!isLinkedPortalIdentity(currentIdentity)) {
+        setTanks([]);
+        setScheduleTime(null);
+        return;
+      }
+
       const [tankDocs, settingsDoc] = await Promise.all([
-        tanksRepository.getTanks({ location: customerName, status: STATUS.LENT }),
+        tanksRepository.getTanks({ location: currentIdentity.customerName, status: STATUS.LENT }),
         getDoc(doc(db, "settings", "portal")),
       ]);
 
@@ -75,16 +78,17 @@ export default function CustomerReturnPage() {
     } finally {
       setLoading(false);
     }
-  }, [customerName]);
+  }, []);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
   // Auto-return check
   useEffect(() => {
     if (!scheduleTime || loading || tanks.length === 0) return;
+    if (!isLinkedPortalIdentity(identity)) return;
     const [h, m] = scheduleTime.split(":").map(Number);
     const now = new Date();
-    const todayKey = `autoReturn_${customerId}_${now.toDateString()}`;
+    const todayKey = `autoReturn_${identity.customerId}_${now.toDateString()}`;
     const alreadyDone = localStorage.getItem(todayKey) === "1";
     if (alreadyDone) return;
 
@@ -97,7 +101,7 @@ export default function CustomerReturnPage() {
       setTimeout(() => submitReturn(true, todayKey), 1200);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scheduleTime, loading]);
+  }, [scheduleTime, loading, identity]);
 
   const setCondition = (id: string, cond: Condition) => {
     setTanks((prev) => prev.map((t) => t.id === id ? { ...t, condition: cond } : t));
@@ -109,23 +113,20 @@ export default function CustomerReturnPage() {
       if (!auto) alert("返却するタンクがありません（全て持ち越し）");
       return;
     }
+    if (!isLinkedPortalIdentity(identity)) {
+      if (!auto) alert("返却申請は顧客紐付け後に利用できます。");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await Promise.all(
-        toReturn.map((tank) =>
-          addDoc(collection(db, "transactions"), {
-            type: "return",
-            status: "pending_approval",
-            tankId: tank.id,
-            condition: tank.condition === "unused" ? "unused" : "normal",
-            customerId,
-            customerName,
-            createdByUid: customerUserUid || session.uid || customerId,
-            createdAt: serverTimestamp(),
-            source: auto ? "auto_schedule" : "customer_portal",
-          })
-        )
-      );
+      await createPortalReturnRequests({
+        identity,
+        items: toReturn.map((tank) => ({
+          tankId: tank.id,
+          condition: tank.condition === "unused" ? "unused" : "normal",
+        })),
+        source: auto ? "auto_schedule" : "customer_portal",
+      });
       if (autoKey) localStorage.setItem(autoKey, "1");
       setIsSuccess(true);
     } catch (err) {
@@ -137,6 +138,7 @@ export default function CustomerReturnPage() {
   };
 
   const returningCount = tanks.filter((t) => t.condition !== "keep").length;
+  const isLinked = isLinkedPortalIdentity(identity);
 
   if (isSuccess) {
     return (
@@ -232,6 +234,19 @@ export default function CustomerReturnPage() {
               borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite",
             }} />
           </div>
+        ) : !isLinked ? (
+          <div style={{
+            background: "#fff", border: "1.5px solid #e8eaed", borderRadius: 20,
+            padding: "40px 24px", textAlign: "center",
+          }}>
+            <AlertCircle size={32} color="#f59e0b" style={{ marginBottom: 12 }} />
+            <p style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", margin: "0 0 8px" }}>
+              返却は顧客確認後に利用できます
+            </p>
+            <p style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", margin: 0 }}>
+              会社情報の確認後、貸出中タンクの返却申請が可能になります。
+            </p>
+          </div>
         ) : tanks.length === 0 ? (
           <div style={{
             background: "#fff", border: "1.5px solid #e8eaed", borderRadius: 20,
@@ -312,7 +327,7 @@ export default function CustomerReturnPage() {
       </div>
 
       {/* Fixed submit bar */}
-      {!loading && tanks.length > 0 && (
+      {!loading && isLinked && tanks.length > 0 && (
         <div style={{
           position: "fixed", bottom: 0, left: 0, right: 0,
           background: "rgba(248,250,252,0.95)",
