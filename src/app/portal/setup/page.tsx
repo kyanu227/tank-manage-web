@@ -2,9 +2,8 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { auth, db } from "@/lib/firebase/config";
+import { auth } from "@/lib/firebase/config";
 import { onAuthStateChanged, signOut } from "firebase/auth";
-import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
 import { Building2, MessageSquare, ArrowRight, CheckCircle2, UserRound } from "lucide-react";
 import {
   ensureCustomerUser,
@@ -13,6 +12,7 @@ import {
   saveCustomerPortalSession,
   type CustomerUserDoc,
 } from "@/lib/firebase/customer-user";
+import { completeCustomerUserSetup } from "@/lib/firebase/portal-profile-service";
 
 export default function SetupPage() {
   const router = useRouter();
@@ -77,21 +77,17 @@ export default function SetupPage() {
     setError("");
 
     try {
-      await updateDoc(doc(db, "customerUsers", userUid), {
+      const profile = await completeCustomerUserSetup({
+        uid: userUid,
         selfCompanyName: trimmedCompanyName,
         selfName: trimmedSelfName,
         lineName: lineName.trim(),
-        setupCompleted: true,
-        updatedAt: serverTimestamp(),
       });
 
       saveCustomerPortalSession(normalizeCustomerUser({
         ...(customerUser ?? {}),
         uid: userUid,
-        selfCompanyName: trimmedCompanyName,
-        selfName: trimmedSelfName,
-        lineName: lineName.trim(),
-        setupCompleted: true,
+        ...profile,
       }));
 
       router.push("/portal");

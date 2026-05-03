@@ -3,10 +3,15 @@
 // 旧スキーマ互換は repository 境界で正規化する。
 
 import {
+  addDoc,
   collection,
+  doc,
   getDocs,
   query,
+  serverTimestamp,
+  updateDoc,
   where,
+  type DocumentReference,
   type QueryConstraint,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
@@ -59,28 +64,45 @@ export interface GetPendingTransactionsOptions {
   statuses?: string[];
 }
 
+type RepositoryUpdateWriter = {
+  update: (ref: DocumentReference, data: Record<string, unknown>) => unknown;
+};
+
 /** 1件作成。createdAt / updatedAt は repository 側で自動付与する。 */
 export async function createTransaction(
-  _input: CreateTransactionInput,
+  input: CreateTransactionInput,
 ): Promise<string> {
-  throw new Error("not implemented in Phase 1");
+  const ref = await addDoc(collection(db, "transactions"), {
+    ...withoutDocumentId(input),
+    status: input.status ?? "pending",
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+  return ref.id;
 }
 
 /** 単純更新。updatedAt は repository 側で自動付与する。 */
 export async function updateTransaction(
-  _transactionId: string,
-  _patch: TransactionPatch,
+  transactionId: string,
+  patch: TransactionPatch,
 ): Promise<void> {
-  throw new Error("not implemented in Phase 1");
+  await updateDoc(doc(db, "transactions", transactionId), {
+    ...withoutDocumentId(patch),
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /** updateTransaction のバッチ/トランザクション参加版。 */
 export function updateTransactionInBatch(
-  _writer: RepositoryWriter,
-  _transactionId: string,
-  _patch: TransactionPatch,
+  writer: RepositoryWriter,
+  transactionId: string,
+  patch: TransactionPatch,
 ): void {
-  throw new Error("not implemented in Phase 1");
+  const updateWriter = writer as RepositoryUpdateWriter;
+  updateWriter.update(doc(db, "transactions", transactionId), {
+    ...withoutDocumentId(patch),
+    updatedAt: serverTimestamp(),
+  });
 }
 
 /** 1件取得。存在しなければ null。 */
@@ -230,4 +252,9 @@ export function markOrderCompletedInBatch(
   _actor: OperationActor,
 ): void {
   throw new Error("not implemented in Phase 1");
+}
+
+function withoutDocumentId<T extends Record<string, unknown>>(input: T): Omit<T, "id"> {
+  const { id: _id, ...payload } = input;
+  return payload;
 }

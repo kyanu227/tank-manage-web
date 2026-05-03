@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import type { OrderStatus } from "@/lib/order-types";
 
-const PENDING_STATUSES: OrderStatus[] = ["pending", "pending_approval", "pending_link"];
+const PENDING_STATUSES: OrderStatus[] = ["pending", "pending_approval"];
 
 export function usePendingOrderCount(): number | null {
   const pathname = usePathname();

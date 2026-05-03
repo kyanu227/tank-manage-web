@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { ArrowLeft, Send, CheckCircle2, Delete, X } from "lucide-react";
+import { ArrowLeft, Send, CheckCircle2, AlertCircle, X } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase/config";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { createPortalUnfilledReports } from "@/lib/firebase/portal-transaction-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
+import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 import { STATUS } from "@/lib/tank-rules";
 
 interface TankItem {
@@ -15,15 +15,11 @@ interface TankItem {
 
 export default function UnfilledReportPage() {
   const router = useRouter();
-  const sessionStr = typeof window !== "undefined" ? localStorage.getItem("customerSession") : null;
-  const session = sessionStr ? JSON.parse(sessionStr) : {};
-  const customerUserUid: string = session.customerUserUid || "";
-  const customerId: string = session.customerId || session.uid || "";
-  const customerName: string = session.name || "";
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
   const [tanks, setTanks] = useState<TankItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [identity, setIdentity] = useState<PortalIdentity | null>(null);
 
   // Available prefixes derived from currently lent tanks
   const [availablePrefixes, setAvailablePrefixes] = useState<string[]>([]);
@@ -33,14 +29,17 @@ export default function UnfilledReportPage() {
   const [lentTanks, setLentTanks] = useState<string[]>([]);
 
   useEffect(() => {
-    if (!customerName) {
-      setLoading(false);
-      return;
-    }
-
     const fetchLentTanks = async () => {
       try {
-        const tankDocs = await tanksRepository.getTanks({ location: customerName, status: STATUS.LENT });
+        const currentIdentity = getPortalIdentityFromStorage();
+        setIdentity(currentIdentity);
+        if (!isLinkedPortalIdentity(currentIdentity)) {
+          setLentTanks([]);
+          setAvailablePrefixes([]);
+          return;
+        }
+
+        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: STATUS.LENT });
         const tankIds: string[] = tankDocs.map((t) => t.id);
         setLentTanks(tankIds);
 
@@ -58,7 +57,7 @@ export default function UnfilledReportPage() {
     };
 
     fetchLentTanks();
-  }, [customerName]);
+  }, []);
 
   const handlePrefixClick = (prefix: string) => {
     setSelectedPrefix(prefix);
@@ -102,22 +101,17 @@ export default function UnfilledReportPage() {
 
   const submitReport = async () => {
     if (tanks.length === 0) return;
+    if (!isLinkedPortalIdentity(identity)) {
+      alert("未充填報告は顧客情報の紐付け後に利用できます。");
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await Promise.all(
-        tanks.map((tank) =>
-          addDoc(collection(db, "transactions"), {
-            type: "uncharged_report",
-            status: "completed",
-            tankId: tank.tankId,
-            customerId,
-            customerName,
-            createdByUid: customerUserUid || session.uid || customerId,
-            createdAt: serverTimestamp(),
-            source: "customer_app",
-          })
-        )
-      );
+      await createPortalUnfilledReports({
+        identity,
+        tankIds: tanks.map((tank) => tank.tankId),
+        source: "customer_app",
+      });
       setIsSuccess(true);
     } catch (err) {
       console.error(err);
@@ -126,6 +120,8 @@ export default function UnfilledReportPage() {
       setIsSubmitting(false);
     }
   };
+
+  const isLinked = isLinkedPortalIdentity(identity);
 
   if (isSuccess) {
     return (
@@ -272,6 +268,27 @@ export default function UnfilledReportPage() {
               }}
             />
           </div>
+        ) : !isLinked ? (
+          <div style={{ textAlign: "center", paddingTop: 20 }}>
+            <div
+              style={{
+                background: "#fff",
+                border: "1.5px solid #e2e8f0",
+                borderRadius: 20,
+                padding: "32px 24px",
+                textAlign: "center",
+                marginBottom: 16,
+              }}
+            >
+              <AlertCircle size={32} color="#f59e0b" style={{ marginBottom: 12 }} />
+              <p style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", marginBottom: 8 }}>
+                会社情報の確認後に利用できます
+              </p>
+              <p style={{ fontSize: 13, color: "#94a3b8", fontWeight: 600, margin: 0 }}>
+                未充填報告は顧客情報の紐付け後に利用できます。
+              </p>
+            </div>
+          </div>
         ) : availablePrefixes.length === 0 ? (
           <div style={{ textAlign: "center", paddingTop: 20 }}>
             <div
@@ -389,7 +406,7 @@ export default function UnfilledReportPage() {
         )}
 
         {/* Selected List */}
-        {tanks.length > 0 && (
+        {isLinked && tanks.length > 0 && (
           <div>
             <p style={{ fontSize: 11, fontWeight: 700, letterSpacing: "0.06em", color: "#94a3b8", marginBottom: 10, paddingLeft: 2 }}>
               報告リスト ({tanks.length}件)
@@ -442,7 +459,7 @@ export default function UnfilledReportPage() {
         )}
       </div>
 
-      {tanks.length > 0 && (
+      {isLinked && tanks.length > 0 && (
         <div
           style={{
             position: "fixed",
