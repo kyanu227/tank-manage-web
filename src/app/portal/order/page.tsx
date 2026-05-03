@@ -3,8 +3,8 @@
 import { useState, useRef } from "react";
 import { ArrowLeft, Send, CheckCircle2, X, Plus, Ship, Store, MessageSquare } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase/config";
-import { collection, addDoc, serverTimestamp } from "firebase/firestore";
+import { createPortalOrder } from "@/lib/firebase/portal-transaction-service";
+import { getPortalIdentityFromStorage } from "@/lib/portal";
 
 const TANK_TYPES = [
   { key: "スチール 10L", label: "スチール", sub: "10L", color: "#6366f1", bg: "#eef2ff" },
@@ -58,33 +58,24 @@ export default function CustomerOrderPage() {
     const selectedDeliveryType = deliveryType;
     setIsSubmitting(true);
     try {
-      const sessionStr = localStorage.getItem("customerSession");
-      const session = sessionStr ? JSON.parse(sessionStr) : {};
-      const customerId = session.uid || "unknown";
-      const customerName = session.name || "不明な顧客";
+      const identity = getPortalIdentityFromStorage();
+      if (!identity) {
+        alert("ログイン情報を確認できません。再度ログインしてください。");
+        return;
+      }
       const orderNoteText = orderNote.trim();
 
-      // 1発注 = 1ドキュメント（items配列）としてまとめて保存する
-      const ref = await addDoc(collection(db, "transactions"), {
-        type: "order",
-        status: "pending",
+      const orderId = await createPortalOrder({
+        identity,
         items: cart.map((item) => ({
           tankType: item.tankType,
           quantity: item.quantity,
         })),
-        customerId,
-        customerName,
-        createdByUid: session.customerUserUid || session.uid || "legacy_customer",
         deliveryType: selectedDeliveryType,
-        deliveryTargetName: selectedDeliveryType === "delivery" ? deliveryTargetName.trim() : "",
+        deliveryTargetName,
         note: orderNoteText,
-        orderNote: orderNoteText,
-        deliveryNote: orderNoteText,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
-        source: "customer_portal",
       });
-      setOrderIds([ref.id]);
+      setOrderIds([orderId]);
       setIsSuccess(true);
     } catch (err) {
       console.error(err);
