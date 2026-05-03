@@ -49,6 +49,7 @@ export const ACTION = {
   RETURN: "返却",
   RETURN_UNUSED: "未使用返却",
   RETURN_DEFECT: "返却(未充填)",
+  CARRY_OVER: "持ち越し",
   FILL: "充填",
 
   // 自社利用
@@ -97,6 +98,10 @@ export const OP_RULES: Record<TankAction, TransitionRule> = {
   [ACTION.RETURN_DEFECT]: {
     allowedPrev: [STATUS.LENT, STATUS.UNRETURNED, STATUS.IN_HOUSE],
     nextStatus: STATUS.EMPTY,
+  },
+  [ACTION.CARRY_OVER]: {
+    allowedPrev: [STATUS.LENT],
+    nextStatus: STATUS.UNRETURNED,
   },
   [ACTION.FILL]: {
     allowedPrev: [STATUS.EMPTY],
