@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Package, Clock, Activity, ShoppingCart, RotateCcw, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { logsRepository, tanksRepository } from "@/lib/firebase/repositories";
+import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 import { STATUS } from "@/lib/tank-rules";
 
 interface LogEntry { action: string; timestamp: any; tankId: string; staffName?: string; }
@@ -12,20 +13,24 @@ export default function PortalPage() {
   const [rentedTanks, setRentedTanks] = useState<string[]>([]);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [identity, setIdentity] = useState<PortalIdentity | null>(null);
 
   useEffect(() => {
-    const sessionStr = localStorage.getItem("customerSession");
-    if (!sessionStr) return;
-    const session = JSON.parse(sessionStr);
-    const customerName = session.name;
-
     const fetchData = async () => {
       try {
-        const tankDocs = await tanksRepository.getTanks({ location: customerName, status: STATUS.LENT });
+        const currentIdentity = getPortalIdentityFromStorage();
+        setIdentity(currentIdentity);
+        if (!isLinkedPortalIdentity(currentIdentity)) {
+          setRentedTanks([]);
+          setLogs([]);
+          return;
+        }
+
+        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: STATUS.LENT });
         const tanks: string[] = tankDocs.map((t) => t.id);
         setRentedTanks(tanks.sort());
 
-        const recentLogs = await logsRepository.getActiveLogs({ location: customerName, limit: 30 }) as unknown as LogEntry[];
+        const recentLogs = await logsRepository.getActiveLogs({ location: currentIdentity.customerName, limit: 30 }) as unknown as LogEntry[];
         setLogs(recentLogs);
       } catch (e) {
         console.error("Portal fetch error", e);
@@ -41,6 +46,7 @@ export default function PortalPage() {
     const d = ts.toDate();
     return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   };
+  const isLinked = isLinkedPortalIdentity(identity);
 
   if (loading) {
     return (
@@ -122,6 +128,24 @@ export default function PortalPage() {
           </div>
         )}
       </div>
+
+      {!isLinked && (
+        <div style={{
+          background: "#fff7ed",
+          border: "1px solid #fed7aa",
+          borderRadius: 14,
+          padding: "1.6dvh 4vw",
+          color: "#9a3412",
+          flexShrink: 0,
+        }}>
+          <p style={{ fontSize: "clamp(12px, 3.2vw, 14px)", fontWeight: 800, margin: "0 0 0.5dvh" }}>
+            会社情報の確認中です
+          </p>
+          <p style={{ fontSize: "clamp(11px, 2.9vw, 12px)", fontWeight: 600, margin: 0, lineHeight: 1.5 }}>
+            発注は仮受付できます。返却・未充填報告と貸出履歴は、顧客情報の紐付け後に利用できます。
+          </p>
+        </div>
+      )}
 
       {/* Recent History — takes remaining space, no scroll */}
       <div style={{
