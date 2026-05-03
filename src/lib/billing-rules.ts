@@ -18,7 +18,7 @@ import { ACTION, type TankAction } from "./tank-rules";
  *
  * 通常返却    → 請求可（顧客が使用した）
  * 未使用返却  → 請求不可（顧客が使用していない、ガスが残っている）
- * 未充填返却  → 請求不可（こちら側の充填不備）
+ * 未充填返却  → 請求不可（こちら側の充填ミス）
  */
 const BILLABLE_ACTIONS: Set<TankAction> = new Set([
   ACTION.RETURN,
@@ -26,7 +26,7 @@ const BILLABLE_ACTIONS: Set<TankAction> = new Set([
 
 const NON_BILLABLE_ACTIONS: Set<TankAction> = new Set([
   ACTION.RETURN_UNUSED,
-  ACTION.RETURN_DEFECT,
+  ACTION.RETURN_UNCHARGED,
 ]);
 
 /**

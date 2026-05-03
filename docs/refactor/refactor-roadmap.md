@@ -153,7 +153,7 @@ page.tsx
   - `tankTagService.updateTag({ tankId, tag })` を新設し、`logNote` ↔ `[TAG:xxx]` 変換を service に閉じる
   - `staff/inhouse/page.tsx` の `writeBatch().update().commit()` を service 経由に
   - `useBulkReturnByLocation.ts` の同パターンも service 経由に
-- 触らない: `[TAG:unused]` / `[TAG:defect]` という enum 表現自体
+- 触らない: `[TAG:unused]` / `[TAG:uncharged]` という enum 表現自体
 
 ---
 

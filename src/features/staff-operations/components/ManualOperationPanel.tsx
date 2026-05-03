@@ -185,7 +185,7 @@ export default function ManualOperationPanel({
           }}>
             <div style={{ display: "flex", gap: 6 }}>
               {([
-                { id: "defect" as TagType, label: "未充填", icon: AlertCircle, color: "#ef4444" },
+                { id: "uncharged" as TagType, label: "未充填", icon: AlertCircle, color: "#ef4444" },
                 { id: "unused" as TagType, label: "未使用", icon: Droplets, color: "#10b981" },
               ]).map(tag => {
                 const active = returnTag === tag.id;

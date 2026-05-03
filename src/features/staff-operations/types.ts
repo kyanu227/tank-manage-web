@@ -5,8 +5,8 @@ import type { TankAction } from "@/lib/tank-rules";
 import type { TankDoc } from "@/lib/tank-types";
 
 export type OpMode = "lend" | "return" | "fill";
-export type TagType = "normal" | "unused" | "defect";
-export type BulkTagType = "normal" | "unused" | "defect";
+export type TagType = "normal" | "unused" | "uncharged";
+export type BulkTagType = "normal" | "unused" | "uncharged";
 export type OpStyle = "manual" | "order";
 
 export interface QueueItem {

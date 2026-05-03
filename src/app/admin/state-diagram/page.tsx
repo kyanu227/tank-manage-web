@@ -41,7 +41,7 @@ const CATEGORIES: { name: string; color: string; actions: TankAction[] }[] = [
       ACTION.LEND,
       ACTION.RETURN,
       ACTION.RETURN_UNUSED,
-      ACTION.RETURN_DEFECT,
+      ACTION.RETURN_UNCHARGED,
       ACTION.CARRY_OVER,
       ACTION.FILL,
     ],
@@ -54,7 +54,7 @@ const CATEGORIES: { name: string; color: string; actions: TankAction[] }[] = [
       ACTION.IN_HOUSE_USE_RETRO,
       ACTION.IN_HOUSE_RETURN,
       ACTION.IN_HOUSE_RETURN_UNUSED,
-      ACTION.IN_HOUSE_RETURN_DEFECT,
+      ACTION.IN_HOUSE_RETURN_UNCHARGED,
     ],
   },
   {
