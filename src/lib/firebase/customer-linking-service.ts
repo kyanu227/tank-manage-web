@@ -99,7 +99,7 @@ export async function linkCustomerUsersToCustomers({
       throw new Error(`紐付け先の顧客「${customerId}」は他の操作で削除されています。再読込してください。`);
     }
     const customerName = customerId
-      ? buildCustomerDisplayName(linkedCustomer, assignment.customerName || customerId)
+      ? buildCustomerLocationName(linkedCustomer, assignment.customerName || customerId)
       : "";
     const current = currentCustomerUsers.get(assignment.id);
     if (!current) {
@@ -146,15 +146,15 @@ export async function linkCustomerUsersToCustomers({
   await batch.commit();
 }
 
-function buildCustomerDisplayName(
+function buildCustomerLocationName(
   customer: CustomerLinkSnapshot | undefined,
   fallback: string,
 ): string {
-  const companyName = customer?.companyName?.trim();
-  if (companyName) return companyName;
-
   const name = customer?.name?.trim();
   if (name) return name;
+
+  const companyName = customer?.companyName?.trim();
+  if (companyName) return companyName;
 
   return fallback.trim();
 }
