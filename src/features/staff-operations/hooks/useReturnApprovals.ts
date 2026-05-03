@@ -98,7 +98,7 @@ export function useReturnApprovals({
         const condition = appData?.condition ?? item.condition;
         const tag: ReturnTag =
           condition === "unused" ? RETURN_TAG.UNUSED
-            : condition === "uncharged" ? RETURN_TAG.DEFECT
+            : condition === "uncharged" ? RETURN_TAG.UNCHARGED
               : RETURN_TAG.NORMAL;
         const note = `[承認] 顧客: ${selectedReturnGroup.customerName} (タグ:${condition})`;
         const tank = await tanksRepository.getTank(item.tankId);

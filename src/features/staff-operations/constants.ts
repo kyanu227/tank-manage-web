@@ -24,7 +24,7 @@ export const CONDITION_LABELS: ConditionLabel[] = [
 export const BULK_TAGS: BulkTagConfig[] = [
   { id: "normal", label: "通常", color: "#64748b", bg: "#f1f5f9", borderColor: "#e2e8f0" },
   { id: "unused", label: "未使用", color: "#10b981", bg: "#ecfdf5", borderColor: "#6ee7b7" },
-  { id: "defect", label: "未充填", color: "#ef4444", bg: "#fef2f2", borderColor: "#fca5a5" },
+  { id: "uncharged", label: "未充填", color: "#ef4444", bg: "#fef2f2", borderColor: "#fca5a5" },
 ];
 
 export const MODE_CONFIG: ModeConfig = {

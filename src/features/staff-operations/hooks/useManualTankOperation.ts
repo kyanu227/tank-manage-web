@@ -178,7 +178,7 @@ export function useManualTankOperation({
             finalLocation = effectiveCustomer?.customerName ?? "";
           } else if (mode === "return") {
             if (tag === RETURN_TAG.UNUSED) finalNote = "[TAG:unused]";
-            else if (tag === RETURN_TAG.DEFECT) finalNote = "[TAG:defect]";
+            else if (tag === RETURN_TAG.UNCHARGED) finalNote = "[TAG:uncharged]";
           }
 
           return {

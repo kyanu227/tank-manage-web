@@ -34,7 +34,7 @@ export type TankStatus = (typeof STATUS)[keyof typeof STATUS];
 export const RETURN_TAG = {
   NORMAL: "normal",
   UNUSED: "unused",
-  DEFECT: "defect",
+  UNCHARGED: "uncharged",
 } as const;
 
 export type ReturnTag = (typeof RETURN_TAG)[keyof typeof RETURN_TAG];
@@ -48,7 +48,7 @@ export const ACTION = {
   LEND: "貸出",
   RETURN: "返却",
   RETURN_UNUSED: "未使用返却",
-  RETURN_DEFECT: "返却(未充填)",
+  RETURN_UNCHARGED: "返却(未充填)",
   CARRY_OVER: "持ち越し",
   FILL: "充填",
 
@@ -57,7 +57,7 @@ export const ACTION = {
   IN_HOUSE_USE_RETRO: "自社利用(事後)",
   IN_HOUSE_RETURN: "自社返却",
   IN_HOUSE_RETURN_UNUSED: "自社返却(未使用)",
-  IN_HOUSE_RETURN_DEFECT: "自社返却(不備)",
+  IN_HOUSE_RETURN_UNCHARGED: "自社返却(未充填)",
 
   // 異常系・メンテナンス
   DAMAGE_REPORT: "破損報告",
@@ -95,7 +95,7 @@ export const OP_RULES: Record<TankAction, TransitionRule> = {
     allowedPrev: [STATUS.LENT, STATUS.UNRETURNED, STATUS.IN_HOUSE],
     nextStatus: STATUS.FILLED,
   },
-  [ACTION.RETURN_DEFECT]: {
+  [ACTION.RETURN_UNCHARGED]: {
     allowedPrev: [STATUS.LENT, STATUS.UNRETURNED, STATUS.IN_HOUSE],
     nextStatus: STATUS.EMPTY,
   },
@@ -125,7 +125,7 @@ export const OP_RULES: Record<TankAction, TransitionRule> = {
     allowedPrev: [STATUS.IN_HOUSE],
     nextStatus: STATUS.FILLED,
   },
-  [ACTION.IN_HOUSE_RETURN_DEFECT]: {
+  [ACTION.IN_HOUSE_RETURN_UNCHARGED]: {
     allowedPrev: [STATUS.IN_HOUSE],
     nextStatus: STATUS.EMPTY,
   },
@@ -212,8 +212,8 @@ export function resolveReturnAction(
   switch (tag) {
     case RETURN_TAG.UNUSED:
       return isInHouse ? ACTION.IN_HOUSE_RETURN_UNUSED : ACTION.RETURN_UNUSED;
-    case RETURN_TAG.DEFECT:
-      return isInHouse ? ACTION.IN_HOUSE_RETURN_DEFECT : ACTION.RETURN_DEFECT;
+    case RETURN_TAG.UNCHARGED:
+      return isInHouse ? ACTION.IN_HOUSE_RETURN_UNCHARGED : ACTION.RETURN_UNCHARGED;
     case RETURN_TAG.NORMAL:
     default:
       return isInHouse ? ACTION.IN_HOUSE_RETURN : ACTION.RETURN;

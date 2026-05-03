@@ -41,7 +41,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
         if (!groups[loc]) groups[loc] = [];
         let tag: BulkTagType = "normal";
         if (tank.logNote === "[TAG:unused]") tag = "unused";
-        if (tank.logNote === "[TAG:defect]") tag = "defect";
+        if (tank.logNote === "[TAG:uncharged]") tag = "uncharged";
         groups[loc].push({ ...tank, tag } as unknown as BulkTankWithTag);
       });
       Object.keys(groups).forEach(loc => {
@@ -71,7 +71,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     try {
       let logNote = "";
       if (newTag === "unused") logNote = "[TAG:unused]";
-      if (newTag === "defect") logNote = "[TAG:defect]";
+      if (newTag === "uncharged") logNote = "[TAG:uncharged]";
       const ref = doc(db, "tanks", tankId);
       await writeBatch(db).update(ref, { logNote }).commit();
     } catch (e) {

@@ -10,12 +10,12 @@ import TankIdInput from "@/components/TankIdInput";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
-type TagType = "normal" | "unused" | "defect";
+type TagType = "normal" | "unused" | "uncharged";
 
 const TAGS: { id: TagType; label: string; color: string; bg: string }[] = [
   { id: "normal", label: "通常", color: "#64748b", bg: "#f1f5f9" },
   { id: "unused", label: "未使用", color: "#10b981", bg: "#ecfdf5" },
-  { id: "defect", label: "不備", color: "#ef4444", bg: "#fef2f2" },
+  { id: "uncharged", label: "未充填", color: "#ef4444", bg: "#fef2f2" },
 ];
 
 const ACCENT = "#6366f1";
@@ -51,7 +51,7 @@ export default function InHousePage() {
       .map((t) => {
         const baseTag: TagType =
           t.logNote === "[TAG:unused]" ? "unused" :
-          t.logNote === "[TAG:defect]" ? "defect" : "normal";
+          t.logNote === "[TAG:uncharged]" ? "uncharged" : "normal";
         return {
           id: t.id,
           status: t.status,
@@ -70,7 +70,7 @@ export default function InHousePage() {
     try {
       let logNote = "";
       if (newTag === "unused") logNote = "[TAG:unused]";
-      if (newTag === "defect") logNote = "[TAG:defect]";
+      if (newTag === "uncharged") logNote = "[TAG:uncharged]";
       const ref = doc(db, "tanks", tankId);
       await writeBatch(db).update(ref, { logNote }).commit();
     } catch (e) {
