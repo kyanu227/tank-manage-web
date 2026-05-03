@@ -6,7 +6,7 @@ import type {
 import { transactionsRepository } from "@/lib/firebase/repositories";
 
 export type PortalDeliveryType = "pickup" | "delivery";
-export type PortalReturnCondition = "normal" | "unused" | "keep";
+export type PortalReturnCondition = "normal" | "unused" | "uncharged" | "keep";
 export type PortalReturnSource = "customer_portal" | "auto_schedule";
 export type PortalUnfilledSource = "customer_app" | "customer_portal";
 

@@ -7,16 +7,11 @@ import { doc, writeBatch } from "firebase/firestore";
 import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
 import TankIdInput from "@/components/TankIdInput";
+import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
 type TagType = "normal" | "unused" | "uncharged";
-
-const TAGS: { id: TagType; label: string; color: string; bg: string }[] = [
-  { id: "normal", label: "通常", color: "#64748b", bg: "#f1f5f9" },
-  { id: "unused", label: "未使用", color: "#10b981", bg: "#ecfdf5" },
-  { id: "uncharged", label: "未充填", color: "#ef4444", bg: "#fef2f2" },
-];
 
 const ACCENT = "#6366f1";
 
@@ -216,25 +211,16 @@ export default function InHousePage() {
                       </div>
                       <div style={{ fontSize: 10, color: "#94a3b8" }}>{tank.staff}</div>
                     </div>
-                    <div style={{ display: "flex", background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 8, padding: 2, flexShrink: 0 }}>
-                      {TAGS.map((tag) => {
-                        const active = tank.tag === tag.id;
-                        return (
-                          <button
-                            key={tag.id}
-                            onClick={() => updateTag(tank.id, tag.id)}
-                            style={{
-                              padding: "5px 9px", border: "none", borderRadius: 6,
-                              background: active ? tag.bg : "transparent",
-                              color: active ? tag.color : "#94a3b8",
-                              fontSize: 11, fontWeight: active ? 700 : 500,
-                              cursor: "pointer", transition: "all 0.1s",
-                            }}
-                          >
-                            {tag.label}
-                          </button>
-                        );
-                      })}
+                    <div style={{ width: 170, flexShrink: 0 }}>
+                      <ReturnTagSelector<TagType>
+                        value={tank.tag}
+                        onChange={(value) => updateTag(tank.id, value)}
+                        options={[
+                          { value: "uncharged", label: "未充填" },
+                          { value: "unused", label: "未使用" },
+                        ]}
+                        compact
+                      />
                     </div>
                   </div>
                 ))}

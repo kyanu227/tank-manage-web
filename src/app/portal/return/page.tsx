@@ -5,24 +5,19 @@ import { ArrowLeft, Send, CheckCircle2, Clock, RotateCcw, AlertCircle } from "lu
 import { useRouter } from "next/navigation";
 import { db } from "@/lib/firebase/config";
 import { doc, getDoc } from "firebase/firestore";
+import ReturnTagSelector, { getReturnTagLabel, getReturnTagStyle, type ReturnTagValue } from "@/components/ReturnTagSelector";
 import { createPortalReturnRequests } from "@/lib/firebase/portal-transaction-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 import { STATUS } from "@/lib/tank-rules";
 
-type Condition = "normal" | "unused" | "keep";
+type Condition = ReturnTagValue;
 
 interface TankItem {
   id: string;          // Firestore doc id (= tankId)
   lentAt: Date | null;
   condition: Condition;
 }
-
-const CONDITIONS: { value: Condition; label: string; color: string; bg: string }[] = [
-  { value: "normal", label: "通常",   color: "#475569", bg: "#f1f5f9" },
-  { value: "unused", label: "未使用", color: "#0ea5e9", bg: "#e0f2fe" },
-  { value: "keep",   label: "持ち越", color: "#f59e0b", bg: "#fef3c7" },
-];
 
 function fmtDate(d: Date | null): string {
   if (!d) return "日付不明";
@@ -262,16 +257,18 @@ export default function CustomerReturnPage() {
         ) : (
           tanks.map((tank) => {
             const isKeep = tank.condition === "keep";
+            const conditionStyle = getReturnTagStyle(tank.condition);
+            const isSpecial = tank.condition !== "normal";
             return (
               <div
                 key={tank.id}
                 style={{
                   background: "#fff",
-                  border: `2px solid ${isKeep ? "#fde68a" : tank.condition === "unused" ? "#bae6fd" : "#e8eaed"}`,
+                  border: `2px solid ${isSpecial ? conditionStyle.border : "#e8eaed"}`,
                   borderRadius: 20, padding: "18px 18px 14px",
                   opacity: isKeep ? 0.65 : 1,
                   transition: "all 0.15s",
-                  boxShadow: isKeep ? "none" : "0 2px 8px rgba(0,0,0,0.04)",
+                  boxShadow: isKeep ? "none" : isSpecial ? `0 2px 10px ${conditionStyle.color}18` : "0 2px 8px rgba(0,0,0,0.04)",
                 }}
               >
                 {/* Tank ID + date */}
@@ -290,38 +287,29 @@ export default function CustomerReturnPage() {
                       </span>
                     </div>
                   </div>
-                  {isKeep && (
+                  {isSpecial && (
                     <span style={{
                       fontSize: 10, fontWeight: 800, padding: "4px 10px", borderRadius: 8,
-                      background: "#fef3c7", color: "#92400e", letterSpacing: "0.05em",
+                      background: conditionStyle.background, color: conditionStyle.color, letterSpacing: "0.05em",
                     }}>
-                      HOLD
+                      {getReturnTagLabel(tank.condition)}
                     </span>
                   )}
                 </div>
 
                 {/* Condition selector */}
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
-                  {CONDITIONS.map((c) => {
-                    const active = tank.condition === c.value;
-                    return (
-                      <button
-                        key={c.value}
-                        onClick={() => setCondition(tank.id, c.value)}
-                        style={{
-                          padding: "10px 0", borderRadius: 12,
-                          fontSize: 12, fontWeight: 800, border: "2px solid",
-                          cursor: "pointer", transition: "all 0.12s",
-                          background: active ? c.bg : "#f8fafc",
-                          borderColor: active ? c.color : "transparent",
-                          color: active ? c.color : "#94a3b8",
-                        }}
-                      >
-                        {c.label}
-                      </button>
-                    );
-                  })}
-                </div>
+                <ReturnTagSelector<Condition>
+                  value={tank.condition}
+                  onChange={(value) => setCondition(tank.id, value)}
+                  options={[
+                    { value: "uncharged", label: "未充填" },
+                    { value: "keep", label: "持ち越し" },
+                    { value: "unused", label: "未使用" },
+                  ]}
+                  enableSwipe
+                  swipeRightValue="unused"
+                  swipeLeftValue="keep"
+                />
               </div>
             );
           })

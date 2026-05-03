@@ -1,9 +1,9 @@
 "use client";
 
 import { ArrowLeft, CheckCircle2, Loader2, ThumbsUp } from "lucide-react";
-import { CONDITION_LABELS } from "../constants";
+import ReturnTagSelector from "@/components/ReturnTagSelector";
 import type { UseReturnApprovalsResult } from "../hooks/useReturnApprovals";
-import type { ReturnGroup } from "../types";
+import type { Condition, ReturnGroup } from "../types";
 
 interface ReturnApprovalScreenProps {
   selectedReturnGroup: ReturnGroup;
@@ -61,23 +61,16 @@ export default function ReturnApprovalScreen({
                     <ThumbsUp size={20} />
                   </button>
                 </div>
-                <div style={{ display: "flex", gap: 6 }}>
-                  {CONDITION_LABELS.map((c) => (
-                    <button
-                      key={c.val}
-                      onClick={() => setApprovals((p) => ({ ...p, [item.id]: { ...p[item.id], condition: c.val } }))}
-                      style={{
-                        flex: 1, padding: "8px 0", borderRadius: 10, fontSize: 11, fontWeight: 700,
-                        cursor: "pointer", border: "1.5px solid", transition: "all 0.1s",
-                        background: app.condition === c.val ? `${c.color}15` : "#f8fafc",
-                        borderColor: app.condition === c.val ? c.color : "transparent",
-                        color: app.condition === c.val ? c.color : "#94a3b8",
-                      }}
-                    >
-                      {c.label}
-                    </button>
-                  ))}
-                </div>
+                <ReturnTagSelector<Condition>
+                  value={app.condition}
+                  onChange={(condition) => setApprovals((p) => ({ ...p, [item.id]: { ...p[item.id], condition } }))}
+                  options={[
+                    { value: "uncharged", label: "未充填" },
+                    { value: "keep", label: "持ち越し" },
+                    { value: "unused", label: "未使用" },
+                  ]}
+                  compact
+                />
               </div>
             );
           })}

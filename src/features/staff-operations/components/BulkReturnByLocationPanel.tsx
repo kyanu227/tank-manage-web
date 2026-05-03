@@ -1,7 +1,7 @@
 "use client";
 
 import { ArrowDownToLine, CheckCircle2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
-import { BULK_TAGS } from "../constants";
+import ReturnTagSelector from "@/components/ReturnTagSelector";
 import type { UseBulkReturnByLocationResult } from "../hooks/useBulkReturnByLocation";
 
 interface BulkReturnByLocationPanelProps {
@@ -104,25 +104,16 @@ export default function BulkReturnByLocationPanel({ bulk }: BulkReturnByLocation
                             </span>
                           </div>
                           {/* タグセレクター */}
-                          <div style={{ display: "flex", background: "#fff", border: "1px solid #e2e8f0", borderRadius: 8, padding: 2, flexShrink: 0 }}>
-                            {BULK_TAGS.map((tag) => {
-                              const active = tank.tag === tag.id;
-                              return (
-                                <button
-                                  key={tag.id}
-                                  onClick={() => updateTag(loc, tank.id, tag.id)}
-                                  style={{
-                                    padding: "6px 10px", border: "none", borderRadius: 6,
-                                    background: active ? tag.bg : "transparent",
-                                    color: active ? tag.color : "#94a3b8",
-                                    fontSize: 11, fontWeight: active ? 800 : 600,
-                                    cursor: "pointer", transition: "all 0.15s",
-                                  }}
-                                >
-                                  {tag.label}
-                                </button>
-                              );
-                            })}
+                          <div style={{ width: 180, flexShrink: 0 }}>
+                            <ReturnTagSelector
+                              value={tank.tag}
+                              onChange={(value) => updateTag(loc, tank.id, value)}
+                              options={[
+                                { value: "uncharged", label: "未充填" },
+                                { value: "unused", label: "未使用" },
+                              ]}
+                              compact
+                            />
                           </div>
                         </div>
                       ))}

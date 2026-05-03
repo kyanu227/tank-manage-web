@@ -50,20 +50,6 @@ export interface BulkTankDoc {
   logNote?: string;
 }
 
-export interface ConditionLabel {
-  val: Condition;
-  label: string;
-  color: string;
-}
-
-export interface BulkTagConfig {
-  id: BulkTagType;
-  label: string;
-  color: string;
-  bg: string;
-  borderColor: string;
-}
-
 export interface ModeConfigItem {
   label: string;
   icon: LucideIcon;

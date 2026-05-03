@@ -1,9 +1,10 @@
 "use client";
 
-import { AlertCircle, ArrowLeft, Droplets, Loader2, Send, X } from "lucide-react";
+import { ArrowLeft, Loader2, Send, X } from "lucide-react";
 import DrumRoll from "@/components/DrumRoll";
 import QuickSelect from "@/components/QuickSelect";
 import type { QuickSelectOption } from "@/components/QuickSelect";
+import ReturnTagSelector from "@/components/ReturnTagSelector";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
 import type { ModeConfigItem, OpMode, TagType } from "../types";
@@ -183,31 +184,15 @@ export default function ManualOperationPanel({
             padding: "8px 16px", background: "#fff", borderTop: "1px solid #e2e8f0",
             flexShrink: 0, zIndex: 20,
           }}>
-            <div style={{ display: "flex", gap: 6 }}>
-              {([
-                { id: "uncharged" as TagType, label: "未充填", icon: AlertCircle, color: "#ef4444" },
-                { id: "unused" as TagType, label: "未使用", icon: Droplets, color: "#10b981" },
-              ]).map(tag => {
-                const active = returnTag === tag.id;
-                return (
-                  <button
-                    key={tag.id}
-                    onClick={() => setReturnTag(active ? "normal" : tag.id)}
-                    style={{
-                      flex: 1, padding: "8px 4px", borderRadius: 10,
-                      background: active ? `${tag.color}15` : "#fff",
-                      border: `2px solid ${active ? tag.color : "#e2e8f0"}`,
-                      color: active ? tag.color : "#94a3b8",
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 4,
-                      cursor: "pointer", transition: "all 0.15s",
-                    }}
-                  >
-                    <tag.icon size={14} />
-                    <span style={{ fontSize: 10, fontWeight: 800 }}>{tag.label}</span>
-                  </button>
-                );
-              })}
-            </div>
+            <ReturnTagSelector<TagType>
+              value={returnTag}
+              onChange={setReturnTag}
+              options={[
+                { value: "uncharged", label: "未充填" },
+                { value: "unused", label: "未使用" },
+              ]}
+              compact
+            />
           </div>
         )}
 
