@@ -74,6 +74,7 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
   compact = false,
 }: ReturnTagSelectorProps<T>) {
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
+  const suppressClickRef = useRef(false);
 
   const selectValue = (nextValue: ReturnTagValue) => {
     onChange((value === nextValue ? "normal" : nextValue) as T);
@@ -88,6 +89,7 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
     if (Math.abs(dx) < 48 || Math.abs(dx) <= Math.abs(dy) * 1.5) return;
     const nextValue = dx > 0 ? swipeRightValue : swipeLeftValue;
     if (nextValue) {
+      suppressClickRef.current = true;
       onChange(nextValue);
     }
   };
@@ -116,7 +118,15 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
           <button
             key={option.value}
             type="button"
-            onClick={() => selectValue(option.value)}
+            onClick={(event) => {
+              if (suppressClickRef.current) {
+                event.preventDefault();
+                event.stopPropagation();
+                suppressClickRef.current = false;
+                return;
+              }
+              selectValue(option.value);
+            }}
             aria-pressed={active}
             style={{
               minWidth: 0,
