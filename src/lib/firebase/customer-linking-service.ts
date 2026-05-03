@@ -3,7 +3,10 @@ import { db } from "@/lib/firebase/config";
 import { assertNotChangedSinceLoad, hasFieldChanges } from "@/lib/firebase/diff-write";
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import type { OperationActor } from "@/lib/operation-context";
-import type { CustomerUserStatus } from "@/lib/firebase/customer-user";
+import {
+  computeCustomerUserStatus,
+  type CustomerUserStatus,
+} from "@/lib/firebase/customer-user";
 
 export interface PortalCustomerUser {
   id: string;
@@ -31,11 +34,20 @@ export interface CustomerUserAssignment {
   updatedAt?: unknown;
 }
 
+interface CustomerLinkSnapshot {
+  id: string;
+  name?: string;
+  companyName?: string;
+  email?: string;
+}
+
 export async function listCustomerUsers(): Promise<PortalCustomerUser[]> {
   const snap = await getDocs(collection(db, "customerUsers"));
   const customerUsers: PortalCustomerUser[] = [];
   snap.forEach((u) => {
-    const data = u.data() as Partial<PortalCustomerUser>;
+    const data = u.data() as Partial<PortalCustomerUser> & { disabled?: boolean };
+    const customerId = data.customerId || "";
+    const setupCompleted = Boolean(data.setupCompleted);
     customerUsers.push({
       id: u.id,
       uid: data.uid || u.id,
@@ -44,10 +56,14 @@ export async function listCustomerUsers(): Promise<PortalCustomerUser[]> {
       selfCompanyName: data.selfCompanyName || "",
       selfName: data.selfName || "",
       lineName: data.lineName || "",
-      customerId: data.customerId || "",
+      customerId,
       customerName: data.customerName || "",
-      status: data.status || "pending_setup",
-      setupCompleted: Boolean(data.setupCompleted),
+      status: computeCustomerUserStatus({
+        disabled: data.disabled === true,
+        setupCompleted,
+        customerId,
+      }),
+      setupCompleted,
       updatedAt: data.updatedAt,
     });
   });
@@ -64,17 +80,27 @@ export async function linkCustomerUsersToCustomers({
   const batch = writeBatch(db);
   const customerUserSnap = await getDocs(collection(db, "customerUsers"));
   const currentCustomerUsers = new Map(customerUserSnap.docs.map((d) => [d.id, d.data()]));
+  const customerSnap = await getDocs(collection(db, "customers"));
+  const currentCustomers = new Map<string, CustomerLinkSnapshot>();
+  customerSnap.forEach((customerDoc) => {
+    const data = customerDoc.data() as Partial<CustomerLinkSnapshot>;
+    currentCustomers.set(customerDoc.id, {
+      id: customerDoc.id,
+      name: data.name || "",
+      companyName: data.companyName || "",
+      email: data.email || "",
+    });
+  });
 
   for (const assignment of assignments) {
     const customerId = assignment.customerId || "";
-    const customerName = customerId ? (assignment.customerName || "") : "";
-    const status = assignment.status === "disabled"
-      ? "disabled"
-      : customerId
-        ? "active"
-        : assignment.setupCompleted
-          ? "pending"
-          : "pending_setup";
+    const linkedCustomer = customerId ? currentCustomers.get(customerId) : undefined;
+    if (customerId && !linkedCustomer) {
+      throw new Error(`紐付け先の顧客「${customerId}」は他の操作で削除されています。再読込してください。`);
+    }
+    const customerName = customerId
+      ? buildCustomerDisplayName(linkedCustomer, assignment.customerName || customerId)
+      : "";
     const current = currentCustomerUsers.get(assignment.id);
     if (!current) {
       throw new Error(`ポータル利用者「${assignment.email || assignment.id}」は他の操作で削除されています。再読込してください。`);
@@ -88,7 +114,6 @@ export async function linkCustomerUsersToCustomers({
     const payload = {
       customerId: customerId || null,
       customerName,
-      status,
     };
 
     if (hasFieldChanges(current, payload)) {
@@ -103,18 +128,33 @@ export async function linkCustomerUsersToCustomers({
 
     const pendingItems = await transactionsRepository.findPendingLinksByUid(assignment.uid);
     pendingItems.forEach((item) => {
-      batch.update(doc(db, "transactions", item.id), {
+      if (item.type !== "order") return;
+      if (item.customerId && item.customerId !== customerId) return;
+
+      transactionsRepository.updateTransactionInBatch(batch, item.id, {
         customerId,
         customerName,
-        status: "pending_approval",
+        status: "pending",
         linkedAt: serverTimestamp(),
         linkedByStaffId: actor.staffId,
         linkedByStaffName: actor.staffName,
         ...(actor.staffEmail ? { linkedByStaffEmail: actor.staffEmail } : {}),
-        updatedAt: serverTimestamp(),
       });
     });
   }
 
   await batch.commit();
+}
+
+function buildCustomerDisplayName(
+  customer: CustomerLinkSnapshot | undefined,
+  fallback: string,
+): string {
+  const companyName = customer?.companyName?.trim();
+  if (companyName) return companyName;
+
+  const name = customer?.name?.trim();
+  if (name) return name;
+
+  return fallback.trim();
 }
