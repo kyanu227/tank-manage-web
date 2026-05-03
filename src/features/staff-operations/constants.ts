@@ -18,6 +18,7 @@ export const CONDITION_LABELS: ConditionLabel[] = [
   { val: "normal", label: "通常", color: "#64748b" },
   { val: "unused", label: "未使用", color: "#10b981" },
   { val: "uncharged", label: "未充填", color: "#ef4444" },
+  { val: "keep", label: "持ち越し", color: "#f59e0b" },
 ];
 
 export const BULK_TAGS: BulkTagConfig[] = [

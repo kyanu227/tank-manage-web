@@ -7,9 +7,11 @@ import { db } from "@/lib/firebase/config";
 import { tanksRepository, transactionsRepository } from "@/lib/firebase/repositories";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import {
+  ACTION,
   RETURN_TAG,
   resolveReturnAction,
   type ReturnTag,
+  type TankAction,
 } from "@/lib/tank-rules";
 import type { ApprovalMap, Condition, PendingReturn, ReturnGroup } from "../types";
 
@@ -93,26 +95,33 @@ export function useReturnApprovals({
       // 存在しないタンクIDはここで弾く（幽霊タンク生成を防ぐ最終防衛ライン）。
       const approvedData = await Promise.all(approved.map(async (item) => {
         const appData = approvals[item.id];
+        const condition = appData?.condition ?? item.condition;
         const tag: ReturnTag =
-          appData.condition === "unused" ? RETURN_TAG.UNUSED
-            : appData.condition === "uncharged" ? RETURN_TAG.DEFECT
+          condition === "unused" ? RETURN_TAG.UNUSED
+            : condition === "uncharged" ? RETURN_TAG.DEFECT
               : RETURN_TAG.NORMAL;
-        const note = `[承認] 顧客: ${selectedReturnGroup.customerName} (タグ:${appData.condition})`;
+        const note = `[承認] 顧客: ${selectedReturnGroup.customerName} (タグ:${condition})`;
         const tank = await tanksRepository.getTank(item.tankId);
         if (!tank) {
           throw new Error(`[${item.tankId}] タンクが存在しません`);
         }
         const currentStatus = tank.status ?? "";
-        return { item, tag, condition: appData.condition as Condition, note, currentStatus };
+        const transitionAction: TankAction = condition === "keep"
+          ? ACTION.CARRY_OVER
+          : resolveReturnAction(tag, currentStatus);
+        const location = condition === "keep"
+          ? tank.location || selectedReturnGroup.customerName
+          : "倉庫";
+        return { item, condition: condition as Condition, note, currentStatus, transitionAction, location };
       }));
 
       await applyBulkTankOperations(
-        approvedData.map(({ item, tag, note, currentStatus }) => ({
+        approvedData.map(({ item, note, currentStatus, transitionAction, location }) => ({
           tankId: item.tankId,
-          transitionAction: resolveReturnAction(tag, currentStatus),
+          transitionAction,
           currentStatus,
           context,
-          location: "倉庫",
+          location,
           tankNote: note,
           logNote: note,
         })),

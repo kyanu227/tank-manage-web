@@ -24,7 +24,7 @@ export interface ScannedTank {
   error?: string;
 }
 
-export type Condition = "normal" | "unused" | "uncharged";
+export type Condition = "normal" | "unused" | "uncharged" | "keep";
 
 export interface PendingReturn {
   id: string;

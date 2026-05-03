@@ -108,9 +108,9 @@ export default function CustomerReturnPage() {
   };
 
   const submitReturn = async (auto = false, autoKey?: string) => {
-    const toReturn = tanks.filter((t) => t.condition !== "keep");
-    if (toReturn.length === 0) {
-      if (!auto) alert("返却するタンクがありません（全て持ち越し）");
+    const submitItems = tanks;
+    if (submitItems.length === 0) {
+      if (!auto) alert("送信するタンクがありません");
       return;
     }
     if (!isLinkedPortalIdentity(identity)) {
@@ -121,9 +121,9 @@ export default function CustomerReturnPage() {
     try {
       await createPortalReturnRequests({
         identity,
-        items: toReturn.map((tank) => ({
+        items: submitItems.map((tank) => ({
           tankId: tank.id,
-          condition: tank.condition === "unused" ? "unused" : "normal",
+          condition: tank.condition,
         })),
         source: auto ? "auto_schedule" : "customer_portal",
       });
@@ -138,6 +138,8 @@ export default function CustomerReturnPage() {
   };
 
   const returningCount = tanks.filter((t) => t.condition !== "keep").length;
+  const keepCount = tanks.filter((t) => t.condition === "keep").length;
+  const submitCount = tanks.length;
   const isLinked = isLinkedPortalIdentity(identity);
 
   if (isSuccess) {
@@ -198,14 +200,14 @@ export default function CustomerReturnPage() {
             </div>
           )}
         </div>
-        {returningCount > 0 && !loading && (
+        {submitCount > 0 && !loading && (
           <div style={{
             display: "flex", alignItems: "center", gap: 6,
             background: "#0ea5e9", color: "#fff",
             padding: "6px 14px", borderRadius: 20, fontSize: 13, fontWeight: 700,
           }}>
             <RotateCcw size={13} />
-            {returningCount}本
+            {submitCount}本
           </div>
         )}
       </header>
@@ -336,21 +338,21 @@ export default function CustomerReturnPage() {
           padding: "14px 20px",
           paddingBottom: "calc(14px + env(safe-area-inset-bottom, 0px))",
         }}>
-          {tanks.filter((t) => t.condition === "keep").length > 0 && (
+          {keepCount > 0 && (
             <div style={{ textAlign: "center", fontSize: 11, color: "#f59e0b", fontWeight: 600, marginBottom: 8 }}>
-              持ち越し {tanks.filter((t) => t.condition === "keep").length}本 は除外されます
+              持ち越し {keepCount}本 を記録します
             </div>
           )}
           <button
             onClick={() => submitReturn(false)}
-            disabled={isSubmitting || returningCount === 0}
+            disabled={isSubmitting || submitCount === 0}
             style={{
               width: "100%", padding: "16px 0", borderRadius: 18, border: "none",
-              background: returningCount > 0 ? "#0f172a" : "#e2e8f0",
-              color: returningCount > 0 ? "#fff" : "#94a3b8",
+              background: submitCount > 0 ? "#0f172a" : "#e2e8f0",
+              color: submitCount > 0 ? "#fff" : "#94a3b8",
               fontSize: 16, fontWeight: 800,
               display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-              cursor: returningCount > 0 && !isSubmitting ? "pointer" : "default",
+              cursor: submitCount > 0 && !isSubmitting ? "pointer" : "default",
               transition: "all 0.15s",
             }}
           >
@@ -363,7 +365,11 @@ export default function CustomerReturnPage() {
             ) : (
               <>
                 <Send size={17} />
-                {returningCount > 0 ? `${returningCount}本を返却申請する` : "返却するタンクを選んでください"}
+                {returningCount === 0 && keepCount > 0
+                  ? `${keepCount}本を持ち越し記録する`
+                  : keepCount > 0
+                    ? `${returningCount}本を返却 / ${keepCount}本を持ち越し`
+                    : `${returningCount}本を返却申請する`}
               </>
             )}
           </button>
