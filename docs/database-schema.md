@@ -224,7 +224,8 @@ B-12
 
 顧客が現在貸出中のタンクに付ける返却時タグ。
 旧コード名には `ReturnApprovalScreen` / `useReturnApprovals` があったが、PR #14 で `ReturnTagProcessingScreen` / `useReturnTagProcessing` へ rename 済みである。
-`pending_approval` status 値は現行互換として残るが、業務意味としては「返却申請」や「承認申請」ではない。
+旧実装では `pending_approval` status 値を使っていたが、return 側の正 status は `pending_return` である。
+`pending_approval` は return 側では「返却申請」や「承認申請」として扱わない。
 スタッフ側は、顧客が付けた `condition` を参照して実際の返却処理・持ち越し処理を完了する。
 
 | フィールド | 型 | 必須 | 説明 |
@@ -237,8 +238,8 @@ B-12
 
 | 値 | 意味 |
 |---|---|
-| `pending_approval` | 現行コード上の旧名。業務意味は顧客返却タグの処理待ち。後続で `pending_return` へ名称変更候補 |
-| `pending_return` | 移行後の処理待ち候補。`docs/pending-return-status-migration-design.md` で設計済み。PR #16 で読み取り互換済み。新規作成ではまだ未使用 |
+| `pending_return` | return 側の正 status。顧客返却タグの処理待ち |
+| `pending_approval` | return 側では使わない旧名。order 側の別概念として残る場合がある |
 | `completed` | 返却処理完了 |
 
 ### `type = "uncharged_report"`

@@ -82,7 +82,7 @@ export async function createPortalReturnRequests(
     items.map((item) =>
       transactionsRepository.createTransaction({
         type: "return",
-        status: "pending_approval",
+        status: "pending_return",
         tankId: item.tankId,
         condition: item.condition,
         customerId: input.identity.customerId,
