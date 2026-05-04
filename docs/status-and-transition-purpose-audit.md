@@ -122,7 +122,7 @@ tank lifecycle status ではない。
 |---|---|---|---|---|---|---|---|---|---|
 | `pending_link` | Customer 未確定の仮受注 | 未紐付け注文を失わず、通常処理から隔離する | unlinked order / CustomerUser | `pending` | まだ tank log は作らない | requested*, createdByUid, customerId null | 通常請求・貸出対象外 | 通常 badge / 通常受注一覧に混ぜない | 正しい |
 | `pending` | Customer 確定後の通常受注 | staff が確認できる通常受注として扱う | linked order or linking promotion | `approved` | まだ tank log は作らない | customerId, customerName, requested* | 貸出準備対象 | Customer 未確定のまま pending にしない | 正しい |
-| `pending_approval` | 現行では order / return の承認待ちに混在。return では顧客返却タグの処理待ち | 処理待ちを表すが名前が広すぎる | 旧 order / return tag processing | order は `approved`, return は `completed` | 処理完了時に logs | type ごとの意味を分けて残す | type により異なる | order と return を同じ意味で扱わない。return を承認申請と解釈しない | 名称変更候補。新規 order では使わない。return は `pending_return` 推奨 |
+| `pending_approval` | 現行では order / return の承認待ちに混在。return では顧客返却タグの処理待ち | 処理待ちを表すが名前が広すぎる | 旧 order / return tag processing | order は `approved`, return は `completed` | 処理完了時に logs | type ごとの意味を分けて残す | type により異なる | order と return を同じ意味で扱わない。return を承認申請と解釈しない | 名称変更候補。新規 order では使わない。return は `pending_return` への移行設計あり |
 | `approved` | order が貸出処理待ち | 承認済み受注と未承認受注を分ける | staff order approval | `completed` | 貸出時に tank logs | approvedByStaff* | 貸出準備に関係 | customerId なしで approved にしない | 正しい |
 | `completed` | transaction の業務処理が完了 | 完了済みを pending から外す | order fulfilment, return fulfilment, uncharged_report record | 原則終端 | order / return は operation logs と紐付く | fulfilledByStaff* or record fields | 請求・報酬・集計に関係 | 未処理のまま completed にしない | 正しい |
 
@@ -165,7 +165,7 @@ staff / admin 系は業務状態ではなく、アカウント・権限状態で
 - `貸出中` は tank lifecycle status。
 - `pending` は transaction workflow status または CustomerUser derived status であり、レイヤーを見ないと意味が違う。
 - `active` / `superseded` / `voided` は log revision status。顧客やスタッフの有効無効ではない。
-- `pending_approval` は order と return に混在しており、名称変更または廃止候補。return 側は顧客返却タグの処理待ちなので `pending_return` 推奨。
+- `pending_approval` は order と return に混在しており、名称変更または廃止候補。return 側は顧客返却タグの処理待ちなので `pending_return` への移行設計を `docs/pending-return-status-migration-design.md` に固定済み。
 - 旧コード名の `ReturnApprovalScreen` / `useReturnApprovals` / `fetchApprovals` / `fulfillReturns` は approval 命名だったが、PR #14 で `ReturnTagProcessing` 系へ rename 済み。業務意味は「スタッフによる返却タグ処理」と読む。詳細は `docs/return-tag-processing-naming-design.md` を正とする。
 - `不良` は名称が悪く、新規設計では廃止方針。タンク不具合は `破損` + 不具合タグへ寄せる。
 - 未充填は破損ではなく、こちら側の充填ミス・準備ミスの記録。
@@ -176,7 +176,7 @@ staff / admin 系は業務状態ではなく、アカウント・権限状態で
 
 | 差分 | 現行 | 台帳上の判断 |
 |---|---|---|
-| `pending_approval` | order / return に混在 | 新規 order では使わない。return は `pending_return` 推奨 |
+| `pending_approval` | order / return に混在 | 新規 order では使わない。return は `pending_return` への移行設計あり。既存 return はまず読み取り互換で自然消化する |
 | 旧 `ReturnApprovalScreen` / `useReturnApprovals` | PR #14 で `ReturnTagProcessingScreen` / `useReturnTagProcessing` へ rename 済み | 業務意味は「承認」ではなく「返却タグ処理」。`pending_approval` status migration は未実施 |
 | 旧返却タグ名 | 以前は未充填返却を破損に見える名前で表していた | 現在は `RETURN_TAG.UNCHARGED` / `[TAG:uncharged]` へ整理済み |
 | `STATUS.DEFECTIVE` | `不良` として存在 | 新規設計では廃止方針。`破損` + 不具合タグへ寄せる |
