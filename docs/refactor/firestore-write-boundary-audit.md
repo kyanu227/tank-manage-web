@@ -1,378 +1,241 @@
 # Firestore 書き込み境界 監査
 
-調査日: 2026-05-02
-範囲: `src/**` 配下の `addDoc` / `setDoc` / `updateDoc` / `writeBatch` / `runTransaction` / `deleteDoc` 全件
+調査日: 2026-05-04
+範囲: `src/**`
 
-> 旧 schema 互換、legacy fallback、backfill は考慮しない。既存コードに残る fallback は撤去対象として扱い、移行後の前提にはしない。
-> 詳細な責務分担の議論は [page-feature-boundary-audit.md](./page-feature-boundary-audit.md)、移行手順は [refactor-roadmap.md](./refactor-roadmap.md) を参照。
+検索 API:
+
+- `addDoc`
+- `setDoc`
+- `updateDoc`
+- `writeBatch`
+- `runTransaction`
+- `deleteDoc`
+- `batch.set`
+- `batch.update`
+- `batch.delete`
+- `transaction.set`
+- `transaction.update`
+- `transaction.delete`
+
+補足:
+
+- `deleteDoc` の直接使用は検出なし。
+- `transaction.set` / `transaction.update` / `transaction.delete` のリテラル一致は検出なし。ただし `runTransaction` 内の writer 変数は `tx` で、`tx.set` / `tx.update` として存在するため、`runTransaction` の行で監査対象に含める。
+- `transactionsRepository.updateTransactionInBatch(writer, ...)` は `writer.update(...)` の抽象化なので、`batch.update` の直接 grep には出ない箇所も書き込み境界として扱う。
 
 ---
 
 ## 0. サマリ
 
-- **Firestore 直接書き込みの呼び出し箇所**: `runTransaction` / `writeBatch` / `addDoc` / `setDoc` / `updateDoc` の入口で計 27 箇所（`import` 行を除く）。下のマトリクスは、`extraOps` 内の `batch.update` などレビュー上重要な書き込みも補助行として併記する。
-- うち、page.tsx に張り付いている主な書き込み入口: admin/customers ×3、admin/permissions ×1、admin/settings ×5、portal/order ×1、portal/return ×1、portal/setup ×1、portal/unfilled ×1、staff/inhouse ×1。
-  - ※ admin/settings の `writeBatch` 3 本は、`batch.set` `batch.update` `batch.delete` で内部に複数の書き込み操作を含む。
-- service / lib に分離済みの主要書き込み: `tank-operation.ts`、`submitTankEntryBatch.ts`、`supply-order.ts`、`admin-money-settings.ts`、`admin-notification-settings.ts`。
-- features hook 内に張り付いている書き込み: `useOrderFulfillment.ts`、`useReturnTagProcessing.ts`、`useBulkReturnByLocation.ts`。
-- `customer-user.ts` の `ensureCustomerUser` は portal Auth の正規経路。`staff-auth.ts` 内の `setDoc` は read 経路からの自動 mirror 修復であり、service 境界として再検討対象。
+- 現行コードでは、portal の `transactions` 作成、admin/settings の staff/orderMaster/customerUsers 保存、portal setup は page 直書きから service / repository 経由へ移動済み。
+- page 直下に残る Firestore 書き込みは主に `CustomerManagementPage` の `customers` CRUD、`admin/permissions` の `settings/adminPermissions` 保存、`staff/inhouse` の `tanks.logNote` 更新。
+- hook 内に残る業務書き込みは `useOrderFulfillment`、`useReturnTagProcessing`、`useBulkReturnByLocation`。特に `transactions` 更新と `tanks` 更新を伴う staff operation は高リスクなので、最初の実装 PR では触らない。
+- `tank-operation.ts` は `tanks` / `logs` 状態遷移と revision / void の正本境界。明示設計なしに分割・移動しない。
+- `submitTankEntryBatch.ts` は新規 `tanks` 作成 + `tankProcurements` + `logs` をまとめる procurement workflow。高リスクだが現状の境界は妥当。
+- `customerUsers` と `pending_link` transactions の連動更新は `customer-linking-service.ts` に寄っており、page 直書きではない。
+- settings / master 系は helper/service に寄っているものが多い。将来は `edit_history` を差し込める service 境界へ揃える候補。
 
 ---
 
-## 1. 全件マトリクス
+## 1. 書き込み境界一覧
 
-> 「業務操作」列は、その書き込みが「ユーザーから見て何をしているか」を 1 行で表す。
-> 「移行先」列は、本ドキュメントが提案する **service / repository への配線**。
-> 既に正しい階層にあるものは「現状維持」と記載する。
-
-### 1.1 src/lib/tank-operation.ts （tank operation service の本体）
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 1 | 244 | `runTransaction` | `tanks` + `logs` | 単一タンクの状態遷移 + ログ作成 (`applyTankOperation`) | **現状維持**。設計書 §17 の方針通り、ここが書き込みの正本 |
-| 2 | 273 | `runTransaction` | `tanks` + `logs` (+ extraOps) | 複数タンクの一括状態遷移 + ログ作成 + batch 参加 (`applyBulkTankOperations`) | **現状維持**。受注貸出 / 返却タグ処理 / 一括返却の中核 |
-| 3 | 375 | `runTransaction` | `logs` + `tanks` | 既存ログの編集 (revision chain) (`applyLogCorrection`) | **現状維持** |
-| 4 | 507 | `runTransaction` | `logs` + `tanks` | ログの取消 (void) (`voidLog`) | **現状維持** |
-
-→ 評価: **このファイルは触らない**。CLAUDE.md / AGENTS.md でも繰り返し「`tank-operation.ts` は明示指示なしに触らない」と禁則化されている。
-
----
-
-### 1.2 src/features/procurement/lib/submitTankEntryBatch.ts
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 5 | 56 | `runTransaction` | `tanks` (新規) + `tankProcurements` + `logs` | タンク購入 / 登録 (新規 `tankId` 重複チェック → 一括 `set`) | **現状維持**。`tank-operation.ts` の対象外（既存 tank の遷移ではなく **新規作成**）。procurement service として正しく独立している |
-
----
-
-### 1.3 src/lib/firebase/supply-order.ts
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 6 | 49 | `writeBatch` | `orders` + `logs` | 資材発注 (品目ごとに `orders` 追加 + サマリ `logs` 1 件) | **現状維持**。`OperationActor` を受け取る正しい service。ただし将来的に `features/procurement/lib/submitSupplyOrder.ts` に移して procurement feature にまとめても良い |
-
----
-
-### 1.4 src/lib/firebase/admin-money-settings.ts
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 7 | 35 | `writeBatch` | `priceMaster` + `rankMaster` | 単価・ランクの差分保存（dirty / deleted を分離して update / delete） | **現状維持**。admin/money page から呼ばれる service として完成 |
+| file | function / component | 使用 API | collection / doc path の推定 | 現在の層分類 | 書き込みの意味 | リスク | 将来の移行候補 | 今は触らない理由 | 優先度 |
+|---|---|---|---|---|---|---|---|---|---|
+| `src/lib/tank-operation.ts` | `applyTankOperation` | `runTransaction`, `tx.set`, `tx.update` | `tanks/{tankId}`, `logs/{autoId}` | domain operation service | 単一タンクの状態遷移とログ作成 | 高 | 現状維持 | 状態遷移・ログ・latestLogId の正本境界 | 触らない |
+| `src/lib/tank-operation.ts` | `applyBulkTankOperations` | `runTransaction`, `tx.set`, `tx.update`, `extraOps` | `tanks/{tankId}`, `logs/{autoId}`, caller 追加書き込み | domain operation service | 複数タンクの状態遷移とログ作成、受注/返却の transaction 更新を同一 transaction に参加 | 高 | 現状維持 | staff operation の中核。移動ではなく caller 側 service 化で包む | 触らない |
+| `src/lib/tank-operation.ts` | `applyLogCorrection` | `runTransaction`, `tx.set`, `tx.update` | `logs/{logId}`, `tanks/{tankId}` | domain operation service | ログ revision 作成とタンク最新状態の差し替え | 高 | 現状維持 | revision chain の不変条件を持つ | 触らない |
+| `src/lib/tank-operation.ts` | `voidLog` | `runTransaction`, `tx.update` | `logs/{logId}`, `tanks/{tankId}` | domain operation service | ログ取消とタンク状態復元 | 高 | 現状維持 | void の業務不変条件を持つ | 触らない |
+| `src/features/procurement/lib/submitTankEntryBatch.ts` | `submitTankEntryBatch` | `runTransaction`, `tx.set` | `tanks/{tankId}`, `tankProcurements/{autoId}`, `logs/{autoId}` | 業務バッチ / workflow | タンク購入・登録時の重複確認、新規 tanks 作成、procurement/log 作成 | 高 | 現状維持。必要なら procurement domain service として命名整理 | 新規作成 workflow として既に page から分離済み | 後 |
+| `src/lib/firebase/supply-order.ts` | `submitSupplyOrder` | `writeBatch`, `batch.set` | `orders/{autoId}`, `logs/{autoId}` | service / 業務 workflow | 資材発注とサマリ log 作成 | 中 | 現状維持。将来は procurement feature 配下へ移す候補 | actor を受け取る service 境界に寄っている | 後 |
+| `src/lib/firebase/repositories/transactions.ts` | `createTransaction` | `addDoc` | `transactions/{autoId}` | repository | portal order / return / uncharged_report などの transaction 作成 | 中 | 現状維持。type 別 service は caller 側に置く | createdAt/updatedAt 付与の薄い repository として妥当 | 後 |
+| `src/lib/firebase/repositories/transactions.ts` | `updateTransaction` | `updateDoc` | `transactions/{id}` | repository | transaction 単純更新 | 中 | 現状維持。用途ごとの service から呼ぶ | repository helper として薄い境界 | 後 |
+| `src/lib/firebase/repositories/transactions.ts` | `updateTransactionInBatch` | `writer.update` | `transactions/{id}` | repository | batch / transaction writer に参加する transaction 更新 | 高 | 現状維持。caller service を作る | `customer-linking-service` や tank operation extraOps から使うため直接移動しない | 後 |
+| `src/lib/firebase/portal-transaction-service.ts` | `createPortalOrder` | repository 経由 `addDoc` | `transactions` | service | linked order は `pending`、unlinked order は `pending_link` で作成 | 中 | 現状維持 | page 直書きから移動済み。status 方針も現行設計に一致 | 完了 |
+| `src/lib/firebase/portal-transaction-service.ts` | `createPortalReturnRequests` | repository 経由 `addDoc` | `transactions` | service | return transaction を `pending_return` で作成 | 中 | 現状維持 | return 側 status が `pending_return` に統一済み | 完了 |
+| `src/lib/firebase/portal-transaction-service.ts` | `createPortalUnfilledReports` | repository 経由 `addDoc` | `transactions` | service | 未充填報告 transaction を `completed` で作成 | 低 | 現状維持 | page 直書きから移動済み | 完了 |
+| `src/features/staff-operations/hooks/useOrderFulfillment.ts` | `approveOrder` | `updateDoc` | `transactions/{orderId}` | hook | order の `pending_approval` を `approved` に上げる | 高 | `orderFulfillmentService.approveOrder` | staff 作業導線の挙動に直結。最初は設計 PR で切る | 中 |
+| `src/features/staff-operations/hooks/useOrderFulfillment.ts` | `fulfillOrder` | `applyBulkTankOperations` + `batch.update` | `tanks`, `logs`, `transactions/{orderId}` | hook + domain operation service | 受注分のタンク貸出と order transaction 完了を同一 transaction に参加 | 高 | `orderFulfillmentService.fulfillOrder` | `tanks` / `logs` / `transactions` 同時更新。大きな修正と混ぜない | 中 |
+| `src/features/staff-operations/hooks/useReturnTagProcessing.ts` | `processReturnTags` | `applyBulkTankOperations` + `batch.update` | `tanks`, `logs`, `transactions/{returnId}` | hook + domain operation service | 返却タグ処理と return transaction 完了 | 高 | `returnTagProcessingService.processReturnTags` | return status とタンク状態遷移の境界。安全なテスト方針が必要 | 中 |
+| `src/app/staff/inhouse/page.tsx` | `updateTag` | `writeBatch().update().commit()` | `tanks/{tankId}` | page | 自社利用中タンクの `logNote` タグだけ更新 | 高 | `tankTagService.updateLogNote` | state 遷移ではないが `tanks` 直接更新。2 箇所重複を小 PR で扱う | 高 |
+| `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` | `updateTag` | `writeBatch().update().commit()` | `tanks/{tankId}` | hook | 一括返却対象タンクの `logNote` タグだけ更新 | 高 | `tankTagService.updateLogNote` | `staff/inhouse` と同じ重複。state field を許可しない helper が必要 | 高 |
+| `src/features/admin-customers/CustomerManagementPage.tsx` | `handleAddCustomer` | `addDoc` | `customers/{autoId}` | page / feature component | 顧客マスタ新規作成 | 中 | `customersService.createCustomer` | 単純 CRUD だが重複名チェックと履歴差し込みをまとめたい | 高 |
+| `src/features/admin-customers/CustomerManagementPage.tsx` | `saveCustomer` | `updateDoc` | `customers/{customerId}` | page / feature component | 顧客マスタ編集 | 中 | `customersService.updateCustomer` | 既存 page 状態管理を崩さず service 抽出できる | 高 |
+| `src/features/admin-customers/CustomerManagementPage.tsx` | `toggleCustomerStatus` | `updateDoc` | `customers/{customerId}` | page / feature component | 顧客有効/無効切替 | 中 | `customersService.setCustomerActive` | customers 正本化の前段として小さく切れる | 高 |
+| `src/app/admin/permissions/page.tsx` | `handleSave` | `setDoc` | `settings/adminPermissions` | page | ページ権限制御の保存 | 中 | `adminPermissionsService.savePermissions` | 単発保存で小さいが AdminAuthGuard の read helper と合わせたい | 高 |
+| `src/lib/firebase/admin-settings.ts` | `savePortalSettings` | `setDoc(merge)` | `settings/portal` | 設定 helper | 自動返却時刻の保存 | 中 | 現状維持。将来 `edit_history` 対応 | helper に寄っており page 直書きではない | 中 |
+| `src/lib/firebase/admin-settings.ts` | `saveInspectionSettings` | `setDoc(merge)` | `settings/inspection` | 設定 helper | 耐圧検査の有効年数・アラート月数保存 | 中 | 現状維持。通知設定側との正本整理候補 | helper に寄っているが `notifySettings/config` と field が重複 | 中 |
+| `src/lib/firebase/admin-money-settings.ts` | `saveAdminMoneySettings` | `writeBatch`, `batch.set`, `batch.update`, `batch.delete` | `priceMaster`, `rankMaster` | service / 設定 helper | 操作単価・ランク条件の差分保存 | 中 | 現状維持。将来 `edit_history` 対応 | dirty/deleted と競合検知が helper 内にまとまっている | 後 |
+| `src/lib/firebase/admin-notification-settings.ts` | `saveAdminNotificationSettings` | `writeBatch`, `batch.set`, `batch.update`, `batch.delete` | `notifySettings/config`, `lineConfigs` | service / 設定 helper | メール通知・LINE設定の差分保存 | 中 | 現状維持。`settings/inspection` との責務整理候補 | helper に寄っており page 直書きではない | 中 |
+| `src/lib/firebase/order-master-settings.ts` | `saveOrderItems` | `writeBatch`, `batch.set`, `batch.update`, `batch.delete` | `orderMaster` | service / 設定 helper | 発注品目マスタの差分保存 | 中 | 現状維持。将来 `edit_history` 対応 | helper に寄っており page 直書きではない | 後 |
+| `src/lib/firebase/staff-sync-service.ts` | `saveStaffMembers` | `writeBatch`, `batch.set`, `batch.update` | `staff`, `staffByEmail` | service | staff と staffByEmail mirror の同期保存 | 中 | 現状維持。将来履歴・権限変更 audit を追加 | page 直書きから service へ寄っている | 中 |
+| `src/lib/firebase/staff-auth.ts` | `setStaffAuthMirrorInBatch` / `deleteStaffAuthMirrorInBatch` | `batch.set`, `batch.delete` | `staffByEmail/{emailKey}` | 設定 helper | staff mirror の batch 参加 helper | 中 | 現状維持 | `staff-sync-service` が使う低レベル helper | 後 |
+| `src/lib/firebase/staff-auth.ts` | `findActiveStaffByEmail` | `setDoc(merge)` | `staffByEmail/{emailKey}` | 設定 helper / auth helper | mirror が無い場合の認証 lookup 中の自動修復 | 中 | 明示的な mirror rebuild service に分離 | read 経路から write するため注意。挙動変更は認証に影響する | 中 |
+| `src/lib/firebase/customer-user.ts` | `ensureCustomerUser` | `setDoc`, `setDoc(merge)` | `customerUsers/{uid}` | service / identity helper | portal user 初期作成、login 時の email/displayName/lastLoginAt 更新 | 中 | 現状維持 | Portal Auth Phase 0 の正規経路 | 後 |
+| `src/lib/firebase/portal-profile-service.ts` | `completeCustomerUserSetup` | `updateDoc` | `customerUsers/{uid}` | service | portal 初期設定完了情報の保存 | 中 | 現状維持。必要なら `customer-user.ts` と統合 | page 直書きから service へ寄っている | 後 |
+| `src/lib/firebase/customer-linking-service.ts` | `linkCustomerUsersToCustomers` | `writeBatch`, `batch.set`, repository `writer.update` | `customerUsers/{uid}`, `transactions/{id}` | service | 顧客紐付けと `pending_link` order の `pending` 昇格 | 高 | 現状維持 | customerUsers と transactions の連動更新が service に寄っている | 後 |
 
 ---
 
-### 1.5 src/lib/firebase/admin-notification-settings.ts
+## 2. 層ごとの現状
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 8 | 30 | `writeBatch` | `notifySettings/config` + `lineConfigs` | 通知設定（メール宛先 / アラート月数 / 有効年数 / LINE 設定）の差分保存 | **現状維持**。**ただし** `notifySettings/config` の `alertMonths` / `validityYears` と `settings/inspection` の同名 field が **責務重複** している。要整理（後述 §3） |
+### page
 
----
+残存:
 
-### 1.6 src/lib/firebase/customer-user.ts
+- `src/features/admin-customers/CustomerManagementPage.tsx`
+  - `customers` の create / update / active toggle を直接実行。
+  - 将来の `customers` 正本化、名称変更時の影響、`edit_history` 差し込みを考えると `customersService` 化の優先度は高い。
+- `src/app/admin/permissions/page.tsx`
+  - `settings/adminPermissions` を直接 `setDoc`。
+  - 単発保存なので小さく切りやすい。
+- `src/app/staff/inhouse/page.tsx`
+  - `tanks.logNote` タグ更新を直接実行。
+  - 状態遷移ではないが `tanks` 書き込みなので、許可フィールド限定 helper を作って page から隠す候補。
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 9 | 62 | `setDoc` | `customerUsers/{uid}` | 新規 portal user の初期作成 (`ensureCustomerUser`) | **現状維持**。portal identity 解決の中核 |
-| 10 | 80 | `setDoc(merge)` | `customerUsers/{uid}` | 既存 portal user の email/displayName/lastLoginAt 更新 | **現状維持** |
+現行で page 直書きから解消済み:
 
-→ 評価: identity helper と service の中間にある。portal/setup の `updateDoc` (#16) と「portal user の更新」は責務重複しているので、`customer-user.ts` 側に `completePortalSetup({ uid, profile })` を追加して **portal user 書き込みを 1 ファイルに集約** すべき。
+- portal order / return / uncharged_report の `transactions` 作成。
+- portal setup の `customerUsers` 更新。
+- admin/settings の staff / orderMaster / customerUsers / settings 保存。
 
----
+### hook
 
-### 1.7 src/lib/firebase/staff-auth.ts
+残存:
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 11 | 147 | `setDoc(merge)` | `staffByEmail/{key}` | mirror が無いまま staff lookup が成功した時の **自動修復書き込み** | **要再検討**。read 経路 (`findActiveStaffByEmail`) が write を含む。mirror 修復は `staffSyncService` の保存処理または明示的な rebuild API に寄せ、認証 lookup は read-only にする |
+- `useOrderFulfillment.ts`
+  - order approval の `transactions` 更新。
+  - tank 貸出と order completion を `applyBulkTankOperations` の `extraOps` に参加。
+- `useReturnTagProcessing.ts`
+  - return tag 処理と return transaction completion を `extraOps` に参加。
+- `useBulkReturnByLocation.ts`
+  - `tanks.logNote` タグ更新。
 
----
+評価:
 
-### 1.8 src/app/admin/customers/page.tsx — 顧客マスタ画面
+- `useOrderFulfillment` と `useReturnTagProcessing` は `tanks` / `logs` / `transactions` の整合に関わるため高リスク。先に docs / test 方針を切る。
+- `useBulkReturnByLocation` の tag 更新は `staff/inhouse` と同じ小さい重複なので、次の実装 PR 候補にできる。
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 12 | 197 | `addDoc` | `customers` | 新規顧客作成（重複名チェック後） | **`customersService.createCustomer(input)`** （新設） |
-| 13 | 237 | `updateDoc` | `customers/{id}` | 既存顧客の編集保存（行ごとの save ボタン） | **`customersService.updateCustomer(id, patch)`** （新設） |
-| 14 | 265 | `updateDoc` | `customers/{id}` | 顧客の active/inactive トグル | **`customersService.setCustomerActive(id, isActive)`** （新設） |
+### service / repository / domain operation service
 
-→ いずれも単純な field 更新だが、page にロジックが点在している。`customersRepository` (read) と `customersService` (write) を新設し、page は呼ぶだけにする。
-→ 重複名チェック (`findDuplicateCustomerName`) も service に閉じる（service が UNIQUE 違反を例外で返す）。
+現状維持でよい境界:
 
----
+- `tank-operation.ts`
+- `submitTankEntryBatch.ts`
+- `supply-order.ts`
+- `portal-transaction-service.ts`
+- `customer-linking-service.ts`
+- `staff-sync-service.ts`
+- `admin-money-settings.ts`
+- `admin-notification-settings.ts`
+- `admin-settings.ts`
+- `order-master-settings.ts`
+- `customer-user.ts`
+- `portal-profile-service.ts`
+- `transactionsRepository`
 
-### 1.9 src/app/admin/permissions/page.tsx
+注意する境界:
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 15 | 76 | `setDoc` (overwrite) | `settings/adminPermissions` | ページ権限の保存 (`pages: {path: roles[]}`) | **`adminPermissionsService.savePermissions(pages)`** （新設） |
-
-→ `AdminAuthGuard` 側でも `getDoc(doc(db, "settings", "adminPermissions"))` をしている。`settingsRepository.getAdminPermissions()` と組で揃えるべき。
-
----
-
-### 1.10 src/app/admin/settings/page.tsx
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 16 | 241 | `writeBatch` | `staff` + `staffByEmail` | 担当者リスト保存（新規 `set` / 編集 `update` / mirror 同期 / email 変更時の旧 mirror 削除） | **`staffSyncService.saveStaffMembers({ staffList })`** （新設）。staff と staffByEmail mirror の整合は service 内に閉じる |
-| 17 | 332 | `writeBatch` | `orderMaster` | 発注品目マスタ保存（新規 / 編集 / 削除 + dirty 比較） | **`orderMasterService.saveOrderItems({ items, dirty, deleted })`** （新設） |
-| 18 | 397 | `writeBatch` | `customerUsers` + `transactions` | ポータル利用者の `customerId` 紐付け + pending `transactions` の `customerId/customerName/status` 反映 + `linkedByStaff*` 記録 | **`customerLinkingService.linkCustomerUsersToCustomers({ assignments, actor })`** （新設）。設計書 §17.5 「customer user 紐付け」と直結する |
-| 19 | 933 | `setDoc(merge)` | `settings/portal` | 自動返却時刻 (`autoReturnHour` / `autoReturnMinute`) の保存 | **`settingsRepository.setPortalSettings(patch)`** または `portalSettingsService.savePortalSettings(input)` |
-| 20 | 1010 | `setDoc(merge)` | `settings/inspection` | 耐圧検査の `validityYears` / `alertMonths` 保存 | **`settingsRepository.setInspectionSettings(patch)`** または `inspectionSettingsService` |
-
-→ admin/settings 1 page で 5 つの異なる業務オペレーションが混在している。タブ単位で page を分割する選択肢もある。
-
----
-
-### 1.11 src/app/portal/order/page.tsx
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 21 | 68 | `addDoc` | `transactions` (`type=order`) | 顧客が発注（cart の items 配列をまとめて 1 トランザクションとして作成） | **`portalTransactionService.createOrderTransaction({ identity, cart, deliveryType, deliveryTargetName, note })`** （新設） |
-
-→ 注意点:
-- `customerId` は `session.uid || "unknown"`、`createdByUid` は `session.customerUserUid || session.uid || "legacy_customer"` という **page にしか存在しない fallback** がある。
-- identity-and-operation-logging-design §19 の未決事項は、現行方針では「`customerId` に customer user uid を混ぜない」方向で扱う。
-- service 化と同時に `portalIdentity.requireCustomerPortalIdentity()` を導入し、identity 不足時は書き込みを止める。未紐付け customer user の申請だけは `createdByUid = customerUserUid` + `status = pending_link` とし、`customerId` fallback は保存しない。
+- `staff-auth.ts` の `findActiveStaffByEmail` は read lookup 中に mirror を自動修復する。認証互換のため現状維持だが、将来は明示的な rebuild / repair service に寄せる候補。
+- `transactionsRepository` は write helper も持つ。repository が「読み取り専用」ではないため、用途ごとの service から呼ばれる前提を維持する。
 
 ---
 
-### 1.12 src/app/portal/return/page.tsx
+## 3. コレクション別 write map
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 22 | 116 | `addDoc` | `transactions` (`type=return`) | 顧客がタンク返却を申請（手動 or 自動） | **`portalTransactionService.createReturnTransaction({ identity, items, source })`** （新設） |
-
-→ 自動返却 (`source: "auto_schedule"`) と手動 (`source: "customer_portal"`) の両方を 1 service で扱う。`localStorage.setItem(autoKey, "1")` の重複防止も hook 側 (`usePortalAutoReturn`) に閉じる。
-
----
-
-### 1.13 src/app/portal/setup/page.tsx
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 23 | 80 | `updateDoc` | `customerUsers/{uid}` | portal 初期設定 (`selfCompanyName` / `selfName` / `lineName` / `setupCompleted`) の保存 | **`customer-user.ts` に `completePortalSetup({ uid, profile })` を追加**。page から `updateDoc` を消す |
-
----
-
-### 1.14 src/app/portal/unfilled/page.tsx
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 24 | 109 | `addDoc` | `transactions` (`type=uncharged_report`) | 顧客が未充填タンクを報告（複数を `Promise.all` で並列作成） | **`portalTransactionService.createUnchargedReportTransaction({ identity, tankIds, source })`** （新設）。ループは service 内 |
+| collection | 現状の write 元 | 境界評価 | 次の方針 |
+|---|---|---|---|
+| `tanks` | `tank-operation.ts`, `submitTankEntryBatch.ts`, `staff/inhouse/page.tsx`, `useBulkReturnByLocation.ts` | 状態遷移は正本境界にある。`logNote` だけ page/hook に残る | `tankTagService.updateLogNote` を小 PR で検討 |
+| `logs` | `tank-operation.ts`, `submitTankEntryBatch.ts`, `supply-order.ts` | service / workflow 境界にある | 現状維持 |
+| `transactions` | `transactionsRepository`, `portal-transaction-service`, `customer-linking-service`, `useOrderFulfillment`, `useReturnTagProcessing` | portal create と pending_link 昇格は service 化済み。staff hooks に approval/completion が残る | order/return fulfillment service は後続で慎重に |
+| `customers` | `CustomerManagementPage` | page 直書き | `customersService` 化の最小 PR 候補 |
+| `customerUsers` | `customer-user.ts`, `portal-profile-service.ts`, `customer-linking-service.ts` | service/helper 境界に寄っている | 現状維持。必要なら identity helper 統合 |
+| `staff`, `staffByEmail` | `staff-sync-service.ts`, `staff-auth.ts` | service 化済みだが `staff-auth` 自動修復あり | read 中 write の扱いを別途監査 |
+| `settings/adminPermissions` | `admin/permissions/page.tsx` | page 直書き | `adminPermissionsService` 化の最小 PR 候補 |
+| `settings/portal`, `settings/inspection` | `admin-settings.ts` | 設定 helper | 現状維持。`edit_history` 差し込み候補 |
+| `notifySettings`, `lineConfigs` | `admin-notification-settings.ts` | 設定 helper | 現状維持。inspection field 重複整理は別論点 |
+| `priceMaster`, `rankMaster` | `admin-money-settings.ts` | 設定 helper | 現状維持 |
+| `orderMaster` | `order-master-settings.ts` | 設定 helper | 現状維持 |
+| `orders` | `supply-order.ts` | service | 現状維持 |
+| `tankProcurements` | `submitTankEntryBatch.ts` | workflow | 現状維持 |
 
 ---
 
-### 1.15 src/app/staff/inhouse/page.tsx
+## 4. 高リスク候補
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 25 | 75 | `writeBatch().update().commit()` | `tanks/{id}` | 自社利用中タンクの **tag (`logNote`) のみ** 更新（状態遷移なし） | **`tanksRepository.updateTankFields(tankId, { logNote })`** （未実装）または **`tankTagService.updateTag({ tankId, tag })`** |
+1. `src/lib/tank-operation.ts`
+   - `tanks` / `logs` 状態遷移、revision、void の正本。
+   - 触らない方がよい既存境界。
 
-→ 単発書き込みなのに `writeBatch` を使っているのは、`batch.update()` を使うため（`batch.set` より安全）。仕様としてはこれで問題ない。
-→ ただし `applyTankOperation` を介さない **逃げ道** になっているので、許容するなら repository 経由を強制し、書き込み許可フィールドを `logNote / note / type / nextMaintenanceDate` 限定に絞る必要がある。
+2. `src/features/staff-operations/hooks/useOrderFulfillment.ts`
+   - order approval と fulfillment の `transactions` 更新が hook に残る。
+   - fulfillment は `applyBulkTankOperations` と `batch.update(transactions)` を同一 transaction に参加させるため、抽出時は `tanks` / `logs` / `transactions` の整合性を維持する必要がある。
 
----
+3. `src/features/staff-operations/hooks/useReturnTagProcessing.ts`
+   - return tag 処理でタンク状態遷移と return transaction completion を同時に行う。
+   - `pending_return` の意味と現場作業の境界に直結するため、status 変更とは混ぜない。
 
-### 1.16 src/features/staff-operations/hooks/useBulkReturnByLocation.ts
+4. `src/app/staff/inhouse/page.tsx` と `src/features/staff-operations/hooks/useBulkReturnByLocation.ts`
+   - `tanks.logNote` のみだが、`tanks` 直接更新が page/hook に重複している。
+   - state / location / latestLogId を絶対に触らない helper が必要。
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 26 | 76 | `writeBatch().update().commit()` | `tanks/{id}` | 一括返却画面の tag (`logNote`) 更新 | **#25 と同じ移行先**。`tanksRepository.updateTankFields()` または `tankTagService.updateTag()` |
+5. `src/lib/firebase/customer-linking-service.ts`
+   - `customerUsers` 紐付けと `pending_link` order の `pending` 昇格を同一 batch で行う。
+   - 現状は service 境界に寄っており、実装修正対象ではない。
 
-→ #25 と同じパターンが 2 箇所にある。共通化必須。
-
----
-
-### 1.17 src/features/staff-operations/hooks/useOrderFulfillment.ts
-
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| 27 | 106 | `updateDoc` | `transactions/{id}` | 受注承認 (`approveOrder`)。status を `approved` に上げ、`approvedBy*` を記録 | **`transactionService.approveOrder({ orderId, actor })`** （新設）。旧 `approvedBy` 文字列は将来削除候補 |
-
-→ `applyBulkTankOperations` の batch 参加部分（[`useOrderFulfillment.ts:257`](../../src/features/staff-operations/hooks/useOrderFulfillment.ts) 周辺）は `batch.update(transactions, ...)` を **`extraOps` callback** で書いている。これは `tank-operation.ts` の `extraOps` 仕様の正しい使い方。
-→ ただし `fulfilledBy` 文字列など旧 field と `fulfilledByStaffId/Name/Email` の併記は service 化後の別 PR で整理する。service 抽出 PR では挙動維持を優先してもよい。
+6. `src/features/procurement/lib/submitTankEntryBatch.ts`
+   - 新規 `tanks` 作成と `logs` 作成を担う。
+   - 状態遷移ではないが業務データへの影響が大きいため、現状維持。
 
 ---
 
-### 1.18 src/features/staff-operations/hooks/useReturnTagProcessing.ts
+## 5. 次に切るべき小 PR 候補
 
-| # | 行 | API | 対象 | 業務操作 | 移行先 |
-|--:|--:|---|---|---|---|
-| (extraOps) | 119-130 | `batch.update` (extraOps callback 内) | `transactions/{id}` | 返却タグ処理完了時に各 transaction の status を completed にし `fulfilledBy*` を記録 | **`returnTagProcessingService.fulfillReturnGroup({ group, approvals, actor })`** （新設）。tank operation と transaction update の組合せを service 化 |
+1. `customersService` の最小追加
+   - 対象: `CustomerManagementPage` の `addDoc` / `updateDoc` 3 箇所。
+   - 理由: page 直書きで、`customers` 正本化・履歴差し込みの前段として効果が高い。
+   - 注意: UI 変更、schema 変更、既存 customers データ更新は混ぜない。
 
-→ 上の表（行 119）は厳密には `extraOps` callback 内のため `addDoc` / `updateDoc` の grep には引っかからない。ただし役割は #27 と同じカテゴリ。
-→ approval 直前に `tanksRepository.getTank` で現状再取得しているのは正しい挙動。これは service 内に閉じてしまえば、page / hook から見えなくなる。
+2. `adminPermissionsService.savePermissions`
+   - 対象: `admin/permissions/page.tsx` の `setDoc` 1 箇所。
+   - 理由: 単発で小さい。`AdminAuthGuard` 側の read helper と将来揃えやすい。
+   - 注意: 権限仕様変更はしない。
 
----
+3. `tankTagService.updateLogNote`
+   - 対象: `staff/inhouse` と `useBulkReturnByLocation` の `tanks.logNote` 更新 2 箇所。
+   - 理由: 重複しており、許可フィールド限定の helper に寄せる価値がある。
+   - 注意: `status` / `location` / `staff` / `latestLogId` は絶対に扱わない。`tank-operation.ts` は触らない。
 
-## 2. コレクション別 書き込みマップ
+4. `staff-auth` mirror 自動修復の扱いを docs / design で切る
+   - 対象: `findActiveStaffByEmail` の `setDoc(merge)`。
+   - 理由: read 経路が write を含む例外。
+   - 注意: 認証導線に影響するため、実装変更は別 PR で明示的に。
 
-> 「どのコレクションに、どの service が書くべきか」の役割表。今後新規書き込みを追加する際の判断基準。
-
-| コレクション | 唯一の write 経路（提案） | 現状の write 元 |
-|---|---|---|
-| `tanks` | `tank-operation.ts` (state 遷移 + log と原子的) ／ `tanksRepository.updateTankFields*` (state 遷移なしの note/type/logNote/nextMaintenanceDate のみ) ／ `submitTankEntryBatch.ts` (新規作成のみ) | `tank-operation.ts` ✅ ／ `submitTankEntryBatch.ts` ✅ ／ `staff/inhouse/page.tsx` ❌ ／ `useBulkReturnByLocation.ts` ❌ |
-| `logs` | `tank-operation.ts` のみ ／ `submitTankEntryBatch.ts` (procurement) ／ `supply-order.ts` (order) | 全て service 経由 ✅ |
-| `transactions` | `portalTransactionService.*` (create) ／ `orderTransactionService.approve/fulfill` ／ `returnTagProcessingService.fulfill` ／ `customerLinkingService.link` (`linkedByStaff*`) | `portal/order/page.tsx` ❌ ／ `portal/return/page.tsx` ❌ ／ `portal/unfilled/page.tsx` ❌ ／ `useOrderFulfillment.ts` ❌ ／ `useReturnTagProcessing.ts` ❌ ／ `admin/settings/page.tsx` ❌ |
-| `customers` | `customersService.*` | `admin/customers/page.tsx` ❌ |
-| `customerUsers` | `customer-user.ts` (`ensureCustomerUser` / `completePortalSetup` 新設) ／ `customerLinkingService.link` | `customer-user.ts` ✅ ／ `portal/setup/page.tsx` ❌ ／ `admin/settings/page.tsx` ❌ |
-| `staff` + `staffByEmail` | `staffSyncService.*` のみ ／ `staff-auth.ts` の **自動 mirror 修復は廃止**（必要なら明示 rebuild API で正常化） | `admin/settings/page.tsx` (✅ helper 利用) / `staff-auth.ts` (修復) ⚠️ |
-| `settings/adminPermissions` | `adminPermissionsService` | `admin/permissions/page.tsx` ❌ |
-| `settings/portal` | `portalSettingsService` | `admin/settings/page.tsx` ❌ |
-| `settings/inspection` | `inspectionSettingsService` | `admin/settings/page.tsx` ❌ |
-| `notifySettings` + `lineConfigs` | `admin-notification-settings.ts` | `admin-notification-settings.ts` ✅ |
-| `priceMaster` + `rankMaster` | `admin-money-settings.ts` | `admin-money-settings.ts` ✅ |
-| `orderMaster` | `orderMasterService` | `admin/settings/page.tsx` ❌ |
-| `orders` | `supply-order.ts` | `supply-order.ts` ✅ |
-| `tankProcurements` | `submitTankEntryBatch.ts` | `submitTankEntryBatch.ts` ✅ |
-| `monthly_stats` / `delete_history` / `edit_history` | 未実装 | 現状 write 無し |
-
-✅ = 想定経路に乗っている／❌ = page・hook から直接書いているので移行が必要／⚠️ = 例外運用
+5. order / return fulfillment service 設計
+   - 対象: `useOrderFulfillment` と `useReturnTagProcessing`。
+   - 理由: hook に高リスク業務書き込みが残る。
+   - 注意: いきなり実装しない。`applyBulkTankOperations` の `extraOps` contract と validation 方針を先に決める。
 
 ---
 
-## 3. 構造的な指摘
+## 6. 今回の監査で変更しない範囲
 
-### 3.1 設定 field の責務重複
-
-`alertMonths` と `validityYears` が以下の **2 箇所** にある。
-
-- `notifySettings/config` … admin/notifications で書く
-- `settings/inspection` … admin/settings で書く
-
-read 側も `useInspectionSettings` は `settings/inspection` を見るのに対し、`admin/notifications` の保存 UI は `notifySettings/config` に書いている。**実際のアラート判定がどちらを参照しているかが不明確** で、片方の保存が片方を上書きしない。
-
-提案: 「耐圧検査の閾値」は `settings/inspection` 一本に正本化し、`notifySettings` からは削除する（または `notifySettings` 側を「通知メディア固有設定」として、閾値を持たない形にする）。
-
-### 3.2 旧 field と新 identity field の並走
-
-`useOrderFulfillment.approveOrder` / `fulfillOrder` および `useReturnTagProcessing.processReturnTags` は、新 field (`approvedByStaffId/Name/Email`、`fulfilledByStaffId/Name/Email`) を書きつつ、旧 field (`approvedBy`、`fulfilledBy` = staff 名文字列) も並走で書いている。
-
-設計書 [docs/identity-and-operation-logging-design.md §9 / §11](../identity-and-operation-logging-design.md) の方針:
-
-> 新規書き込みでは `approvedBy` / `fulfilledBy` のような曖昧な名前文字列 field を増やさない。
-
-新規実装フェーズの前提なので、**旧 field は廃止候補**。ただし service 抽出と旧 field 停止を同じ PR に混ぜるとレビューしづらいため、先に service 化して書き込み箇所を 1 箇所へ寄せ、read 側で旧 field を見ていないことを確認した別 PR で停止する。
-
-### 3.3 portal の `createdByUid` フォールバック
-
-- `portal/order/page.tsx`: `session.customerUserUid || session.uid || "legacy_customer"`
-- `portal/return/page.tsx`: `customerUserUid || session.uid || customerId`
-- `portal/unfilled/page.tsx`: `customerUserUid || session.uid || customerId`
-
-「`legacy_customer`」リテラルや `customerId` フォールバックが残っており、**identity が解決できない場合に書き込みが許されてしまう**。
-
-設計書 §6 / §19 の「`requireCustomerPortalIdentity()` で identity が無いなら書き込まない」方針に沿うなら、**identity 解決失敗は throw して書き込みを止める** べき。顧客未紐付け状態は `customerId` fallback ではなく `createdByUid` + `pending_link` で表現する。
-
-### 3.4 inhouse の `IN_HOUSE_USE_RETRO` 直叩き
-
-`staff/inhouse/page.tsx:108` で `applyTankOperation({ transitionAction: ACTION.IN_HOUSE_USE_RETRO, ... })` を直接呼んでいる。`tank-rules.ts` の `OP_RULES` で許可されている遷移であれば問題ないが、「事後報告」という業務文脈は service 化したほうが意味が露出する（テスト容易性、業務不変条件の集約）。
-
-提案: `inhouseOperationService.reportInHouseUseRetro({ tankId, actor })`。
-
-### 3.5 `writeBatch` で単発 update する違和感
-
-- `staff/inhouse/page.tsx:75` … `writeBatch(db).update(ref, { logNote }).commit()`
-- `useBulkReturnByLocation.ts:76` … 同上
-
-これは `updateDoc(ref, { logNote })` で十分な場面に `writeBatch` を使っている。理由は `batch.update` の API が「**ドキュメントを必ず存在前提で更新する** = 幽霊 doc を作らない」という性質を持つためで、SITEMAP §9-4「`batch.set(..., {merge:true})` は幽霊ドキュメントを作るため原則禁止」と同じ思想。
-
-`updateDoc` 単体で同じ性質を満たすため、単発なら `updateDoc` 使用で問題ない。複数フィールドを違う タイミングで更新する → batch 化する、というのが本来の役割分担。
-
-### 3.6 admin/settings の compound オペレーション
-
-`saveCustomerUsers` (admin/settings/page.tsx:393) は次を 1 ループで実行している:
-
-1. `customerUsers/{uid}` の status / customerId / customerName / updatedAt を merge
-2. `transactionsRepository.findPendingLinksByUid(u.uid)` で pending transactions を read
-3. 該当 order transactions を `pending_link → pending` に昇格、`linkedByStaff*` を記録
-
-これは **「customer user 紐付け」というひとつの業務操作** で、`customerLinkingService.link()` に丸ごと寄せるべき。ループ・read・write の順序やエラー時の atomicity（現状は writeBatch なので一括 commit）も service が責任を持つ。
-
-### 3.7 staff-auth.ts の自動 mirror 修復
-
-`findActiveStaffByEmail` (staff-auth.ts:110-155) は、`staffByEmail` mirror が無いとき **read の延長で `setDoc` する** という挙動を持つ。
-
-問題:
-- read-only と称している関数 (`findStaffProfileByEmailReadOnly`) と並んで存在しており、**どちらが書くか** がコードを読まないと分からない。
-- 書き込みに失敗しても `console.warn` で抑制している。
-
-対策案:
-- `findActiveStaffByEmail` から自動修復を削除し、**read-only のみにする**。mirror の修復は staff 保存 service または明示 rebuild API で行う。
-- 一発で全 mirror を作り直したい場合は `staffSyncService.rebuildAllMirrors()` のような明示 API を作って admin から手動で叩く。
+- `src/**` の実装コード。
+- Firestore 書き込み処理の移動。
+- import 整理。
+- 型修正。
+- repository / service の新規実装。
+- `firestore.rules`。
+- `firebase.json`。
+- package files。
+- Firestore data。
+- Security Rules deploy。
+- Hosting deploy。
 
 ---
 
-## 4. 移行優先度（書き込み観点）
+## 7. 結論
 
-### 4.1 先に移すべきもの（リスク低・効果高）
+現行の書き込み境界は、2026-05-02 時点の監査より service / repository へ寄っている。特に portal transaction 作成、portal setup、admin/settings の複合保存は page 直書きから解消済み。
 
-1. **portal の 3 transaction 作成** (#21 #22 #24)
-   - identity helper 整備とセットで実施。
-   - リスク: 低（read 側は repository 経由）。
-   - 効果: 高（customerId 正本化、`legacy_customer` 等のフォールバック撲滅）。
-
-2. **admin/customers の CRUD** (#12 #13 #14)
-   - 単純な CRUD で外部依存も少ない。`customersRepository` + `customersService` の最小実装で完結。
-
-3. **admin/permissions / settings/portal / settings/inspection の単発 setDoc** (#15 #19 #20)
-   - 1 行 `setDoc` を service 化するだけの移行。
-   - admin/settings は同時に「タブごとの分離」を検討する余地がある。
-
-4. **`tanks.logNote` の単発更新の集約** (#25 #26)
-   - 共通 `tankTagService.updateTag()` で 2 箇所同時に解消。
-   - feature 跨ぎの重複コードを 1 箇所に。
-
-### 4.2 まとめて移したほうが良いもの（複合）
-
-5. **portal/setup の `customerUsers` 更新** (#23) と **`customer-user.ts`**
-   - `completePortalSetup({ uid, profile })` を追加し、portal user 関連の書き込みを 1 ファイルに集約。
-
-6. **transaction approval / fulfillment** (#27 + extraOps batch)
-   - `transactionService` を新設し、`approveOrder` / `fulfillOrderTransaction` / `fulfillReturnGroup` を扱う。
-   - 旧 `approvedBy` / `fulfilledBy` の停止は、service 化後に read 側を確認して別 PR で実施する。
-
-7. **admin/settings の staff / orderMaster / customerUsers 同時更新** (#16 #17 #18)
-   - `staffSyncService` `orderMasterService` `customerLinkingService` の 3 service に分割。
-   - `staff-auth.ts` の自動 mirror 修復削除は、`staffSyncService` 導入後の小 PR で実施する。
-
-### 4.3 後回しにすべきもの
-
-8. **dashboard の bulk correction オーケストレーション**
-   - `applyLogCorrection` / `voidLog` 自体は service として完成しているので、書き込み境界としては既に正しい場所にある。
-   - 「ループ・進捗報告」の service 化は **page リファクタの一部** として、page 構造改善と一緒に進める方が無駄が少ない（書き込み境界だけ動かしても得るものが小さい）。
-
-9. **`tank-operation.ts` 周辺の更なる分割**
-   - 触らない。設計書通り。
-
----
-
-## 5. 移行時の注意
-
-- **同じ PR に混ぜない**:
-  - portal transaction service 化 PR と「`approvedBy` / `fulfilledBy` 廃止」PR は分ける。読み手が両方を同時に追う必要があると、どちらが何の理由で書き換わったか追えなくなる。
-  - service 抽出の機械的リファクタと、UI の reorganize（タブ分割 / レイアウト変更）も分ける。
-- **`tanksRepository.updateTankFields()` の許可フィールド**:
-  - `status` / `location` / `latestLogId` / `staff` は **絶対に許可しない**。これらは `tank-operation.ts` 経由でしか書かない。
-  - allow list を repository 内で enforce し、違反したら throw する。
-- **service 内のループ vs `applyBulkTankOperations`**:
-  - 同一 tank への複数操作は不可（`applyBulkTankOperations` 内部で重複弾き）。
-  - dashboard bulk correction は **同一 tank の最新 active log を順番に編集** するので、どうしても loop。runtime atomic ではなく「途中で失敗したら以降を止めて報告」で良い。
-
----
-
-## 6. 結論
-
-- 直接書き込み入口 27 件に加え、`extraOps` の `batch.update` も review 対象として明示した。page / hook に残る書き込みは service / repository に寄せる余地がある。
-- 既に正しい場所にある書き込みは:
-  - `tank-operation.ts` (#1-#4)
-  - `submitTankEntryBatch.ts` (#5)
-  - `supply-order.ts` (#6)
-  - `admin-money-settings.ts` (#7)
-  - `admin-notification-settings.ts` (#8)
-  - `customer-user.ts` の create / merge (#9 #10)
-- 移行は「**portal transaction service**」「**customers service**」「**settings service**」「**transaction approval service**」「**staff sync service**」を主軸に、`customerLinkingService` / `orderMasterService` / `tankTagService` を小さく足す構成でカバーできる。
-- 以降の手順は [refactor-roadmap.md](./refactor-roadmap.md) に分離する。
+一方で、`customers`、`adminPermissions`、`tanks.logNote`、staff operation の `transactions` approval/completion はまだ page / hook に残る。最初の実装 PR にするなら、業務状態遷移を触らない `customersService` または `adminPermissionsService` が最小で安全。`tanks` / `logs` / `transactions` を同時更新する staff operation は、次の docs / design PR で境界を決めてから実装する。
