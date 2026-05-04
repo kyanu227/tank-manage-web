@@ -5,7 +5,6 @@ import {
   getDocs,
   query,
   serverTimestamp,
-  setDoc,
   where,
   type DocumentData,
   type WriteBatch,
@@ -142,14 +141,5 @@ export async function findActiveStaffByEmail(email: string): Promise<StaffAuthPr
 
   if (!staffDoc) return null;
 
-  const profile = buildStaffAuthProfile(staffDoc.id, { ...staffDoc.data(), email: key });
-  try {
-    await setDoc(doc(db, STAFF_BY_EMAIL_COLLECTION, key), {
-      ...profile,
-      updatedAt: serverTimestamp(),
-    }, { merge: true });
-  } catch (e) {
-    console.warn("Staff auth mirror write failed:", e);
-  }
-  return profile;
+  return buildStaffAuthProfile(staffDoc.id, { ...staffDoc.data(), email: key });
 }
