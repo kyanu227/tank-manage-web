@@ -178,7 +178,7 @@ staff / admin 系は業務状態ではなく、アカウント・権限状態で
 | 差分 | 現行 | 台帳上の判断 |
 |---|---|---|
 | `pending_approval` | order 側に残る可能性がある旧 status。return 側では使わない | return は `pending_return` に一本化済み。order 側整理は別 PR |
-| 旧 `ReturnApprovalScreen` / `useReturnApprovals` | PR #14 で `ReturnTagProcessingScreen` / `useReturnTagProcessing` へ rename 済み | 業務意味は「承認」ではなく「返却タグ処理」。`pending_approval` status migration は未実施 |
+| 旧 `ReturnApprovalScreen` / `useReturnApprovals` | PR #14 で `ReturnTagProcessingScreen` / `useReturnTagProcessing` へ rename 済み | 業務意味は「承認」ではなく「返却タグ処理」。return 側の処理待ちは `pending_return` に一本化済み |
 | 旧返却タグ名 | 以前は未充填返却を破損に見える名前で表していた | 現在は `RETURN_TAG.UNCHARGED` / `[TAG:uncharged]` へ整理済み |
 | `STATUS.DEFECTIVE` | `不良` として存在 | 新規設計では廃止方針。`破損` + 不具合タグへ寄せる |
 | `DAMAGE_REPORT.allowedPrev` | 制限なし | 貸出中 / 未返却から直接変更しない方針 |

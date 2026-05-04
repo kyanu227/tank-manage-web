@@ -70,7 +70,7 @@ Phase 2-B 完了範囲: Phase 2-B-1 〜 2-B-12（21 箇所の読み取りを rep
 - URL: `/staff/orders`
 - 重点:
   - 受注タブ: pending / pending_approval / approved の 3 並列取得 → createdAt desc
-  - 返却タグ処理タブ: type=return + status=pending_approval、customerId 単位グルーピング
+  - 返却タグ処理タブ: type=return + status=pending_return、customerId 単位グルーピング
   - 一括返却タブ: status in [貸出中, 未返却]、location 単位グルーピング
 - 関連: Phase 2-B-7（getOrders）, 2-B-8a/8b（getReturns + getTank）, 2-B-11（statusIn）
 
@@ -100,7 +100,7 @@ Phase 2-B 完了範囲: Phase 2-B-1 〜 2-B-12（21 箇所の読み取りを rep
 |---|---|---|
 | staff/mypage | `/staff/mypage` | 2-B-3（自分の操作履歴 100 件） |
 | admin/staff-analytics | `/admin/staff-analytics` | 2-B-5（スタッフ実績ランキング） |
-| admin/settings ポータル利用者タブ | `/admin/settings` | 2-B-12（顧客紐付け確定 + pending_link → pending_approval 昇格） |
+| admin/settings ポータル利用者タブ | `/admin/settings` | 2-B-12（顧客紐付け確定 + pending_link → pending 昇格） |
 
 ### 不具合発生時の特定手順
 

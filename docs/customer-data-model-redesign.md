@@ -146,7 +146,7 @@ status の派生ルール:
 
 管理者が後で紐付け確定する（admin/settings の customers タブ。pending_link データがある場合）
   └─ customerUsers.customerId をセット
-      └─ pending_link 状態の transactions を pending_approval に昇格
+      └─ pending_link 状態の order transactions を pending に昇格
           customerId / customerName を上書きセット
 
 スタッフが受注貸出する（useOrderFulfillment.fulfillOrder）
@@ -456,7 +456,7 @@ status の派生ルール:
 batch.update(doc(db, "transactions", item.id), {
   customerId,                // customerUsers.customerId にセットされた値
   customerName,              // 管理者が選んだ customers の表示名
-  status: "pending_approval",
+  status: "pending",
   linkedAt: serverTimestamp(),
 })
 
