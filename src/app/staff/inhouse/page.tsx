@@ -2,10 +2,9 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { doc, writeBatch } from "firebase/firestore";
 import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
+import { updateLogNote } from "@/lib/firebase/tank-tag-service";
 import TankIdInput from "@/components/TankIdInput";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
@@ -66,8 +65,7 @@ export default function InHousePage() {
       let logNote = "";
       if (newTag === "unused") logNote = "[TAG:unused]";
       if (newTag === "uncharged") logNote = "[TAG:uncharged]";
-      const ref = doc(db, "tanks", tankId);
-      await writeBatch(db).update(ref, { logNote }).commit();
+      await updateLogNote(tankId, logNote);
     } catch (e) {
       console.error("Failed to update tag", e);
       // 失敗時はオーバーライドを取り消して最新状態を取り直す
