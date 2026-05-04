@@ -1,9 +1,8 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { doc, writeBatch } from "firebase/firestore";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
-import { db } from "@/lib/firebase/config";
+import { updateLogNote } from "@/lib/firebase/tank-tag-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { RETURN_TAG, STATUS, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
@@ -72,8 +71,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       let logNote = "";
       if (newTag === "unused") logNote = "[TAG:unused]";
       if (newTag === "uncharged") logNote = "[TAG:uncharged]";
-      const ref = doc(db, "tanks", tankId);
-      await writeBatch(db).update(ref, { logNote }).commit();
+      await updateLogNote(tankId, logNote);
     } catch (e) {
       console.error("Failed to update tag", e);
       fetchBulkTanks();
