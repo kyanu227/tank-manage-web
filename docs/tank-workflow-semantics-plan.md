@@ -164,7 +164,7 @@ PR #15 で `docs/pending-return-status-migration-design.md` を追加し、retur
 | status | 意味 |
 |---|---|
 | `pending_approval` | 現行互換の返却処理待ち。業務名としては見直し候補 |
-| `pending_return` | 移行後の返却タグ処理待ち候補。現行コードではまだ未使用 |
+| `pending_return` | 移行後の返却タグ処理待ち候補。PR #16 で読み取り互換済み。新規作成ではまだ未使用 |
 | `completed` | スタッフが現場で回収・処理を完了した状態 |
 
 注意:

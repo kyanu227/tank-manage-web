@@ -51,6 +51,9 @@ export interface GetReturnsOptions {
   since?: unknown;
 }
 
+export const PENDING_RETURN_STATUSES = ["pending_approval", "pending_return"] as const;
+export type ReturnProcessingStatus = typeof PENDING_RETURN_STATUSES[number];
+
 /** 未充填報告取得オプション */
 export interface GetUnchargedReportsOptions {
   status?: string;
@@ -170,6 +173,22 @@ export async function getReturns(
     list.push({ id: d.id, ...d.data() } as TransactionDoc);
   });
   return list;
+}
+
+/**
+ * 返却タグ処理待ち transactions を取得する。
+ * 移行期間中は現行互換の pending_approval と新 status の pending_return を両方読む。
+ * 既存の getReturns({ status }) と同じ query 形を保つため、in query ではなく status ごとに取得して merge する。
+ */
+export async function getPendingReturnTags(): Promise<TransactionDoc[]> {
+  const results = await Promise.all(
+    PENDING_RETURN_STATUSES.map((status) => getReturns({ status })),
+  );
+  const byId = new Map<string, TransactionDoc>();
+  results.flat().forEach((item) => {
+    byId.set(item.id, item);
+  });
+  return Array.from(byId.values());
 }
 
 /**

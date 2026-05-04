@@ -44,7 +44,7 @@ export function useReturnTagProcessing({
   const fetchPendingReturnTags = useCallback(async () => {
     setPendingReturnTagsLoading(true);
     try {
-      const docs = await transactionsRepository.getReturns({ status: "pending_approval" });
+      const docs = await transactionsRepository.getPendingReturnTags();
       const items = docs as unknown as PendingReturn[];
       const groupMap = new Map<string, ReturnGroup>();
       items.forEach((item) => {

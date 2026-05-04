@@ -50,6 +50,8 @@ return transaction の新しい処理待ち status は、`pending_return` を第
 
 この段階では、新規作成 status はまだ `pending_approval` のままでもよい。先に読み取り側を両対応にすることで、次の新規作成 status 変更を安全に受けられる。
 
+実施状況: PR #16 で `transactionsRepository.getPendingReturnTags()` を追加し、スタッフ側の `useReturnTagProcessing.fetchPendingReturnTags()` が `pending_approval` と `pending_return` の両方を読めるようにした。新規作成 status はまだ変更していない。
+
 ### Phase 2: 新規作成を `pending_return` に変更する
 
 `portal-transaction-service.ts` の return transaction 作成 status を `pending_return` へ変更する。
@@ -135,6 +137,8 @@ order の `pending_approval` は今回対象外である。`transactionsReposito
 return status を `pending_approval | pending_return` の両方で読める helper を追加する。
 
 既存の `getReturns({ status })` を拡張するか、return 専用に `getPendingReturnTags()` のような helper を作るかは実装時に判断する。目的は、スタッフ側の返却タグ処理一覧が両 status を漏れなく表示することである。
+
+実施状況: PR #16 で実施済み。
 
 ### PR B: portal return 新規作成 status 変更
 

@@ -238,7 +238,7 @@ B-12
 | 値 | 意味 |
 |---|---|
 | `pending_approval` | 現行コード上の旧名。業務意味は顧客返却タグの処理待ち。後続で `pending_return` へ名称変更候補 |
-| `pending_return` | 移行後の処理待ち候補。`docs/pending-return-status-migration-design.md` で設計済み。現行コードではまだ未使用 |
+| `pending_return` | 移行後の処理待ち候補。`docs/pending-return-status-migration-design.md` で設計済み。PR #16 で読み取り互換済み。新規作成ではまだ未使用 |
 | `completed` | 返却処理完了 |
 
 ### `type = "uncharged_report"`
