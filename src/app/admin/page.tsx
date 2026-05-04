@@ -41,10 +41,8 @@ export default function AdminDashboardPage() {
           logsRepository.getActiveLogs({ from: todayStart }),
           // 貸出中タンク数
           tanksRepository.getTanks({ status: STATUS.LENT }),
-          // 要対応トランザクション（pending / pending_approval）
-          transactionsRepository.getPendingTransactions({
-            statuses: ["pending", "pending_approval"],
-          }),
+          // 要対応トランザクション（受注待ち + 返却タグ処理待ち）
+          transactionsRepository.getPendingTransactions(),
         ]);
 
         // ログからユニークスタッフ数を集計

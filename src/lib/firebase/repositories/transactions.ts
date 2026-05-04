@@ -62,7 +62,7 @@ export interface GetUnchargedReportsOptions {
 
 /** 要対応 transactions 取得オプション */
 export interface GetPendingTransactionsOptions {
-  /** 既定: ["pending", "pending_approval"]。Firestore の `in` 句は最大10件。 */
+  /** 既定: ["pending", "pending_approval", "pending_return"]。Firestore の `in` 句は最大10件。 */
   statuses?: string[];
 }
 
@@ -186,7 +186,7 @@ export async function getPendingReturnTags(): Promise<TransactionDoc[]> {
  * 要対応 transactions のクエリ。type 横断（order/return/uncharged_report 全部）。
  * 管理画面ダッシュボードの「要対応」KPI 用。
  * - `where("status","in", statuses)` のみ。`type` フィルタは付けない（type 横断が本関数の存在意義）
- * - 既定 statuses は ["pending", "pending_approval"]（Firestore の `in` は最大10件）
+ * - 既定 statuses は ["pending", "pending_approval", "pending_return"]（Firestore の `in` は最大10件）
  * - orderBy / limit は付けない
  * - 戻り値は生ドキュメントを TransactionDoc にキャストしたもの（正規化はしない）
  *
@@ -195,7 +195,7 @@ export async function getPendingReturnTags(): Promise<TransactionDoc[]> {
 export async function getPendingTransactions(
   options?: GetPendingTransactionsOptions,
 ): Promise<TransactionDoc[]> {
-  const statuses = options?.statuses ?? ["pending", "pending_approval"];
+  const statuses = options?.statuses ?? ["pending", "pending_approval", "pending_return"];
   const snap = await getDocs(
     query(collection(db, "transactions"), where("status", "in", statuses)),
   );
