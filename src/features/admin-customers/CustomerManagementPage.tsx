@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Building2, Plus, Save, Search, X, RefreshCw, ToggleLeft, ToggleRight, Users } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { addDoc, collection, doc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
+import { collection, getDocs } from "firebase/firestore";
+import * as customersService from "@/lib/firebase/customers-service";
 import PortalUsersPanel from "./PortalUsersPanel";
 
 interface Customer {
@@ -253,7 +254,7 @@ function CustomersPanel() {
 
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, "customers"), {
+      await customersService.createCustomer({
         name,
         companyName: newCustomer.companyName.trim() || name,
         formalName: newCustomer.formalName.trim(),
@@ -261,8 +262,6 @@ function CustomersPanel() {
         price12: toNumber(newCustomer.price12),
         priceAluminum: toNumber(newCustomer.priceAluminum),
         isActive: newCustomer.isActive,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp(),
       });
 
       setIsModalOpen(false);
@@ -292,11 +291,7 @@ function CustomersPanel() {
 
     setSavingCustomerIds((prev) => prev.includes(customer.id) ? prev : [...prev, customer.id]);
     try {
-      const customerRef = doc(db, "customers", customer.id);
-      await updateDoc(customerRef, {
-        ...payload,
-        updatedAt: serverTimestamp(),
-      });
+      await customersService.updateCustomer(customer.id, payload);
       setCustomers((prev) => prev.map((item) => (
         item.id === customer.id ? { ...item, ...payload } : item
       )));
@@ -320,11 +315,7 @@ function CustomersPanel() {
     }
 
     try {
-      const customerRef = doc(db, "customers", customer.id);
-      await updateDoc(customerRef, {
-        ...payload,
-        updatedAt: serverTimestamp(),
-      });
+      await customersService.updateCustomer(customer.id, payload);
       setCustomers((prev) => prev.map((item) => (
         item.id === customer.id ? { ...item, ...payload } : item
       )));
