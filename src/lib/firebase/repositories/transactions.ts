@@ -230,8 +230,8 @@ export function listenOrders(
   throw new Error("not implemented in Phase 1");
 }
 
-/** 返却承認待ち購読。 */
-export function listenReturnApprovals(
+/** 返却タグ処理待ち購読。 */
+export function listenPendingReturnTags(
   _callback: (returns: TransactionDoc[]) => void,
 ): Unsubscribe {
   throw new Error("not implemented in Phase 1");

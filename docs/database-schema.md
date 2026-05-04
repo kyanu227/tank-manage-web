@@ -223,7 +223,8 @@ B-12
 ### `type = "return"`
 
 顧客が現在貸出中のタンクに付ける返却時タグ。
-現行コード名には `ReturnApprovalScreen` / `useReturnApprovals` / `pending_approval` が残るが、業務意味としては「返却申請」や「承認申請」ではない。
+旧コード名には `ReturnApprovalScreen` / `useReturnApprovals` があったが、PR #14 で `ReturnTagProcessingScreen` / `useReturnTagProcessing` へ rename 済みである。
+`pending_approval` status 値は現行互換として残るが、業務意味としては「返却申請」や「承認申請」ではない。
 スタッフ側は、顧客が付けた `condition` を参照して実際の返却処理・持ち越し処理を完了する。
 
 | フィールド | 型 | 必須 | 説明 |

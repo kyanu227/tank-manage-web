@@ -9,13 +9,13 @@ import { useDestinations } from "./hooks/useDestinations";
 import { useManualTankOperation } from "./hooks/useManualTankOperation";
 import { useOperationSwipe } from "./hooks/useOperationSwipe";
 import { useOrderFulfillment } from "./hooks/useOrderFulfillment";
-import { useReturnApprovals } from "./hooks/useReturnApprovals";
+import { useReturnTagProcessing } from "./hooks/useReturnTagProcessing";
 import BulkReturnByLocationPanel from "./components/BulkReturnByLocationPanel";
 import ManualOperationPanel from "./components/ManualOperationPanel";
 import OperationModeTabs from "./components/OperationModeTabs";
 import OrderFulfillmentScreen from "./components/OrderFulfillmentScreen";
 import OrderListPanel from "./components/OrderListPanel";
-import ReturnApprovalScreen from "./components/ReturnApprovalScreen";
+import ReturnTagProcessingScreen from "./components/ReturnTagProcessingScreen";
 import ReturnRequestList from "./components/ReturnRequestList";
 import type { OpMode, OpStyle } from "./types";
 
@@ -67,7 +67,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
   // 各業務フックの組み立て
   const bulk = useBulkReturnByLocation();
-  const approvals = useReturnApprovals({ fetchBulkTanks: bulk.fetchBulkTanks });
+  const returnTagProcessing = useReturnTagProcessing({ fetchBulkTanks: bulk.fetchBulkTanks });
   const orders = useOrderFulfillment({
     allTanks,
     fetchData,
@@ -87,9 +87,9 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
       orders.fetchOrders();
     }
     if (mode === "return") {
-      approvals.fetchApprovals();
+      returnTagProcessing.fetchPendingReturnTags();
       bulk.fetchBulkTanks();
-      approvals.setSelectedReturnGroup(null);
+      returnTagProcessing.setSelectedReturnGroup(null);
       setShowManualReturn(false);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -111,14 +111,14 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     );
   }
 
-  /* ─── 返却承認画面 ─── */
-  if (mode === "return" && approvals.selectedReturnGroup) {
+  /* ─── 返却タグ処理画面 ─── */
+  if (mode === "return" && returnTagProcessing.selectedReturnGroup) {
     return (
       <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden", overscrollBehavior: "contain" }}>
         <OperationModeTabs mode={mode} />
-        <ReturnApprovalScreen
-          selectedReturnGroup={approvals.selectedReturnGroup}
-          approvals={approvals}
+        <ReturnTagProcessingScreen
+          selectedReturnGroup={returnTagProcessing.selectedReturnGroup}
+          returnTagProcessing={returnTagProcessing}
         />
         <GlobalAnimations />
       </div>
@@ -157,7 +157,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         />
       )}
 
-      {/* 返却モード: リクエスト + 全貸出タンク */}
+      {/* 返却モード: 返却タグ処理待ち + 全貸出タンク */}
       {mode === "return" && !showManualReturn && (
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
           <button
@@ -174,9 +174,9 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           </button>
 
           <ReturnRequestList
-            approvalsLoading={approvals.approvalsLoading}
-            returnGroups={approvals.returnGroups}
-            openReturnGroup={approvals.openReturnGroup}
+            pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
+            returnGroups={returnTagProcessing.returnGroups}
+            openReturnTagGroup={returnTagProcessing.openReturnTagGroup}
           />
 
           <BulkReturnByLocationPanel bulk={bulk} />

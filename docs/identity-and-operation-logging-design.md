@@ -55,7 +55,7 @@ StaffID / CustomerID を正本にした operation logging の設計方針。
 
 ### workflow / use-case
 
-- 手動貸出、受注貸出、返却承認、破損、修理、耐圧検査、自社移動、タンク登録などの業務手順を組み立てる。
+- 手動貸出、受注貸出、返却タグ処理、破損、修理、耐圧検査、自社移動、タンク登録などの業務手順を組み立てる。
 - どの transaction を完了させるか、どの customer snapshot を渡すかなどの業務意味を保持する。
 - Firestore の低レベル I/O は domain operation service または repository に委譲する。
 
@@ -283,7 +283,7 @@ export interface TankOperationInput {
 
 - `src/features/staff-operations/hooks/useManualTankOperation.ts`
 - `src/features/staff-operations/hooks/useOrderFulfillment.ts`
-- `src/features/staff-operations/hooks/useReturnApprovals.ts`
+- `src/features/staff-operations/hooks/useReturnTagProcessing.ts`
 - `src/features/staff-operations/hooks/useBulkReturnByLocation.ts`
 - `src/app/staff/damage/page.tsx`
 - `src/app/staff/repair/page.tsx`
@@ -301,7 +301,7 @@ export interface TankOperationInput {
 直接 `transactions` 書き込み:
 
 - `src/features/staff-operations/hooks/useOrderFulfillment.ts`
-- `src/features/staff-operations/hooks/useReturnApprovals.ts`
+- `src/features/staff-operations/hooks/useReturnTagProcessing.ts`
 - `src/app/portal/order/page.tsx`
 - `src/app/portal/return/page.tsx`
 - `src/app/portal/unfilled/page.tsx`
@@ -395,7 +395,7 @@ Firestore composite index は Firebase Console で手動管理する。
 - `OperationContext` の必須チェック。
 - `OperationContext` から `LogDoc` top-level field への展開。
 - `applyTankOperation` / `applyBulkTankOperations` の log 作成処理。
-- 受注貸出・返却承認での tank/log/transaction 一貫更新。
+- 受注貸出・返却タグ処理での tank/log/transaction 一貫更新。
 - dashboard の edit / void actor 記録。
 - procurement / supply-order の非タンクログ actor schema。
 
@@ -436,7 +436,7 @@ Firestore composite index は Firebase Console で手動管理する。
 
 - 受注承認: `approvedByStaffId` / `approvedByStaffName` / `approvedByStaffEmail`
 - 受注貸出完了: `fulfilledByStaffId` / `fulfilledByStaffName` / `fulfilledByStaffEmail`
-- 返却承認完了: 同上
+- 返却タグ処理完了: 同上
 - customer user 紐付け: `linkedByStaff*`
 
 ### 6. 非タンクログ移行

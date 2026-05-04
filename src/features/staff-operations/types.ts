@@ -60,4 +60,4 @@ export interface ModeConfigItem {
 
 export type ModeConfig = Record<OpMode, ModeConfigItem>;
 export type TankMap = Record<string, TankDoc>;
-export type ApprovalMap = Record<string, { approved: boolean; condition: Condition }>;
+export type ReturnTagSelectionMap = Record<string, { selected: boolean; condition: Condition }>;
