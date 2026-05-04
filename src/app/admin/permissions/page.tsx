@@ -3,8 +3,9 @@
 import { useState, useEffect, useCallback } from "react";
 import { Shield, Save, RefreshCw, Check } from "lucide-react";
 import { db } from "@/lib/firebase/config";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { doc, getDoc } from "firebase/firestore";
 import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
+import { savePermissions } from "@/lib/firebase/admin-permissions-service";
 
 const PERMISSION_CONTROLLED_ADMIN_PAGES = ADMIN_PAGES.filter(
   (page) => !page.adminOnly && !page.devOnly && !page.hidden
@@ -66,10 +67,7 @@ export default function PermissionsPage() {
     if (!confirm("権限設定を保存しますか？")) return;
     setSaving(true);
     try {
-      await setDoc(doc(db, "settings", "adminPermissions"), {
-        pages: permissions,
-        updatedAt: new Date().toISOString(),
-      });
+      await savePermissions(permissions);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e: any) {
