@@ -20,7 +20,7 @@
 |---|---|
 | タンク | レンタル対象の物理タンク。`tanks/{tankId}` で管理する。 |
 | ログ | タンク操作の履歴。`logs` に追記型で保存する。 |
-| 取引 | 顧客からの発注、返却申請、未充填報告。`transactions` に保存する。 |
+| 取引 | 顧客からの発注、顧客返却タグ、未充填報告。`transactions` に保存する。 |
 | 貸出先 | タンクの貸出・請求の単位となる会社・店舗。正本は `customers`。 |
 | ポータル利用者 | 顧客ポータルにログインする個人。Firebase Auth uid と `customerUsers/{uid}` で管理する。 |
 
@@ -164,7 +164,8 @@ B-12
 
 ## `transactions`
 
-顧客ポータルからの申請と、スタッフが処理する受注・返却データを保存する。
+顧客ポータルからの発注、顧客返却タグ、未充填報告と、スタッフが処理する受注・返却データを保存する。
+`type = "return"` は業務上「返却申請」ではなく、顧客が貸出中タンクへ返却時の扱いタグを付ける補助情報である。
 
 ### ドキュメントID
 
@@ -221,19 +222,21 @@ B-12
 
 ### `type = "return"`
 
-顧客からの返却申請。
+顧客が現在貸出中のタンクに付ける返却時タグ。
+現行コード名には `ReturnApprovalScreen` / `useReturnApprovals` / `pending_approval` が残るが、業務意味としては「返却申請」や「承認申請」ではない。
+スタッフ側は、顧客が付けた `condition` を参照して実際の返却処理・持ち越し処理を完了する。
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---:|---|
 | `tankId` | string | yes | 返却対象タンクID。 |
-| `condition` | string | yes | `normal`, `unused`。スタッフ承認時は `uncharged` も扱う。 |
-| `finalCondition` | string | no | 承認時に確定した状態。 |
+| `condition` | string | yes | `normal`, `unused`, `uncharged`, `keep`。返却時の扱いタグ。 |
+| `finalCondition` | string | no | スタッフ処理時に確定した返却タグ。 |
 
 #### status
 
 | 値 | 意味 |
 |---|---|
-| `pending_approval` | 返却承認待ち |
+| `pending_approval` | 現行コード上の旧名。業務意味は顧客返却タグの処理待ち。後続で `pending_return` へ名称変更候補 |
 | `completed` | 返却処理完了 |
 
 ### `type = "uncharged_report"`

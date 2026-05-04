@@ -101,7 +101,7 @@ tank status そのものではなく、返却 operation を選ぶための入力
 | `normal` | 通常返却 | 使用済みとして空へ戻す | portal return, staff return / customer or staff | `ACTION.RETURN` | condition normal | return finalCondition normal | 通常請求対象 | 未使用・未充填と混同しない | 正しい |
 | `unused` | 未使用返却 | 未使用分を充填済みに戻し、請求を避ける | portal return, staff return / customer or staff | `ACTION.RETURN_UNUSED` | `[TAG:unused]` | condition / finalCondition unused | 請求除外 | 使用済みを unused にしない | 正しい |
 | `uncharged` | 未充填返却を表す | 未充填を回収時に区別する | staff return tag / staff | `ACTION.RETURN_UNCHARGED` | `[TAG:uncharged]` | finalCondition uncharged | 充填報酬取消、請求除外 | 破損・不良と混同しない | 正しい |
-| `keep` | 持ち越し。返却申請から除外する | 使わないが顧客が保持するタンクを返却対象から外す | portal return / customer | 将来 `貸出中 -> 未返却` 候補 | 持ち越し理由や期限を残す候補 | 現行では transaction を作らない | 在庫・督促・請求要確認 | 返却済み扱いにしない | 正しい。ただし明示 action 追加候補 |
+| `keep` | 持ち越し。顧客が未使用タンクを翌日以降も保持する | 回収していないタンクを返却済みにせず、未返却として残す | portal return / customer、staff return tag processing / staff | `ACTION.CARRY_OVER` | 持ち越し tag、回収していないこと、現在 location | condition / finalCondition `keep` | 在庫・督促・請求要確認 | 返却済み扱いにしない。倉庫に戻さない | 正しい。`持ち越し` action へ接続済み |
 
 ## 7. Transaction type
 
@@ -111,7 +111,7 @@ tank lifecycle status ではない。
 | 現在のコード上の名前 | 業務上の意味 | 何を守るために存在するか | いつ入るか / 誰の操作か | 次に進む先 | logs に残すべき情報 | transactions に残すべき情報 | billing / incentive | やってはいけない遷移 | 判定 / 理由 |
 |---|---|---|---|---|---|---|---|---|---|
 | `order` | 顧客からのタンク発注 | 受注と貸出処理を紐付ける | portal order / CustomerUser | status flow で進む | 貸出時に transactionId | items, customerId, createdByUid, requested* | 貸出・請求に関係 | 未紐付けを通常受注へ混ぜない | 正しい |
-| `return` | 顧客の返却予定タグ | 回収処理の補助情報を残す | portal return / CustomerUser | status flow で進む | staff 処理時に finalCondition | tankId, condition, customerId, createdByUid | 請求・返却処理に関係 | tank status を作成時に変えない | 正しい |
+| `return` | 顧客返却タグ transaction | 回収処理の補助情報を残す | portal return / CustomerUser | status flow で進む | staff 処理時に finalCondition | tankId, condition, customerId, createdByUid | 請求・返却処理に関係 | tank status を作成時に変えない。返却申請・承認申請と解釈しない | 正しい |
 | `uncharged_report` | 顧客からの未充填報告 | 未充填の事実を記録する | portal unfilled / CustomerUser | 原則 completed で完了 | 必要なら追跡 log と紐付け | tankId, customerId, createdByUid | 請求除外・報酬取消に関係 | 対応待ち task と混ぜない | 正しい |
 
 ## 8. Transaction status
@@ -122,7 +122,7 @@ tank lifecycle status ではない。
 |---|---|---|---|---|---|---|---|---|---|
 | `pending_link` | Customer 未確定の仮受注 | 未紐付け注文を失わず、通常処理から隔離する | unlinked order / CustomerUser | `pending` | まだ tank log は作らない | requested*, createdByUid, customerId null | 通常請求・貸出対象外 | 通常 badge / 通常受注一覧に混ぜない | 正しい |
 | `pending` | Customer 確定後の通常受注 | staff が確認できる通常受注として扱う | linked order or linking promotion | `approved` | まだ tank log は作らない | customerId, customerName, requested* | 貸出準備対象 | Customer 未確定のまま pending にしない | 正しい |
-| `pending_approval` | 現行では order / return の承認待ちに混在 | 処理待ちを表すが名前が広すぎる | 旧 order / return request | order は `approved`, return は `completed` | 処理完了時に logs | type ごとの意味を分けて残す | type により異なる | order と return を同じ意味で扱わない | 名称変更候補。新規 order では使わない。return は `pending_return` 推奨 |
+| `pending_approval` | 現行では order / return の承認待ちに混在。return では顧客返却タグの処理待ち | 処理待ちを表すが名前が広すぎる | 旧 order / return tag processing | order は `approved`, return は `completed` | 処理完了時に logs | type ごとの意味を分けて残す | type により異なる | order と return を同じ意味で扱わない。return を承認申請と解釈しない | 名称変更候補。新規 order では使わない。return は `pending_return` 推奨 |
 | `approved` | order が貸出処理待ち | 承認済み受注と未承認受注を分ける | staff order approval | `completed` | 貸出時に tank logs | approvedByStaff* | 貸出準備に関係 | customerId なしで approved にしない | 正しい |
 | `completed` | transaction の業務処理が完了 | 完了済みを pending から外す | order fulfilment, return fulfilment, uncharged_report record | 原則終端 | order / return は operation logs と紐付く | fulfilledByStaff* or record fields | 請求・報酬・集計に関係 | 未処理のまま completed にしない | 正しい |
 
@@ -165,7 +165,8 @@ staff / admin 系は業務状態ではなく、アカウント・権限状態で
 - `貸出中` は tank lifecycle status。
 - `pending` は transaction workflow status または CustomerUser derived status であり、レイヤーを見ないと意味が違う。
 - `active` / `superseded` / `voided` は log revision status。顧客やスタッフの有効無効ではない。
-- `pending_approval` は order と return に混在しており、名称変更または廃止候補。return 側は `pending_return` 推奨。
+- `pending_approval` は order と return に混在しており、名称変更または廃止候補。return 側は顧客返却タグの処理待ちなので `pending_return` 推奨。
+- 現行コード名の `ReturnApprovalScreen` / `useReturnApprovals` / `fetchApprovals` / `fulfillReturns` は旧 approval 命名であり、業務意味は「スタッフによる返却タグ処理」と読む。詳細は `docs/return-tag-processing-naming-design.md` を正とする。
 - `不良` は名称が悪く、新規設計では廃止方針。タンク不具合は `破損` + 不具合タグへ寄せる。
 - 未充填は破損ではなく、こちら側の充填ミス・準備ミスの記録。
 - `location` は発注時の配達先ではなく、現行コードではタンクの現在の貸出先・現在保持者の表示 snapshot。
@@ -176,6 +177,7 @@ staff / admin 系は業務状態ではなく、アカウント・権限状態で
 | 差分 | 現行 | 台帳上の判断 |
 |---|---|---|
 | `pending_approval` | order / return に混在 | 新規 order では使わない。return は `pending_return` 推奨 |
+| `ReturnApprovalScreen` / `useReturnApprovals` | 現行コード名として approval 系が残っている | 業務意味は「返却承認」ではなく「返却タグ処理」。後続で `ReturnTagProcessing` 系へ rename 候補 |
 | 旧返却タグ名 | 以前は未充填返却を破損に見える名前で表していた | 現在は `RETURN_TAG.UNCHARGED` / `[TAG:uncharged]` へ整理済み |
 | `STATUS.DEFECTIVE` | `不良` として存在 | 新規設計では廃止方針。`破損` + 不具合タグへ寄せる |
 | `DAMAGE_REPORT.allowedPrev` | 制限なし | 貸出中 / 未返却から直接変更しない方針 |
