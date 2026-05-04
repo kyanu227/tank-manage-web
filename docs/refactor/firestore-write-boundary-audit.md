@@ -14,7 +14,7 @@
 - うち、page.tsx に張り付いている主な書き込み入口: admin/customers ×3、admin/permissions ×1、admin/settings ×5、portal/order ×1、portal/return ×1、portal/setup ×1、portal/unfilled ×1、staff/inhouse ×1。
   - ※ admin/settings の `writeBatch` 3 本は、`batch.set` `batch.update` `batch.delete` で内部に複数の書き込み操作を含む。
 - service / lib に分離済みの主要書き込み: `tank-operation.ts`、`submitTankEntryBatch.ts`、`supply-order.ts`、`admin-money-settings.ts`、`admin-notification-settings.ts`。
-- features hook 内に張り付いている書き込み: `useOrderFulfillment.ts`、`useReturnApprovals.ts`、`useBulkReturnByLocation.ts`。
+- features hook 内に張り付いている書き込み: `useOrderFulfillment.ts`、`useReturnTagProcessing.ts`、`useBulkReturnByLocation.ts`。
 - `customer-user.ts` の `ensureCustomerUser` は portal Auth の正規経路。`staff-auth.ts` 内の `setDoc` は read 経路からの自動 mirror 修復であり、service 境界として再検討対象。
 
 ---
@@ -30,7 +30,7 @@
 | # | 行 | API | 対象 | 業務操作 | 移行先 |
 |--:|--:|---|---|---|---|
 | 1 | 244 | `runTransaction` | `tanks` + `logs` | 単一タンクの状態遷移 + ログ作成 (`applyTankOperation`) | **現状維持**。設計書 §17 の方針通り、ここが書き込みの正本 |
-| 2 | 273 | `runTransaction` | `tanks` + `logs` (+ extraOps) | 複数タンクの一括状態遷移 + ログ作成 + batch 参加 (`applyBulkTankOperations`) | **現状維持**。受注貸出 / 返却承認 / 一括返却の中核 |
+| 2 | 273 | `runTransaction` | `tanks` + `logs` (+ extraOps) | 複数タンクの一括状態遷移 + ログ作成 + batch 参加 (`applyBulkTankOperations`) | **現状維持**。受注貸出 / 返却タグ処理 / 一括返却の中核 |
 | 3 | 375 | `runTransaction` | `logs` + `tanks` | 既存ログの編集 (revision chain) (`applyLogCorrection`) | **現状維持** |
 | 4 | 507 | `runTransaction` | `logs` + `tanks` | ログの取消 (void) (`voidLog`) | **現状維持** |
 
@@ -197,11 +197,11 @@
 
 ---
 
-### 1.18 src/features/staff-operations/hooks/useReturnApprovals.ts
+### 1.18 src/features/staff-operations/hooks/useReturnTagProcessing.ts
 
 | # | 行 | API | 対象 | 業務操作 | 移行先 |
 |--:|--:|---|---|---|---|
-| (extraOps) | 119-130 | `batch.update` (extraOps callback 内) | `transactions/{id}` | 返却承認完了時に各 transaction の status を completed にし `fulfilledBy*` を記録 | **`returnApprovalService.fulfillReturnGroup({ group, approvals, actor })`** （新設）。tank operation と transaction update の組合せを service 化 |
+| (extraOps) | 119-130 | `batch.update` (extraOps callback 内) | `transactions/{id}` | 返却タグ処理完了時に各 transaction の status を completed にし `fulfilledBy*` を記録 | **`returnTagProcessingService.fulfillReturnGroup({ group, approvals, actor })`** （新設）。tank operation と transaction update の組合せを service 化 |
 
 → 上の表（行 119）は厳密には `extraOps` callback 内のため `addDoc` / `updateDoc` の grep には引っかからない。ただし役割は #27 と同じカテゴリ。
 → approval 直前に `tanksRepository.getTank` で現状再取得しているのは正しい挙動。これは service 内に閉じてしまえば、page / hook から見えなくなる。
@@ -216,7 +216,7 @@
 |---|---|---|
 | `tanks` | `tank-operation.ts` (state 遷移 + log と原子的) ／ `tanksRepository.updateTankFields*` (state 遷移なしの note/type/logNote/nextMaintenanceDate のみ) ／ `submitTankEntryBatch.ts` (新規作成のみ) | `tank-operation.ts` ✅ ／ `submitTankEntryBatch.ts` ✅ ／ `staff/inhouse/page.tsx` ❌ ／ `useBulkReturnByLocation.ts` ❌ |
 | `logs` | `tank-operation.ts` のみ ／ `submitTankEntryBatch.ts` (procurement) ／ `supply-order.ts` (order) | 全て service 経由 ✅ |
-| `transactions` | `portalTransactionService.*` (create) ／ `orderTransactionService.approve/fulfill` ／ `returnApprovalService.fulfill` ／ `customerLinkingService.link` (`linkedByStaff*`) | `portal/order/page.tsx` ❌ ／ `portal/return/page.tsx` ❌ ／ `portal/unfilled/page.tsx` ❌ ／ `useOrderFulfillment.ts` ❌ ／ `useReturnApprovals.ts` ❌ ／ `admin/settings/page.tsx` ❌ |
+| `transactions` | `portalTransactionService.*` (create) ／ `orderTransactionService.approve/fulfill` ／ `returnTagProcessingService.fulfill` ／ `customerLinkingService.link` (`linkedByStaff*`) | `portal/order/page.tsx` ❌ ／ `portal/return/page.tsx` ❌ ／ `portal/unfilled/page.tsx` ❌ ／ `useOrderFulfillment.ts` ❌ ／ `useReturnTagProcessing.ts` ❌ ／ `admin/settings/page.tsx` ❌ |
 | `customers` | `customersService.*` | `admin/customers/page.tsx` ❌ |
 | `customerUsers` | `customer-user.ts` (`ensureCustomerUser` / `completePortalSetup` 新設) ／ `customerLinkingService.link` | `customer-user.ts` ✅ ／ `portal/setup/page.tsx` ❌ ／ `admin/settings/page.tsx` ❌ |
 | `staff` + `staffByEmail` | `staffSyncService.*` のみ ／ `staff-auth.ts` の **自動 mirror 修復は廃止**（必要なら明示 rebuild API で正常化） | `admin/settings/page.tsx` (✅ helper 利用) / `staff-auth.ts` (修復) ⚠️ |
@@ -249,7 +249,7 @@ read 側も `useInspectionSettings` は `settings/inspection` を見るのに対
 
 ### 3.2 旧 field と新 identity field の並走
 
-`useOrderFulfillment.approveOrder` / `fulfillOrder` および `useReturnApprovals.fulfillReturns` は、新 field (`approvedByStaffId/Name/Email`、`fulfilledByStaffId/Name/Email`) を書きつつ、旧 field (`approvedBy`、`fulfilledBy` = staff 名文字列) も並走で書いている。
+`useOrderFulfillment.approveOrder` / `fulfillOrder` および `useReturnTagProcessing.processReturnTags` は、新 field (`approvedByStaffId/Name/Email`、`fulfilledByStaffId/Name/Email`) を書きつつ、旧 field (`approvedBy`、`fulfilledBy` = staff 名文字列) も並走で書いている。
 
 設計書 [docs/identity-and-operation-logging-design.md §9 / §11](../identity-and-operation-logging-design.md) の方針:
 

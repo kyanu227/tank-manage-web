@@ -20,7 +20,7 @@
 
 ### 問題2: タグ付き返却（通常/未使用/未充填）の処理が怪しい可能性
 - 症状: ユーザー報告「うまくいってない可能性がある」、具体的な再現手順は未特定
-- 暫定調査: `getReturns` は `{ id, ...d.data() }` で生スプレッドし `condition` フィールドは保持。書き込みロジック（`condition` → `RETURN_TAG.UNUSED/DEFECT/NORMAL` 変換、`fulfillReturns` の処理）は Phase 2-B で触っていない（書き込みスコープ外）
+- 暫定調査: `getReturns` は `{ id, ...d.data() }` で生スプレッドし `condition` フィールドは保持。書き込みロジック（`condition` → `RETURN_TAG.UNUSED/DEFECT/NORMAL` 変換、`processReturnTags` の処理）は Phase 2-B で触っていない（書き込みスコープ外）
 - 結論: Phase 2-B 起因の可能性は低い。**今は触らない**。具体的な症状が分かってから別件として調査
 
 ## 対応方針
@@ -57,7 +57,7 @@ Phase 2-B 完了範囲: Phase 2-B-1 〜 2-B-12（21 箇所の読み取りを rep
 1. **表示データ**: 件数・並び順・内容が従来と同じか
 2. **ローディング表示**: 表示崩れがないか
 3. **エラーメッセージ**: 文言が変わっていないか（「タンクが存在しません」「履歴取得エラー」「保存エラー」など）
-4. **書き込み処理の完走**: 受注承認・返却承認・一括返却・顧客紐付け確定が最後まで通るか
+4. **書き込み処理の完走**: 受注承認・返却タグ処理・一括返却・顧客紐付け確定が最後まで通るか
 
 ### 画面と確認 path
 
@@ -70,7 +70,7 @@ Phase 2-B 完了範囲: Phase 2-B-1 〜 2-B-12（21 箇所の読み取りを rep
 - URL: `/staff/orders`
 - 重点:
   - 受注タブ: pending / pending_approval / approved の 3 並列取得 → createdAt desc
-  - 返却承認タブ: type=return + status=pending_approval、customerId 単位グルーピング
+  - 返却タグ処理タブ: type=return + status=pending_approval、customerId 単位グルーピング
   - 一括返却タブ: status in [貸出中, 未返却]、location 単位グルーピング
 - 関連: Phase 2-B-7（getOrders）, 2-B-8a/8b（getReturns + getTank）, 2-B-11（statusIn）
 

@@ -67,7 +67,7 @@ page.tsx
 | 3 | [src/app/portal/order/page.tsx](../../src/app/portal/order/page.tsx) `60-86` ／ [portal/return/page.tsx](../../src/app/portal/return/page.tsx) `106-137` ／ [portal/unfilled/page.tsx](../../src/app/portal/unfilled/page.tsx) `103-128` | 3 ページが **異なる** `customerId` / `createdByUid` フォールバック (`session.uid \|\| "legacy_customer"` 等) を持つ | 顧客識別子が紐付かず請求・履歴・承認が壊れる |
 | 4 | [src/app/admin/customers/page.tsx](../../src/app/admin/customers/page.tsx) `183-277` | 顧客マスタ CRUD と重複名チェックを page で実装。`customers` への直接 `addDoc` / `updateDoc` | `customers` を貸出先・請求単位の正本にする方針に対して、保存境界が page に残り続ける |
 | 5 | [src/features/staff-operations/hooks/useOrderFulfillment.ts](../../src/features/staff-operations/hooks/useOrderFulfillment.ts) `96-121` ／ `214-278` | 受注承認 (transactions update) と受注貸出完了 (tank operation + transaction batch) が同 hook。新旧 actor field を **両方** 書く | 受注フローの業務不変条件が hook 内に閉じておらず、UI 起因のリグレッションが起きやすい |
-| 6 | [src/features/staff-operations/hooks/useReturnApprovals.ts](../../src/features/staff-operations/hooks/useReturnApprovals.ts) `72-143` | 返却承認の「直前再 read → bulk write → transaction batch」シーケンスが hook | 順序が壊れると幽霊 tank が生まれる可能性 |
+| 6 | [src/features/staff-operations/hooks/useReturnTagProcessing.ts](../../src/features/staff-operations/hooks/useReturnTagProcessing.ts) `72-143` | 返却タグ処理の「直前再 read → bulk write → transaction batch」シーケンスが hook | 順序が壊れると幽霊 tank が生まれる可能性 |
 | 7 | [src/app/staff/inhouse/page.tsx](../../src/app/staff/inhouse/page.tsx) `68-86` ／ [src/features/staff-operations/hooks/useBulkReturnByLocation.ts](../../src/features/staff-operations/hooks/useBulkReturnByLocation.ts) `65-81` | `tanks.logNote` を `writeBatch().update()` で **直接書き換え**。`tank-operation.ts` を経由しない逃げ道 | tag 付け以外のフィールドに誰かが拡張すると、状態遷移を伴わない更新で `latestLogId` がずれる |
 | 8 | [src/lib/firebase/staff-auth.ts](../../src/lib/firebase/staff-auth.ts) `110-155` | read-only と称する `findActiveStaffByEmail` が **mirror が無いと書き込みする**。失敗は `console.warn` で握りつぶし | mirror が壊れた状態で読み取り経路から書き戻され、根本原因が隠れる |
 | 9 | [src/app/admin/notifications/page.tsx](../../src/app/admin/notifications/page.tsx) ／ [src/app/admin/settings/page.tsx](../../src/app/admin/settings/page.tsx) | `alertMonths` / `validityYears` を **2 箇所** (`notifySettings/config` と `settings/inspection`) に書き、read 側 (`useInspectionSettings`) は片方しか見ない | 管理画面で設定したつもりが反映されない |
@@ -165,7 +165,7 @@ page.tsx
   - `transactionService.approveOrder({ orderId, actor })`
   - `transactionService.fulfillOrderTransaction({ order, scannedTanks, actor })` … 内部で `applyBulkTankOperations` の `extraOps` 経由
   - `transactionService.fulfillReturnGroup({ group, approvals, actor })` … 同上
-  - `useOrderFulfillment.ts` / `useReturnApprovals.ts` から書き込みを service 呼び出しに差し替え
+  - `useOrderFulfillment.ts` / `useReturnTagProcessing.ts` から書き込みを service 呼び出しに差し替え
   - 既存挙動維持のため、旧 `approvedBy` / `fulfilledBy` 文字列の併記はこの PR では残してよい
 - 注意:
   - `applyBulkTankOperations` の `extraOps` 利用は維持し、`tank-operation.ts` は触らない

@@ -32,7 +32,7 @@
 | 関数 | 概要 | 利用元 |
 |---|---|---|
 | `getTanks(options)` | `status` / `statusIn` / `location` / `prefix` の AND フィルタ。id 昇順ソート | `useTanks`, portal 3画面, `admin/page`, `useBulkReturnByLocation` |
-| `getTank(tankId)` | 1件取得（不在なら null） | `useReturnApprovals.fulfillReturns` |
+| `getTank(tankId)` | 1件取得（不在なら null） | `useReturnTagProcessing.processReturnTags` |
 
 **stub のまま据え置き**: `listenTanks` / `getTanksByIds` / `updateTankFields` / `updateTankFieldsInBatch`
 
@@ -50,11 +50,11 @@
 | 関数 | 概要 | 利用元 |
 |---|---|---|
 | `getOrders(options)` | `type=="order"` 必須 + `status` / `customerId`。`normalizeOrderDoc` で `PendingOrder[]` 化 | `useOrderFulfillment`, `staff/dashboard` |
-| `getReturns(options)` | `type=="return"` 必須 + `status` / `customerId`。`TransactionDoc[]` 生キャスト | `useReturnApprovals`, `staff/dashboard` |
+| `getReturns(options)` | `type=="return"` 必須 + `status` / `customerId`。`TransactionDoc[]` 生キャスト | `useReturnTagProcessing`, `staff/dashboard` |
 | `getPendingTransactions(options)` | type 横断 + `status` `in` 配列 | `admin/page` |
 | `findPendingLinksByUid(uid)` | `createdByUid` + `status=="pending_link"` 特殊条件 | `admin/settings.saveCustomerUsers` |
 
-**stub のまま据え置き**: `createTransaction` / `updateTransaction` / `updateTransactionInBatch` / `getTransaction` / `getUnchargedReports` / `listenOrders` / `listenReturnApprovals` / `markOrderApproved` / `markOrderCompletedInBatch`
+**stub のまま据え置き**: `createTransaction` / `updateTransaction` / `updateTransactionInBatch` / `getTransaction` / `getUnchargedReports` / `listenOrders` / `listenPendingReturnTags` / `markOrderApproved` / `markOrderCompletedInBatch`
 
 ### 設計境界の確認
 
@@ -76,7 +76,7 @@
 | `src/app/portal/return/page.tsx` 貸出中 | 同上 | 2-B-6 |
 | `src/app/portal/unfilled/page.tsx` 貸出中 | 同上 | 2-B-6 |
 | `src/app/admin/page.tsx` 貸出中件数 | `tanksRepository.getTanks({ status: STATUS.LENT })` | 2-B-9 |
-| `useReturnApprovals.fulfillReturns` 1件確認 | `tanksRepository.getTank(tankId)` | 2-B-8b |
+| `useReturnTagProcessing.processReturnTags` 1件確認 | `tanksRepository.getTank(tankId)` | 2-B-8b |
 | `useBulkReturnByLocation.fetchBulkTanks` | `tanksRepository.getTanks({ statusIn: [LENT, UNRETURNED] })` | 2-B-11 |
 
 ### logs（8件）
@@ -97,7 +97,7 @@
 | 旧 | 新 | フェーズ |
 |---|---|---|
 | `useOrderFulfillment.fetchOrders` (3 status 並列) | `transactionsRepository.getOrders({ status })` × 3 | 2-B-7 |
-| `useReturnApprovals.fetchApprovals` | `transactionsRepository.getReturns({ status: "pending_approval" })` | 2-B-8a |
+| `useReturnTagProcessing.fetchPendingReturnTags` | `transactionsRepository.getReturns({ status: "pending_approval" })` | 2-B-8a |
 | `src/app/admin/page.tsx` 要対応件数 | `transactionsRepository.getPendingTransactions({ statuses: ["pending","pending_approval"] })` | 2-B-9 |
 | `src/app/staff/dashboard/page.tsx` pending orders | `transactionsRepository.getOrders({ status: "pending" })` | 2-B-10a |
 | `src/app/staff/dashboard/page.tsx` pending_approval returns | `transactionsRepository.getReturns({ status: "pending_approval" })` | 2-B-10a |
@@ -122,7 +122,7 @@
 
 - `src/app/portal/order/page.tsx` / `portal/return/page.tsx` / `portal/unfilled/page.tsx` — `addDoc(collection(db, "transactions"), ...)`
 - `src/features/staff-operations/hooks/useOrderFulfillment.ts` — `updateDoc` / `batch.update(doc(db, "transactions", ...))`
-- `src/features/staff-operations/hooks/useReturnApprovals.ts` — `batch.update(doc(db, "transactions", ...))`
+- `src/features/staff-operations/hooks/useReturnTagProcessing.ts` — `batch.update(doc(db, "transactions", ...))`
 - `src/app/admin/settings/page.tsx` — `batch.update(doc(db, "transactions", ...))`（customer リンク確定時）
 - `src/features/staff-operations/hooks/useBulkReturnByLocation.ts` — `writeBatch(db).update(ref, { logNote })`（tag 操作）
 - `src/app/staff/inhouse/page.tsx` — tanks メタ更新
@@ -146,8 +146,8 @@
 
 - **`tank-trace.ts` の repository 経由化**: 4 箇所の logs 読み取りを `logsRepository` 内部呼び出しに寄せる。設計上 service 層の独立は維持しつつ、SDK 直接利用だけ集約する
 - **tanks 全件取得の onSnapshot 化**: `useTanks` の `getTanks()` 全件をリアルタイム購読へ。`listenTanks` の本実装が前提
-- **listen 系の本実装**: `listenLogsByTank` / `listenRecentLogs` / `listenOrders` / `listenReturnApprovals` の onSnapshot 実装。リアルタイム反映が必要な画面の判定が前提
-- **tanks 単一取得のバッチ化**: `useReturnApprovals.fulfillReturns` の N 件並列 `getTank` を `getTanksByIds`（`documentId() in [...]` 分割クエリ）に集約。「存在しない tankId をエラーで弾く」既存挙動の維持には差分集合チェックが必要
+- **listen 系の本実装**: `listenLogsByTank` / `listenRecentLogs` / `listenOrders` / `listenPendingReturnTags` の onSnapshot 実装。リアルタイム反映が必要な画面の判定が前提
+- **tanks 単一取得のバッチ化**: `useReturnTagProcessing.processReturnTags` の N 件並列 `getTank` を `getTanksByIds`（`documentId() in [...]` 分割クエリ）に集約。「存在しない tankId をエラーで弾く」既存挙動の維持には差分集合チェックが必要
 - **`getPendingTransactions({ statuses })` のガード**: `statuses: []`（空配列）や 10 件超で Firestore の `in` 句がエラーになる。再利用が増えるタイミングで「空配列の早期 return」「10件超の分割」のガード追加
 
 ### 書き込み系の repository 化（Phase 3 想定）
@@ -185,7 +185,7 @@
 | # | ファイルパス | 場所 | 使用 API | 性質 | 置き換え候補 |
 |---|---|---|---|---|---|
 | T1 | `src/hooks/useTanks.ts` | L35 | `getDocs(collection)` 全件 | 表示用 | `tanksRepository.getTanks()` |
-| T2 | `useReturnApprovals.ts` | L95 | `getDoc(doc, tankId)` | 業務操作 | `tanksRepository.getTank(tankId)` |
+| T2 | `useReturnTagProcessing.ts` | L95 | `getDoc(doc, tankId)` | 業務操作 | `tanksRepository.getTank(tankId)` |
 | T3 | `useBulkReturnByLocation.ts` | L34 | `getDocs(query, status in [LENT, UNRETURNED])` | 業務操作 | `tanksRepository.getTanks({ statusIn })` |
 | T4 | `src/app/portal/page.tsx` | L24 | `getDocs(query, location==X, status=="貸出中")` | 表示用 | `tanksRepository.getTanks({ location, status })` |
 | T5 | `src/app/portal/return/page.tsx` | L51 | 同 T4 | 表示用 | 同 T4 |
@@ -211,7 +211,7 @@
 | # | ファイルパス | 場所 | 使用 API | 性質 | 置き換え候補 |
 |---|---|---|---|---|---|
 | X1 | `useOrderFulfillment.ts` | L67 | `getDocs(query, type=="order", status==X)` | 表示用 | `getOrders({ status })` |
-| X2 | `useReturnApprovals.ts` | L44 | `getDocs(query, type=="return", status=="pending_approval")` | 表示用 | `getReturns({ status })` |
+| X2 | `useReturnTagProcessing.ts` | L44 | `getDocs(query, type=="return", status=="pending_approval")` | 表示用 | `getReturns({ status })` |
 | X3 | `admin/page.tsx` | L48 | `getDocs(query, status in ["pending","pending_approval"])` | 表示用 | `getPendingTransactions()` |
 | X4 | `staff/dashboard/page.tsx` | L145 | `getDocs(query, type=="order", status=="pending")` | 表示用 | `getOrders({ status:"pending" })` |
 | X5 | `staff/dashboard/page.tsx` | L152 | `getDocs(query, type=="return", status=="pending_approval")` | 表示用 | `getReturns({ status })` |
@@ -231,8 +231,8 @@
 
 #### 後半（transactions / 残り logs / 複合画面）
 - **2-B-7**: `useOrderFulfillment.ts` — `getOrders()` 本実装
-- **2-B-8a**: `useReturnApprovals.fetchApprovals` — `getReturns()` 本実装
-- **2-B-8b**: `useReturnApprovals.fulfillReturns` — `getTank()` 本実装
+- **2-B-8a**: `useReturnTagProcessing.fetchPendingReturnTags` — `getReturns()` 本実装
+- **2-B-8b**: `useReturnTagProcessing.processReturnTags` — `getTank()` 本実装
 - **2-B-9**: `admin/page.tsx` — 3コレクション同時 + `getPendingTransactions()` 本実装
 - **2-B-10a**: `staff/dashboard.fetchData`
 - **2-B-10b**: `staff/dashboard.toggleHistory` — `getLogsByRoot()` 本実装

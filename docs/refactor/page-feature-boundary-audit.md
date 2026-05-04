@@ -34,7 +34,7 @@
 
 - repository (`src/lib/firebase/repositories/*`) は **読み取りはほぼ揃っている**、**書き込みは未着手**。
   - 実装済 read: `tanksRepository.getTank/getTanks` `logsRepository.getActiveLogs/getActiveLogsByStaffId/getActiveLogsByCustomerId/getActiveLogsByTank/getLogsByRoot` `transactionsRepository.getOrders/getReturns/getPendingTransactions/findPendingLinksByUid`。
-  - 未実装（throw "not implemented"）の skeleton: `tanks.listenTanks/getTanksByIds/updateTankFields*`、`logs.getLog/getLogsByTank/getLatestActiveLogForTank/getLogsByAction/getLogsInRange/listen*`、`transactions.createTransaction/updateTransaction/getTransaction/getUnchargedReports/listenOrders/listenReturnApprovals/markOrderApproved/markOrderCompletedInBatch`。
+  - 未実装（throw "not implemented"）の skeleton: `tanks.listenTanks/getTanksByIds/updateTankFields*`、`logs.getLog/getLogsByTank/getLatestActiveLogForTank/getLogsByAction/getLogsInRange/listen*`、`transactions.createTransaction/updateTransaction/getTransaction/getUnchargedReports/listenOrders/listenPendingReturnTags/markOrderApproved/markOrderCompletedInBatch`。
 
 - service / operation 境界に位置する関数:
   - tank 状態遷移: `applyTankOperation` / `applyBulkTankOperations` / `appendTankOperation` / `applyLogCorrection` / `voidLog` ([src/lib/tank-operation.ts](../../src/lib/tank-operation.ts))
@@ -45,7 +45,7 @@
 
 - 識別子の正本化は、tank operation / logs では到達済み。残課題は portal transaction と transaction 承認 actor の境界。
   - `tank-operation.ts` の log 書き込みは `OperationContext` を必須化済み。`logs.staffId` / `logs.customerId` を top-level で書く形に到達済み（[docs/identity-and-operation-logging-design.md](../identity-and-operation-logging-design.md) に準拠）。
-  - 受注完了 / 返却承認の **transactions 直接 update** は `approvedByStaffId` / `fulfilledByStaffId` 系を併記済み。ただし旧 `approvedBy` / `fulfilledBy`（名前文字列）も残っているため、service 抽出後に読み手確認をして別 PR で停止する。
+  - 受注完了 / 返却タグ処理の **transactions 直接 update** は `approvedByStaffId` / `fulfilledByStaffId` 系を併記済み。ただし旧 `approvedBy` / `fulfilledBy`（名前文字列）も残っているため、service 抽出後に読み手確認をして別 PR で停止する。
   - portal の transaction 書き込みは `customerId` に `session.uid` を混ぜる余地があり、identity helper を通っていない。移行後は `customerId` fallback を廃止し、`customerUserUid` / `customerId` / `customerName` の意味を service 境界で固定する。
 
 ---
@@ -173,7 +173,7 @@
 
 | feature | 現状の構成 | 評価 |
 |---|---|---|
-| `features/staff-operations/` | `OperationsTerminal` + 6 components + 5 hooks + types/constants | 強い feature。貸出 / 返却 / 充填 / 受注 / 返却承認 / 一括返却を 1 feature に押し込んでいる |
+| `features/staff-operations/` | `OperationsTerminal` + 6 components + 5 hooks + types/constants | 強い feature。貸出 / 返却 / 充填 / 受注 / 返却タグ処理 / 一括返却を 1 feature に押し込んでいる |
 | `features/maintenance/` | `useMaintenanceSwipe` + `constants.ts` のみ。3 つの page (damage/repair/inspection) は `src/app/staff/{damage,repair,inspection}/page.tsx` に散在 | feature ディレクトリだけある「殻」状態 |
 | `features/procurement/` | `TankEntryScreen` + `useProcurementSwipe` + `submitTankEntryBatch` + `constants` | 比較的まとまっている。supply-order だけ別 (`lib/firebase/supply-order.ts`) |
 
@@ -181,7 +181,7 @@
 
 | feature | 含めるもの | 該当 page |
 |---|---|---|
-| `staff-operations` | `OperationsTerminal` + 手動/受注/返却承認/一括返却 (現状維持) | `/staff/lend` `/staff/return` `/staff/fill` |
+| `staff-operations` | `OperationsTerminal` + 手動/受注/返却タグ処理/一括返却 (現状維持) | `/staff/lend` `/staff/return` `/staff/fill` |
 | `maintenance` | `damage` / `repair` / `inspection` の 3 画面ロジック・hook・service。tag 更新 service もここ | `/staff/damage` `/staff/repair` `/staff/inspection` |
 | `inhouse-operations` | `inhouse` 画面の事後報告 + 一括返却。`useInHouseTanks` hook を分離 | `/staff/inhouse` |
 | `procurement` | `tank-purchase` `tank-register` `supply-order` (新規) | `/staff/tank-purchase` `/staff/tank-register` `/staff/supply-order` |
@@ -221,7 +221,7 @@
 | **session / identity hook** | localStorage / Firebase Auth から現在の操作者を取り出す | `useStaffSession` `useStaffIdentity` `useStaffProfile` `getStaffIdentity` `requireStaffIdentity` |
 | **data fetching hook** | repository を呼んで state にキャッシュ | `useTanks` `useInspectionSettings` `usePendingOrderCount` `useDestinations`（現状名） |
 | **UI state hook** | ローカルな入力値や選択状態を抱える | `useOperationSwipe` `useMaintenanceSwipe` `useProcurementSwipe` |
-| **workflow hook** | 入力 + 検証 + service 呼び出し + UI フィードバック | `useManualTankOperation` `useOrderFulfillment` `useReturnApprovals` `useBulkReturnByLocation` |
+| **workflow hook** | 入力 + 検証 + service 呼び出し + UI フィードバック | `useManualTankOperation` `useOrderFulfillment` `useReturnTagProcessing` `useBulkReturnByLocation` |
 
 ### 3.2 混ざっている箇所
 
@@ -236,7 +236,7 @@
     - fulfill: `applyBulkTankOperations` + `transactions.update` (batch participate)
   - 内部で `updateDoc(doc(db, "transactions", order.id), ...)` を直接書いている → service 化が必要。
 
-- **`useReturnApprovals`** ([src/features/staff-operations/hooks/useReturnApprovals.ts](../../src/features/staff-operations/hooks/useReturnApprovals.ts))
+- **`useReturnTagProcessing`** ([src/features/staff-operations/hooks/useReturnTagProcessing.ts](../../src/features/staff-operations/hooks/useReturnTagProcessing.ts))
   - `tanksRepository.getTank` で「承認直前の現状取得」を hook 内で行っている。これは workflow の正しい挙動だが、**順次 await + 承認直前 read + bulk write** という業務シーケンスは service に閉じた方が読みやすい。
   - 加えて `transactions.update` を batch participate で書いている。fulfillment と同じ構造。
 
@@ -295,7 +295,7 @@
 - **transaction approval / fulfillment service**
   - `approveOrderTransaction(orderId, actor)` … 受注承認だけ
   - `fulfillOrderTransaction({ order, scannedTanks, actor })` … 受注貸出完了 (tank + transaction)
-  - `fulfillReturnGroup({ returnGroup, approvals, actor })` … 返却承認完了
+  - `fulfillReturnGroup({ returnGroup, approvals, actor })` … 返却タグ処理完了
   - これらは **どれも tank-operation の batch participate と transactions.update を組み合わせる** という同じパターン。共通の `executeApprovalWithTankOperations()` を service 層に置けば、approver の identity field (`approvedByStaffId/Name/Email`) を 1 箇所で正規化できる。
 
 - **log correction orchestration service**

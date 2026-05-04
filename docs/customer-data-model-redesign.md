@@ -130,7 +130,7 @@ status の派生ルール:
 | `portal/login` / `register` / `setup` / `layout` | Firebase Auth + `customerUsers` | localStorage `customerSession` 互換 session | Portal Auth Phase 0 本番確認済み |
 | `portal/order` | `customerSession.uid/name` | `transactions` 作成（`status: "pending"`、delivery metadata 保存） | 旧ログイン方式のまま delivery 情報だけ追加済み |
 | `portal/return` / `unfilled` | localStorage `customerSession` 互換 session | `transactions` 作成 | Portal Auth 後の互換 session を利用。個別schema整理は後続 |
-| `useReturnApprovals.fulfillReturns` | — | `applyBulkTankOperations` の `logExtra: { customerId }` | logs に customerId を付与 |
+| `useReturnTagProcessing.processReturnTags` | — | `applyBulkTankOperations` の `logExtra: { customerId }` | logs に customerId を付与 |
 | `useOrderFulfillment.fulfillOrder` | — | 同上 | logs に customerId を付与 |
 
 ### 1.7 customerId / customerName / location の流れ
@@ -460,7 +460,7 @@ batch.update(doc(db, "transactions", item.id), {
   linkedAt: serverTimestamp(),
 })
 
-// useOrderFulfillment / useReturnApprovals (スタッフ承認・完了)
+// useOrderFulfillment / useReturnTagProcessing (スタッフ承認・完了)
 applyBulkTankOperations(..., (batch) => {
   batch.update(doc(db, "transactions", id), {
     status: "completed",

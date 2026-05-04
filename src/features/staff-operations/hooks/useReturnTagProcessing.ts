@@ -13,36 +13,36 @@ import {
   type ReturnTag,
   type TankAction,
 } from "@/lib/tank-rules";
-import type { ApprovalMap, Condition, PendingReturn, ReturnGroup } from "../types";
+import type { Condition, PendingReturn, ReturnGroup, ReturnTagSelectionMap } from "../types";
 
-interface UseReturnApprovalsParams {
+interface UseReturnTagProcessingParams {
   fetchBulkTanks: () => Promise<void>;
 }
 
-export interface UseReturnApprovalsResult {
-  approvalsLoading: boolean;
+export interface UseReturnTagProcessingResult {
+  pendingReturnTagsLoading: boolean;
   returnGroups: ReturnGroup[];
   selectedReturnGroup: ReturnGroup | null;
   setSelectedReturnGroup: (group: ReturnGroup | null) => void;
-  approvals: ApprovalMap;
-  setApprovals: React.Dispatch<React.SetStateAction<ApprovalMap>>;
-  approvalSubmitting: boolean;
-  fetchApprovals: () => Promise<void>;
-  openReturnGroup: (group: ReturnGroup) => void;
-  fulfillReturns: () => Promise<void>;
+  returnTagSelections: ReturnTagSelectionMap;
+  setReturnTagSelections: React.Dispatch<React.SetStateAction<ReturnTagSelectionMap>>;
+  returnTagProcessingSubmitting: boolean;
+  fetchPendingReturnTags: () => Promise<void>;
+  openReturnTagGroup: (group: ReturnGroup) => void;
+  processReturnTags: () => Promise<void>;
 }
 
-export function useReturnApprovals({
+export function useReturnTagProcessing({
   fetchBulkTanks,
-}: UseReturnApprovalsParams): UseReturnApprovalsResult {
-  const [approvalsLoading, setApprovalsLoading] = useState(true);
+}: UseReturnTagProcessingParams): UseReturnTagProcessingResult {
+  const [pendingReturnTagsLoading, setPendingReturnTagsLoading] = useState(true);
   const [returnGroups, setReturnGroups] = useState<ReturnGroup[]>([]);
   const [selectedReturnGroup, setSelectedReturnGroup] = useState<ReturnGroup | null>(null);
-  const [approvals, setApprovals] = useState<ApprovalMap>({});
-  const [approvalSubmitting, setApprovalSubmitting] = useState(false);
+  const [returnTagSelections, setReturnTagSelections] = useState<ReturnTagSelectionMap>({});
+  const [returnTagProcessingSubmitting, setReturnTagProcessingSubmitting] = useState(false);
 
-  const fetchApprovals = useCallback(async () => {
-    setApprovalsLoading(true);
+  const fetchPendingReturnTags = useCallback(async () => {
+    setPendingReturnTagsLoading(true);
     try {
       const docs = await transactionsRepository.getReturns({ status: "pending_approval" });
       const items = docs as unknown as PendingReturn[];
@@ -58,27 +58,27 @@ export function useReturnApprovals({
     } catch (e) {
       console.error(e);
     } finally {
-      setApprovalsLoading(false);
+      setPendingReturnTagsLoading(false);
     }
   }, []);
 
-  const openReturnGroup = useCallback((group: ReturnGroup) => {
+  const openReturnTagGroup = useCallback((group: ReturnGroup) => {
     setSelectedReturnGroup(group);
-    const init: ApprovalMap = {};
+    const init: ReturnTagSelectionMap = {};
     group.items.forEach((item) => {
-      init[item.id] = { approved: false, condition: item.condition };
+      init[item.id] = { selected: false, condition: item.condition };
     });
-    setApprovals(init);
+    setReturnTagSelections(init);
   }, []);
 
-  const fulfillReturns = useCallback(async () => {
+  const processReturnTags = useCallback(async () => {
     if (!selectedReturnGroup) return;
-    const approved = selectedReturnGroup.items.filter((i) => approvals[i.id]?.approved);
-    if (approved.length === 0) {
-      alert("承認するタンクを選択してください");
+    const selectedItems = selectedReturnGroup.items.filter((i) => returnTagSelections[i.id]?.selected);
+    if (selectedItems.length === 0) {
+      alert("処理するタンクを選択してください");
       return;
     }
-    setApprovalSubmitting(true);
+    setReturnTagProcessingSubmitting(true);
     try {
       const actor = requireStaffIdentity();
       const context = {
@@ -89,18 +89,18 @@ export function useReturnApprovals({
         },
       };
 
-      // 承認直前に tanks/{tankId} を再取得し、現在の status を使う。
-      // 承認待ちの間にタンク状態が変わっている可能性があるため、STATUS.LENT 固定だと
+      // 処理直前に tanks/{tankId} を再取得し、現在の status を使う。
+      // 処理待ちの間にタンク状態が変わっている可能性があるため、STATUS.LENT 固定だと
       // validateTransition や logAction の決定が古い前提で行われてしまう。
       // 存在しないタンクIDはここで弾く（幽霊タンク生成を防ぐ最終防衛ライン）。
-      const approvedData = await Promise.all(approved.map(async (item) => {
-        const appData = approvals[item.id];
+      const selectedData = await Promise.all(selectedItems.map(async (item) => {
+        const appData = returnTagSelections[item.id];
         const condition = appData?.condition ?? item.condition;
         const tag: ReturnTag =
           condition === "unused" ? RETURN_TAG.UNUSED
             : condition === "uncharged" ? RETURN_TAG.UNCHARGED
               : RETURN_TAG.NORMAL;
-        const note = `[承認] 顧客: ${selectedReturnGroup.customerName} (タグ:${condition})`;
+        const note = `[返却タグ処理] 顧客: ${selectedReturnGroup.customerName} (タグ:${condition})`;
         const tank = await tanksRepository.getTank(item.tankId);
         if (!tank) {
           throw new Error(`[${item.tankId}] タンクが存在しません`);
@@ -116,7 +116,7 @@ export function useReturnApprovals({
       }));
 
       await applyBulkTankOperations(
-        approvedData.map(({ item, note, currentStatus, transitionAction, location }) => ({
+        selectedData.map(({ item, note, currentStatus, transitionAction, location }) => ({
           tankId: item.tankId,
           transitionAction,
           currentStatus,
@@ -126,7 +126,7 @@ export function useReturnApprovals({
           logNote: note,
         })),
         (batch) => {
-          approvedData.forEach(({ item, condition }) => {
+          selectedData.forEach(({ item, condition }) => {
             batch.update(doc(db, "transactions", item.id), {
               status: "completed",
               finalCondition: condition,
@@ -140,27 +140,27 @@ export function useReturnApprovals({
         }
       );
 
-      alert(`${approved.length}件の返却を承認しました`);
+      alert(`${selectedItems.length}件の返却タグを処理しました`);
       setSelectedReturnGroup(null);
-      fetchApprovals();
+      fetchPendingReturnTags();
       fetchBulkTanks();
     } catch (e: any) {
       alert("エラー: " + e.message);
     } finally {
-      setApprovalSubmitting(false);
+      setReturnTagProcessingSubmitting(false);
     }
-  }, [approvals, fetchApprovals, fetchBulkTanks, selectedReturnGroup]);
+  }, [fetchBulkTanks, fetchPendingReturnTags, returnTagSelections, selectedReturnGroup]);
 
   return {
-    approvalsLoading,
+    pendingReturnTagsLoading,
     returnGroups,
     selectedReturnGroup,
     setSelectedReturnGroup,
-    approvals,
-    setApprovals,
-    approvalSubmitting,
-    fetchApprovals,
-    openReturnGroup,
-    fulfillReturns,
+    returnTagSelections,
+    setReturnTagSelections,
+    returnTagProcessingSubmitting,
+    fetchPendingReturnTags,
+    openReturnTagGroup,
+    processReturnTags,
   };
 }

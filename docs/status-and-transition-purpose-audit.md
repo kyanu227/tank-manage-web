@@ -166,7 +166,7 @@ staff / admin 系は業務状態ではなく、アカウント・権限状態で
 - `pending` は transaction workflow status または CustomerUser derived status であり、レイヤーを見ないと意味が違う。
 - `active` / `superseded` / `voided` は log revision status。顧客やスタッフの有効無効ではない。
 - `pending_approval` は order と return に混在しており、名称変更または廃止候補。return 側は顧客返却タグの処理待ちなので `pending_return` 推奨。
-- 現行コード名の `ReturnApprovalScreen` / `useReturnApprovals` / `fetchApprovals` / `fulfillReturns` は旧 approval 命名であり、業務意味は「スタッフによる返却タグ処理」と読む。詳細は `docs/return-tag-processing-naming-design.md` を正とする。
+- 旧コード名の `ReturnApprovalScreen` / `useReturnApprovals` / `fetchApprovals` / `fulfillReturns` は approval 命名だったが、PR #14 で `ReturnTagProcessing` 系へ rename 済み。業務意味は「スタッフによる返却タグ処理」と読む。詳細は `docs/return-tag-processing-naming-design.md` を正とする。
 - `不良` は名称が悪く、新規設計では廃止方針。タンク不具合は `破損` + 不具合タグへ寄せる。
 - 未充填は破損ではなく、こちら側の充填ミス・準備ミスの記録。
 - `location` は発注時の配達先ではなく、現行コードではタンクの現在の貸出先・現在保持者の表示 snapshot。
@@ -177,7 +177,7 @@ staff / admin 系は業務状態ではなく、アカウント・権限状態で
 | 差分 | 現行 | 台帳上の判断 |
 |---|---|---|
 | `pending_approval` | order / return に混在 | 新規 order では使わない。return は `pending_return` 推奨 |
-| `ReturnApprovalScreen` / `useReturnApprovals` | 現行コード名として approval 系が残っている | 業務意味は「返却承認」ではなく「返却タグ処理」。後続で `ReturnTagProcessing` 系へ rename 候補 |
+| 旧 `ReturnApprovalScreen` / `useReturnApprovals` | PR #14 で `ReturnTagProcessingScreen` / `useReturnTagProcessing` へ rename 済み | 業務意味は「承認」ではなく「返却タグ処理」。`pending_approval` status migration は未実施 |
 | 旧返却タグ名 | 以前は未充填返却を破損に見える名前で表していた | 現在は `RETURN_TAG.UNCHARGED` / `[TAG:uncharged]` へ整理済み |
 | `STATUS.DEFECTIVE` | `不良` として存在 | 新規設計では廃止方針。`破損` + 不具合タグへ寄せる |
 | `DAMAGE_REPORT.allowedPrev` | 制限なし | 貸出中 / 未返却から直接変更しない方針 |
