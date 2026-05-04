@@ -288,7 +288,7 @@ read 側も `useInspectionSettings` は `settings/inspection` を見るのに対
 
 1. `customerUsers/{uid}` の status / customerId / customerName / updatedAt を merge
 2. `transactionsRepository.findPendingLinksByUid(u.uid)` で pending transactions を read
-3. 該当 transactions を `pending_link → pending_approval` に昇格、`linkedByStaff*` を記録
+3. 該当 order transactions を `pending_link → pending` に昇格、`linkedByStaff*` を記録
 
 これは **「customer user 紐付け」というひとつの業務操作** で、`customerLinkingService.link()` に丸ごと寄せるべき。ループ・read・write の順序やエラー時の atomicity（現状は writeBatch なので一括 commit）も service が責任を持つ。
 
