@@ -95,6 +95,7 @@ type BulkLocationOption = {
   location: string;
   customer: CustomerSnapshot | null;
 };
+type BulkLocationMode = "lend" | "inhouse" | null;
 
 const LIMIT_MS = 72 * 60 * 60 * 1000;
 const ACTION_OPTIONS = Object.values(ACTION) as TankAction[];
@@ -478,6 +479,8 @@ export default function StaffDashboard() {
   const voidDisabledReason = getVoidDisabledReason(voidReason, savingVoid);
   const bulkLocationUnavailableReason = getBulkLocationUnavailableReason(
     selectedLogIds.length,
+    bulkLocationMode,
+    customerOptions.length,
     bulkLocationOptions.length
   );
 
@@ -793,7 +796,7 @@ export default function StaffDashboard() {
                               type="button"
                               onClick={() => toggleLogSelection(log.id)}
                               disabled={!canModify}
-                              title={canModify ? "選択" : "期限外または対象外"}
+                              title={canModify ? "選択" : modifyDisabledReason ?? "期限外または対象外"}
                               className="dashboard-log-checkbox"
                               style={{
                                 border: "none",
@@ -1364,9 +1367,17 @@ function getVoidDisabledReason(voidReason: string, savingVoid: boolean): string 
 
 function getBulkLocationUnavailableReason(
   selectedLogCount: number,
+  bulkLocationMode: BulkLocationMode,
+  customerOptionCount: number,
   bulkLocationOptionCount: number
 ): string | null {
   if (selectedLogCount === 0 || bulkLocationOptionCount > 0) return null;
+  if (bulkLocationMode === "lend" && customerOptionCount === 0) {
+    return "有効な貸出先候補がありません。顧客マスタに有効な貸出先があるか確認してください。";
+  }
+  if (bulkLocationMode === "inhouse") {
+    return "自社利用の変更先を確認できません。選択を解除して再度選び直してください。";
+  }
   return "貸出先変更は貸出ログだけ、または自社利用ログだけを選択した場合に使えます。返却・充填・混在選択では使えません。";
 }
 
