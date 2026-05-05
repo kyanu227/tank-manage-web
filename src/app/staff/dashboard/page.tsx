@@ -474,6 +474,13 @@ export default function StaffDashboard() {
     }
   };
 
+  const editDisabledReason = getEditDisabledReason(editForm, editingLog, savingEdit);
+  const voidDisabledReason = getVoidDisabledReason(voidReason, savingVoid);
+  const bulkLocationUnavailableReason = getBulkLocationUnavailableReason(
+    selectedLogIds.length,
+    bulkLocationOptions.length
+  );
+
   return (
     <div style={{ minHeight: "100%", background: "#f8fafc", padding: "14px 14px 32px" }}>
       <div style={{ maxWidth: 1120, margin: "0 auto" }}>
@@ -757,9 +764,9 @@ export default function StaffDashboard() {
                   >
                     一括取消
                   </button>
-                  {selectedLogIds.length > 0 && bulkLocationOptions.length === 0 && (
+                  {bulkLocationUnavailableReason && (
                     <span style={{ fontSize: 11, color: "#94a3b8" }}>
-                      貸出先変更は貸出ログまたは自社利用ログだけ選択してください
+                      {bulkLocationUnavailableReason}
                     </span>
                   )}
                 </div>
@@ -772,7 +779,8 @@ export default function StaffDashboard() {
                   {sortedLogs.map((log) => {
                     const rootId = log.rootLogId ?? log.id;
                     const isExpanded = expandedRootId === rootId;
-                    const canModify = canModifyLog(log, correctionRole);
+                    const modifyDisabledReason = canModifyLogReason(log, correctionRole);
+                    const canModify = modifyDisabledReason == null;
                     const isTankLog = log.logKind === "tank";
                     const history = historyByRoot[rootId] ?? [];
                     const historyLoading = historyLoadingRoot === rootId;
@@ -859,11 +867,18 @@ export default function StaffDashboard() {
                           </span>
                           {isTankLog && isEditMode ? (
                             <div className="dashboard-log-actions" style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              <IconTextButton label="ID変更" icon={<Edit2 size={13} />} disabled={!canModify} onClick={() => openEdit(log)} />
+                              <IconTextButton
+                                label="ID変更"
+                                icon={<Edit2 size={13} />}
+                                disabled={!canModify}
+                                disabledReason={modifyDisabledReason ?? undefined}
+                                onClick={() => openEdit(log)}
+                              />
                               <IconTextButton
                                 label="取消"
                                 icon={<Undo2 size={13} />}
                                 disabled={!canModify}
+                                disabledReason={modifyDisabledReason ?? undefined}
                                 onClick={() => {
                                   setVoidingLog(log);
                                   setVoidReason("");
@@ -874,6 +889,11 @@ export default function StaffDashboard() {
                                 icon={isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                                 onClick={() => toggleHistory(log)}
                               />
+                              {modifyDisabledReason && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", alignSelf: "center" }}>
+                                  {modifyDisabledReason}
+                                </span>
+                              )}
                             </div>
                           ) : !isTankLog ? (
                             <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", padding: "2px 6px", borderRadius: 4, background: "#fff", border: "1px solid #e2e8f0" }}>
@@ -976,12 +996,13 @@ export default function StaffDashboard() {
             <button
               type="button"
               onClick={handleSaveEdit}
-              disabled={savingEdit || !editForm.tankId || editForm.tankId === editingLog.tankId || editForm.reason.trim().length < 5}
-              style={primaryButtonStyle(savingEdit || !editForm.tankId || editForm.tankId === editingLog.tankId || editForm.reason.trim().length < 5)}
+              disabled={Boolean(editDisabledReason)}
+              style={primaryButtonStyle(Boolean(editDisabledReason))}
             >
               {savingEdit ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={18} />}
               {savingEdit ? "保存中..." : "ID変更"}
             </button>
+            <DisabledReasonText reason={editDisabledReason} />
           </div>
         </Modal>
       )}
@@ -1011,12 +1032,13 @@ export default function StaffDashboard() {
             <button
               type="button"
               onClick={handleVoid}
-              disabled={savingVoid || voidReason.trim().length < 5}
-              style={dangerButtonStyle(savingVoid || voidReason.trim().length < 5)}
+              disabled={Boolean(voidDisabledReason)}
+              style={dangerButtonStyle(Boolean(voidDisabledReason))}
             >
               {savingVoid ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <Undo2 size={18} />}
               {savingVoid ? "取消中..." : "取消"}
             </button>
+            <DisabledReasonText reason={voidDisabledReason} />
           </div>
         </Modal>
       )}
@@ -1199,11 +1221,13 @@ function IconTextButton({
   label,
   icon,
   disabled,
+  disabledReason,
   onClick,
 }: {
   label: string;
   icon: React.ReactNode;
   disabled?: boolean;
+  disabledReason?: string;
   onClick: () => void;
 }) {
   return (
@@ -1211,7 +1235,7 @@ function IconTextButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      title={disabled ? "期限外または対象外" : label}
+      title={disabled ? disabledReason ?? "期限外または対象外" : label}
       style={{
         border: "1px solid #e2e8f0",
         background: disabled ? "#f8fafc" : "#fff",
@@ -1283,6 +1307,15 @@ function FieldLabel({ label }: { label: string }) {
   return <div style={{ fontSize: 12, fontWeight: 800, color: "#64748b", marginBottom: -6 }}>{label}</div>;
 }
 
+function DisabledReasonText({ reason }: { reason: string | null }) {
+  if (!reason) return null;
+  return (
+    <p style={{ margin: "-4px 2px 0", fontSize: 12, lineHeight: 1.5, color: "#64748b", fontWeight: 700 }}>
+      {reason}
+    </p>
+  );
+}
+
 function normalizeCorrectionRole(role?: string): StaffCorrectionRole {
   if (role === "admin" || role === "管理者") return "管理者";
   if (role === "準管理者") return "準管理者";
@@ -1295,10 +1328,46 @@ function toTankAction(value: unknown): TankAction | null {
 }
 
 function canModifyLog(log: LogEntry, role: StaffCorrectionRole): boolean {
-  if (log.logKind !== "tank") return false;
-  if (role === "管理者" || role === "準管理者") return true;
+  return canModifyLogReason(log, role) == null;
+}
+
+function canModifyLogReason(log: LogEntry, role: StaffCorrectionRole): string | null {
+  if (log.logKind !== "tank") return "タンク操作ログではありません";
+  if (log.logStatus && log.logStatus !== "active") return "有効なログではありません";
+  if (role === "管理者" || role === "準管理者") return null;
   const ms = timestampToMillis(log.revisionCreatedAt);
-  return ms != null && Date.now() - ms <= LIMIT_MS;
+  if (ms == null) return "作成日時が取得できず期限判定できません";
+  if (Date.now() - ms > LIMIT_MS) return "一般スタッフの編集可能期限を超過しています";
+  return null;
+}
+
+function getEditDisabledReason(
+  editForm: EditForm | null,
+  editingLog: LogEntry | null,
+  savingEdit: boolean
+): string | null {
+  if (savingEdit) return "保存中です";
+  if (!editingLog || !editForm) return "編集対象を確認できません";
+  if (!editForm.tankId) return "タンクIDを選択してください";
+  if (editForm.tankId === editingLog.tankId) {
+    return "変更前と同じタンクIDです。別のタンクIDを選択してください";
+  }
+  if (editForm.reason.trim().length < 5) return "理由を5文字以上入力してください";
+  return null;
+}
+
+function getVoidDisabledReason(voidReason: string, savingVoid: boolean): string | null {
+  if (savingVoid) return "保存中です";
+  if (voidReason.trim().length < 5) return "取消理由を5文字以上入力してください";
+  return null;
+}
+
+function getBulkLocationUnavailableReason(
+  selectedLogCount: number,
+  bulkLocationOptionCount: number
+): string | null {
+  if (selectedLogCount === 0 || bulkLocationOptionCount > 0) return null;
+  return "貸出先変更は貸出ログだけ、または自社利用ログだけを選択した場合に使えます。返却・充填・混在選択では使えません。";
 }
 
 function timestampToMillis(value: unknown): number | null {
