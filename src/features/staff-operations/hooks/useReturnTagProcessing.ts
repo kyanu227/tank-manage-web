@@ -1,19 +1,10 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { doc, serverTimestamp } from "firebase/firestore";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
-import { db } from "@/lib/firebase/config";
-import { tanksRepository, transactionsRepository } from "@/lib/firebase/repositories";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
-import {
-  ACTION,
-  RETURN_TAG,
-  resolveReturnAction,
-  type ReturnTag,
-  type TankAction,
-} from "@/lib/tank-rules";
-import type { Condition, PendingReturn, ReturnGroup, ReturnTagSelectionMap } from "../types";
+import { processReturnTags as processReturnTagsTransaction } from "@/lib/firebase/return-tag-processing-service";
+import { transactionsRepository } from "@/lib/firebase/repositories";
+import type { PendingReturn, ReturnGroup, ReturnTagSelectionMap } from "../types";
 
 interface UseReturnTagProcessingParams {
   fetchBulkTanks: () => Promise<void>;
@@ -73,74 +64,21 @@ export function useReturnTagProcessing({
 
   const processReturnTags = useCallback(async () => {
     if (!selectedReturnGroup) return;
-    const selectedItems = selectedReturnGroup.items.filter((i) => returnTagSelections[i.id]?.selected);
-    if (selectedItems.length === 0) {
+    const selectedCount = selectedReturnGroup.items.filter((i) => returnTagSelections[i.id]?.selected).length;
+    if (selectedCount === 0) {
       alert("処理するタンクを選択してください");
       return;
     }
     setReturnTagProcessingSubmitting(true);
     try {
       const actor = requireStaffIdentity();
-      const context = {
+      const { processedCount } = await processReturnTagsTransaction({
+        group: selectedReturnGroup,
+        selections: returnTagSelections,
         actor,
-        customer: {
-          customerId: selectedReturnGroup.customerId,
-          customerName: selectedReturnGroup.customerName,
-        },
-      };
+      });
 
-      // 処理直前に tanks/{tankId} を再取得し、現在の status を使う。
-      // 処理待ちの間にタンク状態が変わっている可能性があるため、STATUS.LENT 固定だと
-      // validateTransition や logAction の決定が古い前提で行われてしまう。
-      // 存在しないタンクIDはここで弾く（幽霊タンク生成を防ぐ最終防衛ライン）。
-      const selectedData = await Promise.all(selectedItems.map(async (item) => {
-        const appData = returnTagSelections[item.id];
-        const condition = appData?.condition ?? item.condition;
-        const tag: ReturnTag =
-          condition === "unused" ? RETURN_TAG.UNUSED
-            : condition === "uncharged" ? RETURN_TAG.UNCHARGED
-              : RETURN_TAG.NORMAL;
-        const note = `[返却タグ処理] 顧客: ${selectedReturnGroup.customerName} (タグ:${condition})`;
-        const tank = await tanksRepository.getTank(item.tankId);
-        if (!tank) {
-          throw new Error(`[${item.tankId}] タンクが存在しません`);
-        }
-        const currentStatus = tank.status ?? "";
-        const transitionAction: TankAction = condition === "keep"
-          ? ACTION.CARRY_OVER
-          : resolveReturnAction(tag, currentStatus);
-        const location = condition === "keep"
-          ? tank.location || selectedReturnGroup.customerName
-          : "倉庫";
-        return { item, condition: condition as Condition, note, currentStatus, transitionAction, location };
-      }));
-
-      await applyBulkTankOperations(
-        selectedData.map(({ item, note, currentStatus, transitionAction, location }) => ({
-          tankId: item.tankId,
-          transitionAction,
-          currentStatus,
-          context,
-          location,
-          tankNote: note,
-          logNote: note,
-        })),
-        (batch) => {
-          selectedData.forEach(({ item, condition }) => {
-            batch.update(doc(db, "transactions", item.id), {
-              status: "completed",
-              finalCondition: condition,
-              fulfilledAt: serverTimestamp(),
-              fulfilledBy: actor.staffName,
-              fulfilledByStaffId: actor.staffId,
-              fulfilledByStaffName: actor.staffName,
-              ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
-            });
-          });
-        }
-      );
-
-      alert(`${selectedItems.length}件の返却タグを処理しました`);
+      alert(`${processedCount}件の返却タグを処理しました`);
       setSelectedReturnGroup(null);
       fetchPendingReturnTags();
       fetchBulkTanks();
