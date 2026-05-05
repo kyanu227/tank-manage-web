@@ -2,9 +2,10 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
-import { doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { doc, serverTimestamp } from "firebase/firestore";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { db } from "@/lib/firebase/config";
+import { approveOrder as approveOrderTransaction } from "@/lib/firebase/order-fulfillment-service";
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import {
   findMatchingItem,
@@ -103,15 +104,7 @@ export function useOrderFulfillment({
     setApprovingOrderId(order.id);
     try {
       const actor = requireStaffIdentity();
-      await updateDoc(doc(db, "transactions", order.id), {
-        status: "approved",
-        approvedAt: serverTimestamp(),
-        approvedBy: actor.staffName,
-        approvedByStaffId: actor.staffId,
-        approvedByStaffName: actor.staffName,
-        ...(actor.staffEmail ? { approvedByStaffEmail: actor.staffEmail } : {}),
-        updatedAt: serverTimestamp(),
-      });
+      await approveOrderTransaction(order.id, actor);
       await fetchOrders();
     } catch (err: any) {
       alert("承認エラー: " + err.message);
