@@ -84,18 +84,19 @@ service cloud.firestore {
 
     function requestCustomerIdentityMatchesOwner() {
       return ownCustomerUser()
-        && (
-          (
-            hasLinkedCustomer()
-            && request.resource.data.get("customerId", "") == linkedCustomerId()
-            && request.resource.data.get("customerName", "") == linkedCustomerName()
-          )
-          || (
-            !hasLinkedCustomer()
-            && request.resource.data.get("customerId", "") == request.auth.uid
-            && request.resource.data.get("customerName", "") == selfCompanyName()
-          )
-        );
+        && hasLinkedCustomer()
+        && request.resource.data.get("customerId", "") == linkedCustomerId()
+        && request.resource.data.get("customerName", "") == linkedCustomerName();
+    }
+
+    function requestUnlinkedOrderIdentityMatchesOwner() {
+      return ownCustomerUser()
+        && !hasLinkedCustomer()
+        && request.resource.data.get("customerId", "missing") == null
+        && request.resource.data.get("customerName", "") == ""
+        && request.resource.data.get("requestedCompanyName", "") is string
+        && request.resource.data.get("requestedByName", "") is string
+        && request.resource.data.get("requestedLineName", "") is string;
     }
 
     function isOwnCustomerUserCreate(uid) {
@@ -204,10 +205,18 @@ service cloud.firestore {
     function isPortalOrderCreate() {
       return isActiveCustomerUser()
         && request.resource.data.type == "order"
-        && request.resource.data.status == "pending"
         && request.resource.data.source == "customer_portal"
         && request.resource.data.createdByUid == request.auth.uid
-        && requestCustomerIdentityMatchesOwner()
+        && (
+          (
+            request.resource.data.status == "pending"
+            && requestCustomerIdentityMatchesOwner()
+          )
+          || (
+            request.resource.data.status == "pending_link"
+            && requestUnlinkedOrderIdentityMatchesOwner()
+          )
+        )
         && request.resource.data.keys().hasOnly([
           "type",
           "status",
@@ -215,6 +224,9 @@ service cloud.firestore {
           "customerId",
           "customerName",
           "createdByUid",
+          "requestedCompanyName",
+          "requestedByName",
+          "requestedLineName",
           "deliveryType",
           "deliveryTargetName",
           "note",
@@ -231,7 +243,11 @@ service cloud.firestore {
           "customerId",
           "customerName",
           "createdByUid",
+          "requestedCompanyName",
+          "requestedByName",
+          "requestedLineName",
           "createdAt",
+          "updatedAt",
           "source"
         ])
         && request.resource.data.items is list;
@@ -240,10 +256,11 @@ service cloud.firestore {
     function isPortalReturnCreate() {
       return isActiveCustomerUser()
         && request.resource.data.type == "return"
-        && request.resource.data.status == "pending_approval"
+        && request.resource.data.status == "pending_return"
         && request.resource.data.source in ["customer_portal", "auto_schedule"]
         && request.resource.data.createdByUid == request.auth.uid
         && requestCustomerIdentityMatchesOwner()
+        && request.resource.data.condition in ["normal", "unused", "uncharged", "keep"]
         && request.resource.data.keys().hasOnly([
           "type",
           "status",
@@ -253,6 +270,7 @@ service cloud.firestore {
           "customerName",
           "createdByUid",
           "createdAt",
+          "updatedAt",
           "source"
         ])
         && request.resource.data.keys().hasAll([
@@ -264,6 +282,7 @@ service cloud.firestore {
           "customerName",
           "createdByUid",
           "createdAt",
+          "updatedAt",
           "source"
         ]);
     }
@@ -283,6 +302,7 @@ service cloud.firestore {
           "customerName",
           "createdByUid",
           "createdAt",
+          "updatedAt",
           "source"
         ])
         && request.resource.data.keys().hasAll([
@@ -293,6 +313,7 @@ service cloud.firestore {
           "customerName",
           "createdByUid",
           "createdAt",
+          "updatedAt",
           "source"
         ]);
     }
