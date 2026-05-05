@@ -2,17 +2,17 @@
 
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
-import { doc, serverTimestamp } from "firebase/firestore";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
-import { db } from "@/lib/firebase/config";
-import { approveOrder as approveOrderTransaction } from "@/lib/firebase/order-fulfillment-service";
+import {
+  approveOrder as approveOrderTransaction,
+  fulfillOrder as fulfillOrderTransaction,
+} from "@/lib/firebase/order-fulfillment-service";
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import {
   findMatchingItem,
   totalOrderQuantity,
   type PendingOrder,
 } from "@/lib/order-types";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { ACTION, validateTransition } from "@/lib/tank-rules";
 import type { ScannedTank, TankMap } from "../types";
 
@@ -226,38 +226,12 @@ export function useOrderFulfillment({
     setOrderSubmitting(true);
     try {
       const actor = requireStaffIdentity();
-      const orderNote = `受注ID: ${selectedOrder.id}`;
-      const context = {
+      await fulfillOrderTransaction({
+        order: selectedOrder,
+        validTanks,
+        allTanks,
         actor,
-        customer: {
-          customerId: selectedOrder.customerId,
-          customerName: selectedOrder.customerName,
-        },
-      };
-
-      await applyBulkTankOperations(
-        validTanks.map((tank) => ({
-          tankId: tank.id,
-          transitionAction: ACTION.LEND,
-          logAction: "受注貸出",
-          currentStatus: allTanks[tank.id]?.status ?? "",
-          context,
-          location: selectedOrder.customerName,
-          tankNote: orderNote,
-          logNote: orderNote,
-        })),
-        (batch) => {
-          batch.update(doc(db, "transactions", selectedOrder.id), {
-            status: "completed",
-            fulfilledAt: serverTimestamp(),
-            fulfilledBy: actor.staffName,
-            fulfilledByStaffId: actor.staffId,
-            fulfilledByStaffName: actor.staffName,
-            ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
-            updatedAt: serverTimestamp(),
-          });
-        }
-      );
+      });
 
       alert("受注したタンクを貸し出しました");
       closeFulfillment();
