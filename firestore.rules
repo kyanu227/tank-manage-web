@@ -24,6 +24,22 @@ service cloud.firestore {
       return get(/databases/$(database)/documents/staffByEmail/$(request.auth.token.email)).data.role;
     }
 
+    // staffByUid is a mirror for future Rules/AuthGuard lookup, not the staff source of truth.
+    // Existing staffByEmail checks remain for compatibility until every active staff has staffByUid.
+    function hasStaffByUid() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/staffByUid/$(request.auth.uid));
+    }
+
+    function isStaffByUid() {
+      return hasStaffByUid()
+        && get(/databases/$(database)/documents/staffByUid/$(request.auth.uid)).data.isActive == true;
+    }
+
+    function staffRoleByUid() {
+      return get(/databases/$(database)/documents/staffByUid/$(request.auth.uid)).data.role;
+    }
+
     function isAdmin() {
       return isStaff() && staffRole() == "管理者";
     }
@@ -34,6 +50,10 @@ service cloud.firestore {
 
     function isAdminStaff() {
       return isAdmin() || isSubAdmin();
+    }
+
+    function isValidStaffJoinRequestStatus(status) {
+      return status in ["pending", "approved", "rejected"];
     }
 
     function isValidCustomerUserStatus(status) {
@@ -473,6 +493,127 @@ service cloud.firestore {
         || isStaffPendingLinkOrderUpdate();
     }
 
+    function isOwnStaffJoinRequestCreate(uid) {
+      return hasEmail()
+        && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly([
+          "uid",
+          "authEmail",
+          "authEmailLower",
+          "authDisplayName",
+          "requestedName",
+          "message",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.keys().hasAll([
+          "uid",
+          "authEmail",
+          "authEmailLower",
+          "authDisplayName",
+          "requestedName",
+          "message",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.authEmail == request.auth.token.email
+        && request.resource.data.authEmail is string
+        && request.resource.data.authEmailLower is string
+        && request.resource.data.authDisplayName is string
+        && request.resource.data.requestedName is string
+        && request.resource.data.requestedName.size() > 0
+        && request.resource.data.message is string
+        && request.resource.data.status == "pending";
+    }
+
+    function isOwnStaffJoinRequestUpdate(uid) {
+      return hasEmail()
+        && request.auth.uid == uid
+        && resource.data.status == "pending"
+        && request.resource.data.status == "pending"
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.uid == request.auth.uid
+        && request.resource.data.authEmail == request.auth.token.email
+        && request.resource.data.keys().hasOnly([
+          "uid",
+          "authEmail",
+          "authEmailLower",
+          "authDisplayName",
+          "requestedName",
+          "message",
+          "status",
+          "createdAt",
+          "updatedAt"
+        ])
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "authEmail",
+          "authEmailLower",
+          "authDisplayName",
+          "requestedName",
+          "message",
+          "status",
+          "updatedAt"
+        ])
+        && request.resource.data.authEmail is string
+        && request.resource.data.authEmailLower is string
+        && request.resource.data.authDisplayName is string
+        && request.resource.data.requestedName is string
+        && request.resource.data.requestedName.size() > 0
+        && request.resource.data.message is string;
+    }
+
+    function isAdminStaffJoinRequestReviewUpdate() {
+      // staff/authUid, staffByUid, and request status are kept consistent by service transactions.
+      return isAdmin()
+        && resource.data.status == "pending"
+        && request.resource.data.status in ["approved", "rejected"]
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "reviewedAt",
+          "reviewedByStaffId",
+          "reviewedByStaffName",
+          "linkedStaffId",
+          "rejectionReason",
+          "updatedAt"
+        ])
+        && request.resource.data.reviewedByStaffId is string
+        && request.resource.data.reviewedByStaffId.size() > 0
+        && request.resource.data.reviewedByStaffName is string
+        && request.resource.data.reviewedByStaffName.size() > 0
+        && (
+          (
+            request.resource.data.status == "approved"
+            && request.resource.data.keys().hasAll([
+              "status",
+              "reviewedAt",
+              "reviewedByStaffId",
+              "reviewedByStaffName",
+              "linkedStaffId",
+              "updatedAt"
+            ])
+            && request.resource.data.linkedStaffId is string
+            && request.resource.data.linkedStaffId.size() > 0
+            && !request.resource.data.keys().hasAny(["rejectionReason"])
+          )
+          || (
+            request.resource.data.status == "rejected"
+            && request.resource.data.keys().hasAll([
+              "status",
+              "reviewedAt",
+              "reviewedByStaffId",
+              "reviewedByStaffName",
+              "rejectionReason",
+              "updatedAt"
+            ])
+            && request.resource.data.rejectionReason is string
+            && !request.resource.data.keys().hasAny(["linkedStaffId"])
+          )
+        );
+    }
+
     function canReadLinkedCustomerResource() {
       return hasLinkedCustomer()
         && (
@@ -484,6 +625,12 @@ service cloud.firestore {
     match /staffByEmail/{email} {
       allow get: if hasEmail() && request.auth.token.email == email;
       allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    match /staffByUid/{uid} {
+      allow get: if (signedIn() && request.auth.uid == uid) || isAdminStaff();
+      allow list: if isAdminStaff();
       allow create, update, delete: if isAdmin();
     }
 
@@ -501,6 +648,14 @@ service cloud.firestore {
       allow create: if isOwnCustomerUserCreate(uid);
       allow update: if isAdminCustomerUserUpdate() || isOwnCustomerUserUpdate(uid);
       allow delete: if isAdmin();
+    }
+
+    match /staffJoinRequests/{uid} {
+      allow get: if (signedIn() && request.auth.uid == uid) || isAdminStaff();
+      allow list: if isAdminStaff();
+      allow create: if isOwnStaffJoinRequestCreate(uid);
+      allow update: if isOwnStaffJoinRequestUpdate(uid) || isAdminStaffJoinRequestReviewUpdate();
+      allow delete: if false;
     }
 
     match /customers/{customerId} {
