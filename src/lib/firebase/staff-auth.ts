@@ -7,6 +7,7 @@ import {
   serverTimestamp,
   where,
   type DocumentData,
+  type Transaction,
   type WriteBatch,
 } from "firebase/firestore";
 import { db } from "./config";
@@ -61,6 +62,25 @@ export function deleteStaffAuthMirrorInBatch(batch: WriteBatch, email: string) {
   const key = staffEmailKey(email);
   if (!key) return;
   batch.delete(doc(db, STAFF_BY_EMAIL_COLLECTION, key));
+}
+
+export function setStaffUidAuthMirrorInTransaction(
+  transaction: Transaction,
+  uid: string,
+  staffId: string,
+  data: DocumentData
+) {
+  const uidKey = uid.trim();
+  if (!uidKey) return;
+
+  const profile = buildStaffAuthProfile(staffId, data);
+  if (!profile.staffId) return;
+
+  transaction.set(doc(db, STAFF_BY_UID_COLLECTION, uidKey), {
+    uid: uidKey,
+    ...profile,
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
 }
 
 /**
