@@ -90,11 +90,12 @@ export default function PrefixNumberPicker({
       onChange(null);
       return;
     }
+    if (prefixes.length === 0) return;
     const [, prefix, number] = m;
     if (!byPrefix[prefix]?.includes(number)) {
       onChange(null);
     }
-  }, [byPrefix, onChange, value]);
+  }, [byPrefix, onChange, prefixes.length, value]);
 
   const activePrefix = selectedPrefix ?? pendingPrefix;
   const numbers = activePrefix ? byPrefix[activePrefix] ?? [] : [];
@@ -155,7 +156,7 @@ export default function PrefixNumberPicker({
       ) : (
         <>
           <label style={labelStyle}>
-            <span style={captionStyle}>Prefix</span>
+            <span style={captionStyle}>プレフィックス</span>
             <select
               value={activePrefix ?? ""}
               onChange={(e) => handlePrefixChange(e.target.value)}
@@ -174,7 +175,7 @@ export default function PrefixNumberPicker({
           </label>
 
           <label style={labelStyle}>
-            <span style={captionStyle}>Number</span>
+            <span style={captionStyle}>番号</span>
             <select
               value={selectedPrefix === activePrefix ? selectedNumber ?? "" : ""}
               onChange={(e) => handleNumberChange(e.target.value)}
