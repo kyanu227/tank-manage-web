@@ -12,6 +12,7 @@ import {
 import { db } from "./config";
 
 export const STAFF_BY_EMAIL_COLLECTION = "staffByEmail";
+export const STAFF_BY_UID_COLLECTION = "staffByUid";
 
 export interface StaffAuthProfile {
   staffId: string;
@@ -20,6 +21,10 @@ export interface StaffAuthProfile {
   role: string;
   rank: string;
   isActive: boolean;
+}
+
+export interface StaffByUidMirror extends StaffAuthProfile {
+  uid?: string;
 }
 
 export function staffEmailKey(email: string): string {
@@ -73,6 +78,24 @@ export async function getStaffProfileByIdReadOnly(staffId: string): Promise<Staf
 }
 
 /**
+ * staffByUid/{uid} を直接読む表示用途の read-only helper。
+ * mirror 同期などの Firestore write は行わない。
+ */
+export async function getStaffProfileByUidReadOnly(uid: string): Promise<StaffAuthProfile | null> {
+  const id = uid.trim();
+  if (!id) return null;
+
+  const mirrorSnap = await getDoc(doc(db, STAFF_BY_UID_COLLECTION, id));
+  if (!mirrorSnap.exists()) return null;
+
+  const profile = buildStaffAuthProfile(
+    String(mirrorSnap.data().staffId || ""),
+    mirrorSnap.data()
+  );
+  return profile.staffId ? profile : null;
+}
+
+/**
  * email から staff profile を読む表示用途の read-only helper。
  * staffByEmail mirror を優先し、見つからなければ staff を query する。
  * fallback 経路でも mirror は更新しない。
@@ -104,6 +127,11 @@ export async function findStaffProfileByEmailReadOnly(email: string): Promise<St
   }
 
   return null;
+}
+
+export async function findActiveStaffByUid(uid: string): Promise<StaffAuthProfile | null> {
+  const profile = await getStaffProfileByUidReadOnly(uid);
+  return profile?.isActive ? profile : null;
 }
 
 export async function findActiveStaffByEmail(email: string): Promise<StaffAuthProfile | null> {
