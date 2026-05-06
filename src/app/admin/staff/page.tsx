@@ -10,9 +10,15 @@ import {
   saveStaffMembers,
   type StaffMember,
 } from "@/lib/firebase/staff-sync-service";
+import StaffJoinRequestsPanel from "@/components/admin/StaffJoinRequestsPanel";
+import {
+  listStaffJoinRequestsReadOnly,
+  type StaffJoinRequest,
+} from "@/lib/firebase/staff-join-requests";
 
 const ROLES = ["一般", "準管理者", "管理者"] as const;
 const RANKS = ["レギュラー", "ブロンズ", "シルバー", "ゴールド", "プラチナ"] as const;
+const staffJoinRequestsEnabled = process.env.NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS === "true";
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "8px 12px", fontSize: 13, fontWeight: 500,
@@ -48,6 +54,9 @@ export default function AdminStaffPage() {
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
   const [dirtyStaffIds, setDirtyStaffIds] = useState<string[]>([]);
   const [showPasscodes, setShowPasscodes] = useState<Set<string>>(new Set());
+  const [joinRequests, setJoinRequests] = useState<StaffJoinRequest[]>([]);
+  const [joinRequestsLoading, setJoinRequestsLoading] = useState(false);
+  const [joinRequestsError, setJoinRequestsError] = useState("");
 
   const fetchStaff = useCallback(async () => {
     setLoading(true);
@@ -62,7 +71,23 @@ export default function AdminStaffPage() {
     }
   }, []);
 
+  const fetchJoinRequests = useCallback(async () => {
+    if (!staffJoinRequestsEnabled) return;
+    setJoinRequestsLoading(true);
+    setJoinRequestsError("");
+    try {
+      const requests = await listStaffJoinRequestsReadOnly();
+      setJoinRequests(requests);
+    } catch (e) {
+      console.error("Fetch staff join requests error:", e);
+      setJoinRequestsError("スタッフ利用申請を読み込めませんでした。スタッフ一覧の編集は継続できます。");
+    } finally {
+      setJoinRequestsLoading(false);
+    }
+  }, []);
+
   useEffect(() => { fetchStaff(); }, [fetchStaff]);
+  useEffect(() => { fetchJoinRequests(); }, [fetchJoinRequests]);
 
   const addStaff = () => {
     const id = `new_${Date.now()}`;
@@ -117,6 +142,15 @@ export default function AdminStaffPage() {
 
   return (
     <div>
+      {staffJoinRequestsEnabled && (
+        <StaffJoinRequestsPanel
+          requests={joinRequests}
+          loading={joinRequestsLoading}
+          error={joinRequestsError}
+          onRefresh={fetchJoinRequests}
+        />
+      )}
+
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
         <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
           ※「停止」にするとログイン不可になります
