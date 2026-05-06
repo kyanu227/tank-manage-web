@@ -9,6 +9,7 @@ interface StaffJoinRequestPanelProps {
   firebaseUser: User;
   existingRequest?: StaffJoinRequest | null;
   loading?: boolean;
+  lookupFailed?: boolean;
   error?: string;
   onSubmit: (input: { requestedName: string; message: string }) => Promise<void>;
   onSignOut?: () => Promise<void> | void;
@@ -39,6 +40,7 @@ export default function StaffJoinRequestPanel({
   firebaseUser,
   existingRequest,
   loading = false,
+  lookupFailed = false,
   error = "",
   onSubmit,
   onSignOut,
@@ -177,6 +179,18 @@ export default function StaffJoinRequestPanel({
         <div style={{ color: "#94a3b8", display: "flex", flexDirection: "column", alignItems: "center", gap: 10, padding: "22px 0" }}>
           <div style={{ width: 26, height: 26, border: "3px solid #e2e8f0", borderTopColor: "#6366f1", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
           <p style={{ fontSize: 13, fontWeight: 700, margin: 0 }}>申請状況を確認中…</p>
+        </div>
+      ) : lookupFailed ? (
+        <div style={{ ...noticeStyle, background: "#fef2f2", border: "1px solid #fecaca" }}>
+          <AlertCircle size={20} color="#dc2626" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <p style={{ margin: 0, fontSize: 14, fontWeight: 800, color: "#991b1b" }}>
+              申請を送信できません
+            </p>
+            <p style={{ margin: "4px 0 0", fontSize: 13, lineHeight: 1.6, color: "#b91c1c" }}>
+              申請状況を確認できないため、申請を送信できません。時間をおいて再度お試しください。
+            </p>
+          </div>
         </div>
       ) : existingRequest ? (
         renderRequestStatus()

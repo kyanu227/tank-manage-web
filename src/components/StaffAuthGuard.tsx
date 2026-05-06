@@ -51,6 +51,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   const [joinRequest, setJoinRequest] = useState<StaffJoinRequest | null>(null);
   const [joinRequestLoading, setJoinRequestLoading] = useState(false);
   const [joinRequestError, setJoinRequestError] = useState("");
+  const [joinRequestLookupFailed, setJoinRequestLookupFailed] = useState(false);
 
   // Login form state
   const [loginMethod, setLoginMethod] = useState<"passcode" | "email">("email");
@@ -83,6 +84,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     setJoinRequest(null);
     setJoinRequestError("");
     setJoinRequestLoading(false);
+    setJoinRequestLookupFailed(false);
   }, []);
 
   const showJoinRequestPanel = useCallback(async (user: User) => {
@@ -92,14 +94,17 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     setJoinRequestMode(true);
     setJoinRequest(null);
     setJoinRequestError("");
+    setJoinRequestLookupFailed(false);
     setJoinRequestLoading(true);
 
     try {
       const request = await getStaffJoinRequestByUidReadOnly(user.uid);
       setJoinRequest(request);
+      setJoinRequestLookupFailed(false);
     } catch (e) {
       console.error("Staff join request lookup failed:", e);
       setJoinRequestError("申請状況を確認できませんでした。時間をおいて再度お試しください。");
+      setJoinRequestLookupFailed(true);
     } finally {
       setJoinRequestLoading(false);
     }
@@ -393,6 +398,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
             firebaseUser={firebaseUser}
             existingRequest={joinRequest}
             loading={joinRequestLoading}
+            lookupFailed={joinRequestLookupFailed}
             error={joinRequestError}
             onSubmit={handleJoinRequestSubmit}
             onSignOut={handleJoinRequestSignOut}
