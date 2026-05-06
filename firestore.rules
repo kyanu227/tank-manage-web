@@ -542,7 +542,7 @@ service cloud.firestore {
       allow get, list: if isStaff() || isOwnTransaction();
       allow create: if isStaff() || isOwnTransactionCreate();
       allow update: if isStaffTransactionUpdate();
-      allow delete: if isStaff();
+      allow delete: if isAdmin();
     }
 
     match /tankProcurements/{docId} {

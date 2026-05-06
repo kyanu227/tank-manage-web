@@ -110,7 +110,7 @@ export const AUTH_ROLE_OVERVIEW: AuthRoleOverview[] = [
     role: "staff",
     rulesTreatment: "Firebase Auth email + staffByEmail/{email}.isActive == true",
     accessSummary: "staff workflow の read/write を許可します。transactions update は helper 化済みです。",
-    caution: "tanks/logs write と transaction delete はまだ広めです。",
+    caution: "tanks/logs write はまだ広めです。transactions delete は adminOnly に寄せています。",
     status: "caution",
   },
   {
@@ -203,8 +203,8 @@ export const COLLECTION_ACCESS_MATRIX: CollectionAccess[] = [
     read: "staff または own customer transaction",
     create: "staff または portal create helper",
     update: "staff transaction workflow helpers",
-    delete: "staff",
-    note: "staff update は helper 化済み。delete はまだ isStaff() のままです。",
+    delete: "admin",
+    note: "staff update は helper 化済み。delete は adminOnly に hardening 済みで、完全 deny は将来方針です。",
     status: "caution",
   },
   {
@@ -346,9 +346,9 @@ export const SECURITY_RULES_CAUTIONS: RulesCaution[] = [
     status: "broad",
   },
   {
-    title: "transactions delete はまだ isStaff()",
-    detail: "delete policy は PR #37 では維持しています。admin 限定または deny へ寄せるかは別PRで判断します。",
-    status: "caution",
+    title: "transactions delete は adminOnly",
+    detail: "active staff による transaction 物理削除は閉じています。完全 deny にするかは運用方針として別途判断します。",
+    status: "pass",
   },
   {
     title: "staffByEmail casing は未解決",
@@ -384,9 +384,9 @@ export const NEXT_SECURITY_RULES_HARDENING: NextHardeningItem[] = [
     reason: "status / location / latestLogId など、workflow が触る field を段階的に制限するため。",
   },
   {
-    title: "transaction delete policy",
+    title: "transaction delete full-deny policy",
     target: "transactions",
-    reason: "現在は isStaff() のまま。admin 限定または deny 方針を決める必要があります。",
+    reason: "delete は adminOnly に寄せています。管理者にも物理削除を許可しない完全 deny 方針は別途検討します。",
   },
   {
     title: "staffByEmail casing policy",
