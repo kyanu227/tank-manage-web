@@ -5,7 +5,7 @@ import { useEffect, useMemo, useState } from "react";
 /**
  * タンクID選択（Prefix + Number の2段選択）
  *
- * ドラムロールに代わる入力手法。ログ編集・管理系のID選択で使う想定。
+ * 既存タンクID一覧から選ぶ入力手法。ログ編集・管理系のID選択で使う想定。
  *
  * 使い方:
  *   <PrefixNumberPicker
@@ -17,8 +17,8 @@ import { useEffect, useMemo, useState } from "react";
  *
  * 仕様:
  *   - tankId形式は `^([A-Z]+)-(\d{2})$` 固定。非該当は無視
- *   - 左カラム: 存在する prefix 一覧（縦並びボタン）
- *   - 右カラム: 選択中 prefix に紐づく number 一覧（グリッド、存在する番号のみ）
+ *   - prefix: 存在する prefix 一覧（select）
+ *   - number: 選択中 prefix に紐づく number 一覧（select、存在する番号のみ）
  *   - prefix 切替で number 選択はリセット
  *   - prefix が1つだけなら自動選択（number は自動確定しない）
  *   - onChange: prefix変更で null、number確定で tankId
@@ -30,6 +30,7 @@ export type PrefixNumberPickerProps = {
   onChange: (tankId: string | null) => void;
   onSelect?: (tankId: string) => void;
   accentColor?: string;
+  emptyMessage?: string;
 };
 
 const TANK_ID_RE = /^([A-Z]+)-(\d{2})$/;
@@ -40,6 +41,7 @@ export default function PrefixNumberPicker({
   onChange,
   onSelect,
   accentColor = "#3b82f6",
+  emptyMessage = "選択できるタンクがありません",
 }: PrefixNumberPickerProps) {
   const byPrefix = useMemo(() => {
     const map = new Map<string, Set<string>>();
@@ -76,146 +78,127 @@ export default function PrefixNumberPicker({
       setPendingPrefix(selectedPrefix);
     } else if (prefixes.length === 1) {
       setPendingPrefix(prefixes[0]);
+    } else if (pendingPrefix && !prefixes.includes(pendingPrefix)) {
+      setPendingPrefix(null);
     }
-  }, [selectedPrefix, prefixes]);
+  }, [selectedPrefix, prefixes, pendingPrefix]);
+
+  useEffect(() => {
+    if (!value) return;
+    const m = value.match(TANK_ID_RE);
+    if (!m) {
+      onChange(null);
+      return;
+    }
+    const [, prefix, number] = m;
+    if (!byPrefix[prefix]?.includes(number)) {
+      onChange(null);
+    }
+  }, [byPrefix, onChange, value]);
 
   const activePrefix = selectedPrefix ?? pendingPrefix;
   const numbers = activePrefix ? byPrefix[activePrefix] ?? [] : [];
 
-  const handlePrefixClick = (p: string) => {
-    if (activePrefix === p) return;
-    setPendingPrefix(p);
+  const handlePrefixChange = (p: string) => {
+    const nextPrefix = p || null;
+    if (activePrefix === nextPrefix) return;
+    setPendingPrefix(nextPrefix);
     if (value) onChange(null);
   };
 
-  const handleNumberClick = (n: string) => {
+  const handleNumberChange = (n: string) => {
+    if (!n) {
+      onChange(null);
+      return;
+    }
     if (!activePrefix) return;
     const id = `${activePrefix}-${n}`;
     onChange(id);
     onSelect?.(id);
   };
 
-  const btnBase: React.CSSProperties = {
-    padding: "12px 14px",
-    borderRadius: 10,
+  const selectStyle: React.CSSProperties = {
+    width: "100%",
+    borderRadius: 12,
     border: "2px solid #e5e7eb",
     background: "#fff",
-    color: "#111",
-    fontWeight: 700,
+    color: "#111827",
+    fontWeight: 800,
     fontSize: 16,
+    padding: "12px 14px",
+    outline: "none",
     cursor: "pointer",
-    transition: "background 0.15s, border-color 0.15s, color 0.15s",
-    lineHeight: 1,
+    minHeight: 48,
   };
 
-  const activeStyle = (on: boolean): React.CSSProperties =>
-    on
-      ? {
-          borderColor: accentColor,
-          background: accentColor,
-          color: "#fff",
-          boxShadow: `0 2px 8px ${accentColor}33`,
-        }
-      : {};
+  const labelStyle: React.CSSProperties = {
+    display: "flex",
+    flexDirection: "column",
+    gap: 6,
+    minWidth: 0,
+    flex: 1,
+  };
+
+  const captionStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 800,
+    letterSpacing: "0.04em",
+    color: "#94a3b8",
+  };
 
   return (
-    <div style={{ display: "flex", gap: 12, width: "100%", alignItems: "stretch" }}>
-      {/* 左: Prefix box */}
-      <div
-        style={{
-          display: "flex",
-          flexDirection: "column",
-          gap: 8,
-          minWidth: 88,
-          maxHeight: 360,
-          overflowY: "auto",
-          padding: 2,
-        }}
-      >
-        {prefixes.length === 0 ? (
-          <div style={{ color: "#999", fontSize: 13, padding: 8 }}>
-            タンクがありません
-          </div>
-        ) : (
-          prefixes.map((p) => {
-            const on = activePrefix === p;
-            return (
-              <button
-                key={p}
-                type="button"
-                onClick={() => handlePrefixClick(p)}
-                style={{ ...btnBase, ...activeStyle(on), minWidth: 80 }}
-              >
-                {p}
-              </button>
-            );
-          })
-        )}
-      </div>
+    <div style={{ display: "flex", gap: 12, width: "100%", alignItems: "flex-end" }}>
+      {prefixes.length === 0 ? (
+        <div style={{ color: "#9ca3af", fontSize: 14, padding: "12px 0" }}>
+          {emptyMessage}
+        </div>
+      ) : (
+        <>
+          <label style={labelStyle}>
+            <span style={captionStyle}>Prefix</span>
+            <select
+              value={activePrefix ?? ""}
+              onChange={(e) => handlePrefixChange(e.target.value)}
+              style={{
+                ...selectStyle,
+                borderColor: activePrefix ? accentColor : "#e5e7eb",
+              }}
+            >
+              <option value="">選択してください</option>
+              {prefixes.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+          </label>
 
-      {/* 右: Number box */}
-      <div
-        style={{
-          flex: 1,
-          minWidth: 0,
-          maxHeight: 360,
-          overflowY: "auto",
-          padding: 2,
-        }}
-      >
-        {!activePrefix ? (
-          <div
-            style={{
-              color: "#9ca3af",
-              padding: "32px 16px",
-              textAlign: "center",
-              fontSize: 14,
-            }}
-          >
-            左からPrefixを選択してください
-          </div>
-        ) : numbers.length === 0 ? (
-          <div
-            style={{
-              color: "#9ca3af",
-              padding: "32px 16px",
-              textAlign: "center",
-              fontSize: 14,
-            }}
-          >
-            該当する番号がありません
-          </div>
-        ) : (
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fill, minmax(64px, 1fr))",
-              gap: 8,
-            }}
-          >
-            {numbers.map((n) => {
-              const on =
-                selectedPrefix === activePrefix && selectedNumber === n;
-              return (
-                <button
-                  key={n}
-                  type="button"
-                  onClick={() => handleNumberClick(n)}
-                  style={{
-                    ...btnBase,
-                    ...activeStyle(on),
-                    padding: "14px 0",
-                    fontSize: 18,
-                    textAlign: "center",
-                  }}
-                >
+          <label style={labelStyle}>
+            <span style={captionStyle}>Number</span>
+            <select
+              value={selectedPrefix === activePrefix ? selectedNumber ?? "" : ""}
+              onChange={(e) => handleNumberChange(e.target.value)}
+              disabled={!activePrefix || numbers.length === 0}
+              style={{
+                ...selectStyle,
+                borderColor: selectedNumber ? accentColor : "#e5e7eb",
+                cursor: !activePrefix || numbers.length === 0 ? "not-allowed" : "pointer",
+                background: !activePrefix || numbers.length === 0 ? "#f8fafc" : "#fff",
+                color: !activePrefix || numbers.length === 0 ? "#94a3b8" : "#111827",
+              }}
+            >
+              <option value="">
+                {!activePrefix ? "Prefixを選択" : "番号を選択"}
+              </option>
+              {numbers.map((n) => (
+                <option key={n} value={n}>
                   {n}
-                </button>
-              );
-            })}
-          </div>
-        )}
-      </div>
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
+      )}
     </div>
   );
 }
