@@ -347,8 +347,11 @@ service cloud.firestore {
           "updatedAt"
         ])
         && request.resource.data.approvedBy is string
+        && request.resource.data.approvedBy.size() > 0
         && request.resource.data.approvedByStaffId is string
+        && request.resource.data.approvedByStaffId.size() > 0
         && request.resource.data.approvedByStaffName is string
+        && request.resource.data.approvedByStaffName.size() > 0
         && (
           !request.resource.data.keys().hasAny(["approvedByStaffEmail"])
           || request.resource.data.approvedByStaffEmail is string
@@ -378,8 +381,11 @@ service cloud.firestore {
           "updatedAt"
         ])
         && request.resource.data.fulfilledBy is string
+        && request.resource.data.fulfilledBy.size() > 0
         && request.resource.data.fulfilledByStaffId is string
+        && request.resource.data.fulfilledByStaffId.size() > 0
         && request.resource.data.fulfilledByStaffName is string
+        && request.resource.data.fulfilledByStaffName.size() > 0
         && (
           !request.resource.data.keys().hasAny(["fulfilledByStaffEmail"])
           || request.resource.data.fulfilledByStaffEmail is string
@@ -411,8 +417,11 @@ service cloud.firestore {
           "fulfilledByStaffName"
         ])
         && request.resource.data.fulfilledBy is string
+        && request.resource.data.fulfilledBy.size() > 0
         && request.resource.data.fulfilledByStaffId is string
+        && request.resource.data.fulfilledByStaffId.size() > 0
         && request.resource.data.fulfilledByStaffName is string
+        && request.resource.data.fulfilledByStaffName.size() > 0
         && (
           !request.resource.data.keys().hasAny(["fulfilledByStaffEmail"])
           || request.resource.data.fulfilledByStaffEmail is string
@@ -444,9 +453,13 @@ service cloud.firestore {
           "updatedAt"
         ])
         && request.resource.data.customerId is string
+        && request.resource.data.customerId.size() > 0
         && request.resource.data.customerName is string
+        && request.resource.data.customerName.size() > 0
         && request.resource.data.linkedByStaffId is string
+        && request.resource.data.linkedByStaffId.size() > 0
         && request.resource.data.linkedByStaffName is string
+        && request.resource.data.linkedByStaffName.size() > 0
         && (
           !request.resource.data.keys().hasAny(["linkedByStaffEmail"])
           || request.resource.data.linkedByStaffEmail is string
