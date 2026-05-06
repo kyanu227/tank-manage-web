@@ -122,6 +122,10 @@ export default function AdminStaffPage() {
       setJoinRequestActionError("管理者セッションを取得できません。再ログインしてください。");
       return;
     }
+    if (dirtyStaffIds.length > 0) {
+      setJoinRequestActionError("担当者リストに未保存の変更があります。先に保存してから承認してください。");
+      return;
+    }
     if (!confirm("選択した既存スタッフに UID を紐付けて承認しますか？")) return;
 
     setJoinRequestActionLoadingUid(uid);
@@ -140,7 +144,7 @@ export default function AdminStaffPage() {
     } finally {
       setJoinRequestActionLoadingUid(null);
     }
-  }, [fetchJoinRequests, fetchStaff, joinRequestReviewer]);
+  }, [dirtyStaffIds.length, fetchJoinRequests, fetchStaff, joinRequestReviewer]);
 
   const rejectJoinRequest = useCallback(async (uid: string, rejectionReason?: string) => {
     if (!staffJoinRequestsEnabled) return;

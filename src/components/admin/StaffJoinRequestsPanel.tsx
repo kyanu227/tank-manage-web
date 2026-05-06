@@ -165,7 +165,7 @@ export default function StaffJoinRequestsPanel({
     const selectedStaffId = selectedStaffIds[request.uid] ?? "";
     const selectedStaff = staffOptions.find((staff) => staff.id === selectedStaffId);
     const rowLoading = actionLoadingUid === request.uid;
-    const canApprove = !reviewerMissing && !rowLoading && Boolean(selectedStaffId) && !selectedStaff?.authUid;
+    const canApprove = !reviewerMissing && !rowLoading && selectedStaff !== undefined && !selectedStaff.authUid;
     const canReject = !reviewerMissing && !rowLoading;
     const rejectionReason = rejectionReasons[request.uid] ?? "";
 
