@@ -31,4 +31,5 @@ export const ADMIN_PAGES: readonly AdminPageDef[] = [
   { path: "/admin/staff", label: "担当者", group: "スタッフ・権限" },
   { path: "/admin/permissions", label: "ページ権限", group: "スタッフ・権限", adminOnly: true },
   { path: "/admin/state-diagram", label: "状態遷移図", group: "開発・確認", devOnly: true },
+  { path: "/admin/security-rules", label: "Security Rules", group: "開発・確認", adminOnly: true, devOnly: true },
 ];

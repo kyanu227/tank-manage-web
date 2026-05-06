@@ -80,6 +80,7 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     label: "開発・確認",
     items: [
       { href: "/admin/state-diagram", label: "状態遷移図", icon: Workflow },
+      { href: "/admin/security-rules", label: "Security Rules", icon: ShieldCheck, adminOnly: true },
     ],
   },
 ];
