@@ -156,7 +156,7 @@ export default function PrefixNumberPicker({
       ) : (
         <>
           <label style={labelStyle}>
-            <span style={captionStyle}>プレフィックス</span>
+            <span style={captionStyle}>アルファベット</span>
             <select
               value={activePrefix ?? ""}
               onChange={(e) => handlePrefixChange(e.target.value)}
@@ -165,7 +165,7 @@ export default function PrefixNumberPicker({
                 borderColor: activePrefix ? accentColor : "#e5e7eb",
               }}
             >
-              <option value="">選択してください</option>
+              <option value="">アルファベットを選択</option>
               {prefixes.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -189,7 +189,7 @@ export default function PrefixNumberPicker({
               }}
             >
               <option value="">
-                {!activePrefix ? "Prefixを選択" : "番号を選択"}
+                {!activePrefix ? "アルファベットを選択" : "番号を選択"}
               </option>
               {numbers.map((n) => (
                 <option key={n} value={n}>
