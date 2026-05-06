@@ -36,6 +36,30 @@ interface AdminAuthGuardProps {
   onPermissionsLoaded?: (allowedPaths: string[]) => void;
 }
 
+function matchesAdminPath(pathname: string, path: string) {
+  return pathname === path
+    || (path !== "/admin" && pathname.startsWith(path + "/"))
+    || (pathname === "/admin/settings" && path === "/admin/settings/portal");
+}
+
+function findAdminPage(pathname: string) {
+  return ADMIN_PAGES
+    .filter((page) => matchesAdminPath(pathname, page.path))
+    .sort((a, b) => b.path.length - a.path.length)[0] ?? null;
+}
+
+function canSubAdminUseRegisteredPage(pathname: string) {
+  const page = findAdminPage(pathname);
+  return !page?.adminOnly && !page?.devOnly;
+}
+
+function filterSubAdminAllowedPaths(paths: string[]) {
+  return paths.filter((path) => {
+    const page = ADMIN_PAGES.find((entry) => entry.path === path);
+    return !page?.adminOnly && !page?.devOnly;
+  });
+}
+
 export default function AdminAuthGuard({
   children,
   onStaffLoaded,
@@ -165,17 +189,13 @@ export default function AdminAuthGuard({
             const allowedPaths = Object.entries(pages)
               .filter(([, roles]) => roles.includes("準管理者"))
               .map(([path]) => path);
+            const visibleAllowedPaths = filterSubAdminAllowedPaths(allowedPaths);
 
-            onPermissionsLoaded?.(allowedPaths);
+            onPermissionsLoaded?.(visibleAllowedPaths);
 
             // Check if current pathname is allowed
-            const isAllowed = allowedPaths.some(
-              (p) => (
-                pathname === p
-                || (p !== "/admin" && pathname.startsWith(p + "/"))
-                || (pathname === "/admin/settings" && p === "/admin/settings/portal")
-              )
-            );
+            const isAllowed = canSubAdminUseRegisteredPage(pathname)
+              && visibleAllowedPaths.some((p) => matchesAdminPath(pathname, p));
             setHasAccess(isAllowed);
           } else {
             // No permissions doc → deny all by default
