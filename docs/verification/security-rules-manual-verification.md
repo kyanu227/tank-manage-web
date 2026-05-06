@@ -10,6 +10,9 @@
 - portal return create
 - portal uncharged report create
 - staff operation writes
+- staffJoinRequests owner create / update
+- staffJoinRequests admin review update
+- staffByUid own get / admin list / admin write
 
 ---
 
@@ -60,6 +63,11 @@ PR #31 で Security Rules readiness audit を作成し、PR #32 で未deploy の
 | `transactions/{id}` | portal return create | `type`, `status`, `tankId`, `condition`, `customerId`, `customerName`, `createdByUid`, `createdAt`, `updatedAt`, `source` |
 | `transactions/{id}` | portal uncharged report create | `type`, `status`, `tankId`, `customerId`, `customerName`, `createdByUid`, `createdAt`, `updatedAt`, `source` |
 | `transactions` / `tanks` / `logs` | staff operation writes | 詳細は `docs/verification/staff-operation-manual-verification.md` を参照 |
+| `staffJoinRequests/{uid}` | owner create | `uid`, `authEmail`, `authEmailLower`, `authDisplayName`, `requestedName`, `message`, `status`, `createdAt`, `updatedAt` |
+| `staffJoinRequests/{uid}` | owner update | `authEmail`, `authEmailLower`, `authDisplayName`, `requestedName`, `message`, `status`, `updatedAt` |
+| `staffJoinRequests/{uid}` | admin review update | `status`, `reviewedAt`, `reviewedByStaffId`, `reviewedByStaffName`, `linkedStaffId`, `rejectionReason`, `updatedAt` |
+| `staffByUid/{uid}` | own get / admin list / admin write | `uid`, `staffId`, `name`, `email`, `role`, `rank`, `isActive`, `updatedAt` |
+| `staff/{staffId}` | admin approval transaction | `authUid`, `authEmail`, `uidLinkedAt`, `updatedAt` |
 
 ---
 
@@ -375,6 +383,152 @@ payload:
 - `staffByEmail/{email}.isActive == true`。
 - passcode localStorage session だけでは staff write を許可しない。
 
+### 5.9 staffJoinRequests owner pending create
+
+前提:
+
+- Firebase Auth user として login 済み。
+- document id は `request.auth.uid`。
+- `request.auth.token.email` が存在する。
+- user はまだ staff 権限を得ていない。
+
+期待:
+
+- `staffJoinRequests/{uid}` create が許可される。
+- `status` は `pending` のみ。
+- `uid` / `authEmail` は `request.auth` と一致する。
+- `role`, `rank`, `isActive`, `linkedStaffId`, `reviewedBy*`, `rejectionReason` は本人 create で書けない。
+
+payload:
+
+```json
+{
+  "uid": "<auth uid>",
+  "authEmail": "<auth email>",
+  "authEmailLower": "<lowercase auth email>",
+  "authDisplayName": "<auth display name or empty>",
+  "requestedName": "申請 太郎",
+  "message": "スタッフ利用申請です",
+  "status": "pending",
+  "createdAt": "<server timestamp>",
+  "updatedAt": "<server timestamp>"
+}
+```
+
+確認:
+
+- `uid == request.auth.uid`。
+- `authEmail == request.auth.token.email`。
+- `requestedName` が non-empty string。
+- allowed keys 外の review / role field が含まれていない。
+
+### 5.10 staffJoinRequests owner get / pending update
+
+前提:
+
+- `staffJoinRequests/{uid}` が存在する。
+- document id は `request.auth.uid`。
+- 既存 request の `status` は `pending`。
+
+期待:
+
+- 申請者本人が自分の request を get できる。
+- pending 中の `requestedName`, `message`, auth snapshot, `updatedAt` 更新が許可される。
+- `approved` / `rejected` への変更は許可されない。
+- `linkedStaffId`, `reviewedByStaffId`, `reviewedByStaffName`, `rejectionReason` は本人 update で書けない。
+
+payload:
+
+```json
+{
+  "uid": "<auth uid>",
+  "authEmail": "<auth email>",
+  "authEmailLower": "<lowercase auth email>",
+  "authDisplayName": "<auth display name or empty>",
+  "requestedName": "申請 太郎",
+  "message": "補足メッセージを更新します",
+  "status": "pending",
+  "createdAt": "<existing createdAt>",
+  "updatedAt": "<server timestamp>"
+}
+```
+
+確認:
+
+- `resource.data.status == "pending"`。
+- `request.resource.data.status == "pending"`。
+- `request.resource.data.uid == resource.data.uid == request.auth.uid`。
+- `authEmail == request.auth.token.email`。
+
+### 5.11 staffJoinRequests admin review update
+
+前提:
+
+- `staffJoinRequests/{uid}` が存在する。
+- 既存 request の `status` は `pending`。
+- reviewer は `isAdmin()`。
+
+期待:
+
+- admin が `approved` へ review update できる。
+- admin が `rejected` へ review update できる。
+- sub-admin は list できるが review update は拒否される。
+- `staff.authUid` / `staffByUid` / request status の複数 document 整合性は service transaction で担保する。
+
+approved payload:
+
+```json
+{
+  "status": "approved",
+  "reviewedAt": "<server timestamp>",
+  "reviewedByStaffId": "<reviewer staff id>",
+  "reviewedByStaffName": "<reviewer staff name>",
+  "linkedStaffId": "<linked staff id>",
+  "updatedAt": "<server timestamp>"
+}
+```
+
+rejected payload:
+
+```json
+{
+  "status": "rejected",
+  "reviewedAt": "<server timestamp>",
+  "reviewedByStaffId": "<reviewer staff id>",
+  "reviewedByStaffName": "<reviewer staff name>",
+  "rejectionReason": "今回は承認しません",
+  "updatedAt": "<server timestamp>"
+}
+```
+
+確認:
+
+- review update は `isAdmin()` のみ。
+- approved では `linkedStaffId` が non-empty string。
+- rejected では `rejectionReason` が string。
+- approved と rejected の payload field が混ざらない。
+
+### 5.12 staffByUid own get / admin list / admin write
+
+前提:
+
+- `staffByUid/{uid}` は staff 正本ではなく AuthGuard / Rules 用 mirror。
+- 本番 deploy 前に active staff 分の mirror 作成状況を確認する。
+
+期待:
+
+- signed-in user は自分の `staffByUid/{uid}` を get できる。
+- adminStaff は `staffByUid` を list できる。
+- admin は `staffByUid/{uid}` を create / update / delete できる。
+- non-admin は staffByUid write できない。
+- 他人の `staffByUid/{uid}` get は拒否される。
+
+確認:
+
+- own get は `request.auth.uid == uid`。
+- list は `isAdminStaff()`。
+- create / update / delete は `isAdmin()`。
+
 ---
 
 ## 6. 拒否されるべき payload
@@ -402,6 +556,17 @@ payload:
 | passcode localStorage session だけで Firestore write しようとする | Rules は localStorage session を検証できない |
 | `staffByEmail` mirror がない Firebase Auth user が staff write しようとする | `isStaff()` が false |
 | inactive staff が staff write しようとする | `staffByEmail/{email}.isActive != true` |
+| 未ログイン user が `staffJoinRequests` を create する | `request.auth == null` |
+| `uid` が `request.auth.uid` と違う `staffJoinRequests` create | owner identity 不一致 |
+| `authEmail` が `request.auth.token.email` と違う `staffJoinRequests` create | Auth email snapshot 不一致 |
+| owner が `staffJoinRequests.status` に `approved` / `rejected` を書く | 本人は pending のみ |
+| owner が `linkedStaffId` / `reviewedByStaffId` / `reviewedByStaffName` / `rejectionReason` を書く | review field は本人 write 範囲外 |
+| owner が approved / rejected request を update する | owner update は pending 中のみ |
+| non-admin が `staffJoinRequests` を list する | list は adminStaff のみ |
+| sub-admin が staffJoinRequests review update する | 現行 draft は list 可、review update は admin のみ |
+| non-admin が `staffByUid` を create / update / delete する | write は admin のみ |
+| unrelated signed-in user が他人の `staffByUid/{uid}` を get する | own uid ではない |
+| passcode localStorage session だけで staffJoinRequests admin review / staffByUid write を行う | Rules は localStorage session を staff identity として扱えない |
 
 ---
 
@@ -421,6 +586,17 @@ staff passcode login は localStorage session であり、Firestore Rules から
 
 Security Rules 本番化時は、passcode session だけの staff operation は Firestore write に使えない前提で確認する。passcode flow を復活または維持する場合は、Firebase Auth ベースの staff identity 設計を別途行う。
 
+### 7.3 staffByUid / staffJoinRequests deploy readiness
+
+PR #47 で `staffByUid` / `staffJoinRequests` rules draft は追加済みだが、本番 Security Rules には未反映である。
+
+deploy 前には、少なくとも以下を確認する。
+
+- 全 active staff の `staffByUid/{uid}` mirror が作成済みか。
+- 既存 `isStaff()` は staffByEmail ベースのままで、staffByUid への全面切替は未実施である。
+- `staffJoinRequests` review update は admin のみであり、sub-admin は list までに留まる。
+- `staff.authUid` / `staffByUid` / `staffJoinRequests.status` の整合性は service transaction で担保される。
+
 ---
 
 ## 8. 異常時に確認すること
@@ -436,6 +612,10 @@ Security Rules 本番化時は、passcode session だけの staff operation は 
 - `createdAt` / `updatedAt` が両方あるか。
 - allowed keys 外の field が混ざっていないか。
 - staff operation の場合、`staffByEmail/{email}` の doc id と Auth email casing が一致しているか。
+- staff applicant の場合、`staffJoinRequests/{uid}` の document id と `request.auth.uid` が一致しているか。
+- `authEmail` が `request.auth.token.email` と一致しているか。
+- admin review update を sub-admin session で実行していないか。
+- `staffByUid/{uid}` の own get で他人の uid を読もうとしていないか。
 
 拒否されるべき payload が許可された場合:
 
@@ -445,6 +625,9 @@ Security Rules 本番化時は、passcode session だけの staff operation は 
 - `isPortalReturnCreate()` に `pending_approval` が残っていないか。
 - `condition` の許可値が広すぎないか。
 - `keys().hasOnly(...)` の allowed keys が広すぎないか。
+- `isOwnStaffJoinRequestCreate(uid)` / `isOwnStaffJoinRequestUpdate(uid)` が review field を許可していないか。
+- `isAdminStaffJoinRequestReviewUpdate()` が `approved` / `rejected` 以外を許可していないか。
+- `staffByUid` write が admin 以外に許可されていないか。
 
 ---
 
@@ -487,6 +670,19 @@ Security Rules 本番化時は、passcode session だけの staff operation は 
 | customer self-write `status` | deny |  |  |  |
 | passcode-only staff write | deny |  |  |  |
 | missing `staffByEmail` staff write | deny |  |  |  |
+| staffJoinRequests owner pending create | allow |  |  |  |
+| staffJoinRequests owner get | allow |  |  |  |
+| staffJoinRequests owner pending update | allow |  |  |  |
+| staffJoinRequests owner approved update | deny |  |  |  |
+| staffJoinRequests owner linkedStaffId write | deny |  |  |  |
+| staffJoinRequests admin list | allow |  |  |  |
+| staffJoinRequests admin approve review | allow |  |  |  |
+| staffJoinRequests admin reject review | allow |  |  |  |
+| staffJoinRequests sub-admin review | deny |  |  | list は allow、review update は deny |
+| staffByUid own get | allow |  |  |  |
+| staffByUid other user get | deny |  |  |  |
+| staffByUid admin list | allow |  |  |  |
+| staffByUid non-admin write | deny |  |  |  |
 
 ---
 
@@ -512,4 +708,9 @@ Security Rules 本番化時は、passcode session だけの staff operation は 
 - [ ] customer self-write `status` deny を確認した。
 - [ ] passcode localStorage session は Rules で表現できないことを確認した。
 - [ ] `staffByEmail` casing を別論点として記録した。
+- [ ] active staff の `staffByUid` mirror 作成状況を確認した。
+- [ ] `staffJoinRequests` create / update / review の allow / deny を確認した。
+- [ ] `staffByUid` own get / admin list / admin write / non-admin deny を確認した。
+- [ ] 既存 staffByEmail ベースの `isStaff()` を削除していないことを確認した。
+- [ ] Security Rules deploy と Hosting deploy を混ぜていないことを確認した。
 - [ ] Security Rules deploy を行う専用手順 / 専用 PR を別途用意した。

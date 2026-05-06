@@ -73,6 +73,18 @@ export const RULES_CURRENT_STATE: RulesCurrentState[] = [
     status: "pass",
   },
   {
+    label: "staff UID join request rules",
+    value: "repo draft",
+    detail: "staffByUid / staffJoinRequests の draft rules は repo に追加済みですが、Security Rules deploy は未実行です。",
+    status: "not-deployed",
+  },
+  {
+    label: "staffByUid mirror readiness",
+    value: "未検証",
+    detail: "本番 deploy 前に全 active staff の staffByUid mirror が作成済みか確認が必要です。",
+    status: "caution",
+  },
+  {
     label: "transactions staff update",
     value: "allowlist 導入済み",
     detail: "PR #37 までで order approve / fulfill / return completion / customer linking の helper に寄せています。",
@@ -114,6 +126,20 @@ export const AUTH_ROLE_OVERVIEW: AuthRoleOverview[] = [
     status: "caution",
   },
   {
+    role: "signed-in staff applicant",
+    rulesTreatment: "Firebase Auth + staffJoinRequests/{uid}",
+    accessSummary: "未登録 Firebase Auth user は staff 権限を得ず、自分の申請作成・参照・pending 更新のみ可能です。",
+    caution: "承認されるまで staff write は不可です。",
+    status: "caution",
+  },
+  {
+    role: "uid-linked staff",
+    rulesTreatment: "Firebase Auth uid + staffByUid/{uid}",
+    accessSummary: "将来的な staff 判定 mirror です。現時点では既存 isStaff() は staffByEmail 互換を維持しています。",
+    caution: "既存業務 rules はまだ staffByEmail ベースです。staffByUid への全面切替は未実施です。",
+    status: "caution",
+  },
+  {
     role: "sub admin",
     rulesTreatment: "staffByEmail.role == \"準管理者\"",
     accessSummary: "adminStaff として設定・履歴・マスタ参照などの一部管理操作を許可します。",
@@ -145,6 +171,15 @@ export const COLLECTION_ACCESS_MATRIX: CollectionAccess[] = [
     status: "caution",
   },
   {
+    collection: "staffByUid",
+    read: "own get / adminStaff list",
+    create: "admin",
+    update: "admin",
+    delete: "admin",
+    note: "staff 正本ではなく AuthGuard / Rules 用 mirror。deploy 前に active staff 分の mirror 検証が必要です。",
+    status: "caution",
+  },
+  {
     collection: "staff",
     read: "adminStaff または本人 active staff",
     create: "admin",
@@ -160,6 +195,15 @@ export const COLLECTION_ACCESS_MATRIX: CollectionAccess[] = [
     update: "admin helper または本人 update helper",
     delete: "admin",
     note: "status 既存 field 問題は caution。将来的には派生値へ寄せる方針です。",
+    status: "caution",
+  },
+  {
+    collection: "staffJoinRequests",
+    read: "owner get / adminStaff list",
+    create: "owner pending create",
+    update: "owner pending update / admin review update",
+    delete: "false",
+    note: "approved/rejected への review は service transaction で staff / staffByUid と整合させます。",
     status: "caution",
   },
   {
@@ -327,6 +371,33 @@ export const WORKFLOW_RULES_OVERVIEW: WorkflowOverview[] = [
     status: "pass",
     note: "customerId/customerName と linkedBy* を non-empty にしています。",
   },
+  {
+    name: "staff join request create",
+    actor: "signed-in unregistered staff applicant",
+    collection: "staffJoinRequests",
+    operation: "create",
+    helper: "isOwnStaffJoinRequestCreate(uid)",
+    status: "caution",
+    note: "uid/authEmail は request.auth と一致し、status は pending のみです。",
+  },
+  {
+    name: "staff join request pending update",
+    actor: "owner applicant",
+    collection: "staffJoinRequests",
+    operation: "update",
+    helper: "isOwnStaffJoinRequestUpdate(uid)",
+    status: "caution",
+    note: "pending 中の requestedName / message / auth snapshot 更新に限定します。",
+  },
+  {
+    name: "staff join request admin review",
+    actor: "admin",
+    collection: "staffJoinRequests / staff / staffByUid",
+    operation: "transaction update",
+    helper: "isAdminStaffJoinRequestReviewUpdate()",
+    status: "caution",
+    note: "Rules は request payload を制限し、staff.authUid / staffByUid / request status の整合性は service transaction が担保します。",
+  },
 ];
 
 export const SECURITY_RULES_CAUTIONS: RulesCaution[] = [
@@ -344,6 +415,26 @@ export const SECURITY_RULES_CAUTIONS: RulesCaution[] = [
     title: "tanks / logs staff write はまだ broad",
     detail: "active staff なら field 制限なしに write できるため、logs/tanks allowlist が次の hardening 候補です。",
     status: "broad",
+  },
+  {
+    title: "staffByUid は draft 追加済みだが未deploy",
+    detail: "UID mirror rules は repo draft に入っていますが、本番 Security Rules にはまだ反映していません。",
+    status: "not-deployed",
+  },
+  {
+    title: "既存 isStaff() は staffByEmail ベースのまま",
+    detail: "staffByUid helper は追加済みですが、既存業務 collection rules は staffByEmail 互換を維持しています。",
+    status: "caution",
+  },
+  {
+    title: "active staff の staffByUid mirror 作成確認が必要",
+    detail: "UID-first deploy readiness では、全 active staff に staffByUid/{uid} mirror があることの確認が blocker です。",
+    status: "caution",
+  },
+  {
+    title: "staffJoinRequests review は service transaction 前提",
+    detail: "Rules だけでは複数 document 整合性を完全には表現できないため、staff.authUid / staffByUid / request status の整合は service transaction で担保します。",
+    status: "caution",
   },
   {
     title: "transactions delete は adminOnly",
@@ -387,6 +478,21 @@ export const NEXT_SECURITY_RULES_HARDENING: NextHardeningItem[] = [
     title: "transaction delete full-deny policy",
     target: "transactions",
     reason: "delete は adminOnly に寄せています。管理者にも物理削除を許可しない完全 deny 方針は別途検討します。",
+  },
+  {
+    title: "staffByUid deploy readiness verification",
+    target: "staffByUid",
+    reason: "active staff mirror の作成状況と own get / admin list / admin write の allow/deny を確認するため。",
+  },
+  {
+    title: "staffJoinRequests manual verification",
+    target: "staffJoinRequests",
+    reason: "owner pending create/update と admin review update の allow/deny を deploy 前に固定するため。",
+  },
+  {
+    title: "AuthGuard staffByUid-first migration",
+    target: "staff auth",
+    reason: "既存 staffByEmail 互換を残しつつ、UID mirror 優先 lookup に段階移行するため。",
   },
   {
     title: "staffByEmail casing policy",
