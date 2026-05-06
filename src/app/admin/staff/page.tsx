@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   Eye, EyeOff, Plus, RefreshCw, Save,
   ToggleLeft, ToggleRight,
@@ -15,6 +15,11 @@ import {
   listStaffJoinRequestsReadOnly,
   type StaffJoinRequest,
 } from "@/lib/firebase/staff-join-requests";
+import {
+  approveStaffJoinRequestForExistingStaff,
+  rejectStaffJoinRequest,
+} from "@/lib/firebase/staff-join-request-review-service";
+import { useStaffIdentity } from "@/hooks/useStaffSession";
 
 const ROLES = ["一般", "準管理者", "管理者"] as const;
 const RANKS = ["レギュラー", "ブロンズ", "シルバー", "ゴールド", "プラチナ"] as const;
@@ -49,6 +54,7 @@ const btnOutline: React.CSSProperties = {
 };
 
 export default function AdminStaffPage() {
+  const staffIdentity = useStaffIdentity();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [staffList, setStaffList] = useState<StaffMember[]>([]);
@@ -57,6 +63,30 @@ export default function AdminStaffPage() {
   const [joinRequests, setJoinRequests] = useState<StaffJoinRequest[]>([]);
   const [joinRequestsLoading, setJoinRequestsLoading] = useState(false);
   const [joinRequestsError, setJoinRequestsError] = useState("");
+  const [joinRequestActionLoadingUid, setJoinRequestActionLoadingUid] = useState<string | null>(null);
+  const [joinRequestActionError, setJoinRequestActionError] = useState("");
+
+  const joinRequestStaffOptions = useMemo(() => (
+    staffList
+      .filter((staff) => staff.isActive)
+      .map((staff) => ({
+        id: staff.id,
+        name: staff.name,
+        email: staff.email,
+        role: staff.role,
+        rank: staff.rank,
+        isActive: staff.isActive,
+        authUid: staff.authUid,
+      }))
+  ), [staffList]);
+
+  const joinRequestReviewer = useMemo(() => {
+    if (!staffIdentity) return null;
+    return {
+      staffId: staffIdentity.staffId,
+      staffName: staffIdentity.staffName,
+    };
+  }, [staffIdentity]);
 
   const fetchStaff = useCallback(async () => {
     setLoading(true);
@@ -85,6 +115,61 @@ export default function AdminStaffPage() {
       setJoinRequestsLoading(false);
     }
   }, []);
+
+  const approveJoinRequest = useCallback(async (uid: string, staffId: string) => {
+    if (!staffJoinRequestsEnabled) return;
+    if (!joinRequestReviewer) {
+      setJoinRequestActionError("管理者セッションを取得できません。再ログインしてください。");
+      return;
+    }
+    if (dirtyStaffIds.length > 0) {
+      setJoinRequestActionError("担当者リストに未保存の変更があります。先に保存してから承認してください。");
+      return;
+    }
+    if (!confirm("選択した既存スタッフに UID を紐付けて承認しますか？")) return;
+
+    setJoinRequestActionLoadingUid(uid);
+    setJoinRequestActionError("");
+    try {
+      await approveStaffJoinRequestForExistingStaff({
+        uid,
+        staffId,
+        reviewer: joinRequestReviewer,
+      });
+      await fetchJoinRequests();
+      await fetchStaff();
+    } catch (e) {
+      console.error("Approve staff join request error:", e);
+      setJoinRequestActionError(e instanceof Error ? e.message : "スタッフ利用申請を承認できませんでした。");
+    } finally {
+      setJoinRequestActionLoadingUid(null);
+    }
+  }, [dirtyStaffIds.length, fetchJoinRequests, fetchStaff, joinRequestReviewer]);
+
+  const rejectJoinRequest = useCallback(async (uid: string, rejectionReason?: string) => {
+    if (!staffJoinRequestsEnabled) return;
+    if (!joinRequestReviewer) {
+      setJoinRequestActionError("管理者セッションを取得できません。再ログインしてください。");
+      return;
+    }
+    if (!confirm("このスタッフ利用申請を却下しますか？")) return;
+
+    setJoinRequestActionLoadingUid(uid);
+    setJoinRequestActionError("");
+    try {
+      await rejectStaffJoinRequest({
+        uid,
+        reviewer: joinRequestReviewer,
+        rejectionReason,
+      });
+      await fetchJoinRequests();
+    } catch (e) {
+      console.error("Reject staff join request error:", e);
+      setJoinRequestActionError(e instanceof Error ? e.message : "スタッフ利用申請を却下できませんでした。");
+    } finally {
+      setJoinRequestActionLoadingUid(null);
+    }
+  }, [fetchJoinRequests, joinRequestReviewer]);
 
   useEffect(() => { fetchStaff(); }, [fetchStaff]);
   useEffect(() => { fetchJoinRequests(); }, [fetchJoinRequests]);
@@ -147,7 +232,13 @@ export default function AdminStaffPage() {
           requests={joinRequests}
           loading={joinRequestsLoading}
           error={joinRequestsError}
+          staffOptions={joinRequestStaffOptions}
+          reviewer={joinRequestReviewer}
+          actionLoadingUid={joinRequestActionLoadingUid}
+          actionError={joinRequestActionError}
           onRefresh={fetchJoinRequests}
+          onApproveExistingStaff={approveJoinRequest}
+          onReject={rejectJoinRequest}
         />
       )}
 

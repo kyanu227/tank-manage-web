@@ -15,6 +15,8 @@ export interface StaffMember {
   role: "一般" | "準管理者" | "管理者";
   rank: string;
   isActive: boolean;
+  authUid?: string;
+  authEmail?: string;
   updatedAt?: unknown;
 }
 
