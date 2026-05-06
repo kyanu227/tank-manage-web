@@ -324,6 +324,142 @@ service cloud.firestore {
         || isPortalUnchargedReportCreate();
     }
 
+    function isStaffOrderApproveUpdate() {
+      return isStaff()
+        && resource.data.type == "order"
+        && resource.data.status in ["pending", "pending_approval"]
+        && request.resource.data.status == "approved"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "approvedAt",
+          "approvedBy",
+          "approvedByStaffId",
+          "approvedByStaffName",
+          "approvedByStaffEmail",
+          "updatedAt"
+        ])
+        && request.resource.data.keys().hasAll([
+          "status",
+          "approvedAt",
+          "approvedBy",
+          "approvedByStaffId",
+          "approvedByStaffName",
+          "updatedAt"
+        ])
+        && request.resource.data.approvedBy is string
+        && request.resource.data.approvedByStaffId is string
+        && request.resource.data.approvedByStaffName is string
+        && (
+          !request.resource.data.keys().hasAny(["approvedByStaffEmail"])
+          || request.resource.data.approvedByStaffEmail is string
+        );
+    }
+
+    function isStaffOrderFulfillUpdate() {
+      return isStaff()
+        && resource.data.type == "order"
+        && resource.data.status in ["pending", "pending_approval", "approved"]
+        && request.resource.data.status == "completed"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "fulfilledAt",
+          "fulfilledBy",
+          "fulfilledByStaffId",
+          "fulfilledByStaffName",
+          "fulfilledByStaffEmail",
+          "updatedAt"
+        ])
+        && request.resource.data.keys().hasAll([
+          "status",
+          "fulfilledAt",
+          "fulfilledBy",
+          "fulfilledByStaffId",
+          "fulfilledByStaffName",
+          "updatedAt"
+        ])
+        && request.resource.data.fulfilledBy is string
+        && request.resource.data.fulfilledByStaffId is string
+        && request.resource.data.fulfilledByStaffName is string
+        && (
+          !request.resource.data.keys().hasAny(["fulfilledByStaffEmail"])
+          || request.resource.data.fulfilledByStaffEmail is string
+        );
+    }
+
+    function isStaffReturnCompletionUpdate() {
+      return isStaff()
+        && resource.data.type == "return"
+        && resource.data.status == "pending_return"
+        && request.resource.data.status == "completed"
+        && request.resource.data.finalCondition in ["normal", "unused", "uncharged", "keep"]
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "status",
+          "finalCondition",
+          "fulfilledAt",
+          "fulfilledBy",
+          "fulfilledByStaffId",
+          "fulfilledByStaffName",
+          "fulfilledByStaffEmail",
+          "updatedAt"
+        ])
+        && request.resource.data.keys().hasAll([
+          "status",
+          "finalCondition",
+          "fulfilledAt",
+          "fulfilledBy",
+          "fulfilledByStaffId",
+          "fulfilledByStaffName"
+        ])
+        && request.resource.data.fulfilledBy is string
+        && request.resource.data.fulfilledByStaffId is string
+        && request.resource.data.fulfilledByStaffName is string
+        && (
+          !request.resource.data.keys().hasAny(["fulfilledByStaffEmail"])
+          || request.resource.data.fulfilledByStaffEmail is string
+        );
+    }
+
+    function isStaffPendingLinkOrderUpdate() {
+      return isStaff()
+        && resource.data.type == "order"
+        && resource.data.status == "pending_link"
+        && request.resource.data.status == "pending"
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "customerId",
+          "customerName",
+          "status",
+          "linkedAt",
+          "linkedByStaffId",
+          "linkedByStaffName",
+          "linkedByStaffEmail",
+          "updatedAt"
+        ])
+        && request.resource.data.keys().hasAll([
+          "customerId",
+          "customerName",
+          "status",
+          "linkedAt",
+          "linkedByStaffId",
+          "linkedByStaffName",
+          "updatedAt"
+        ])
+        && request.resource.data.customerId is string
+        && request.resource.data.customerName is string
+        && request.resource.data.linkedByStaffId is string
+        && request.resource.data.linkedByStaffName is string
+        && (
+          !request.resource.data.keys().hasAny(["linkedByStaffEmail"])
+          || request.resource.data.linkedByStaffEmail is string
+        );
+    }
+
+    function isStaffTransactionUpdate() {
+      return isStaffOrderApproveUpdate()
+        || isStaffOrderFulfillUpdate()
+        || isStaffReturnCompletionUpdate()
+        || isStaffPendingLinkOrderUpdate();
+    }
+
     function canReadLinkedCustomerResource() {
       return hasLinkedCustomer()
         && (
@@ -392,7 +528,8 @@ service cloud.firestore {
     match /transactions/{transactionId} {
       allow get, list: if isStaff() || isOwnTransaction();
       allow create: if isStaff() || isOwnTransactionCreate();
-      allow update, delete: if isStaff();
+      allow update: if isStaffTransactionUpdate();
+      allow delete: if isStaff();
     }
 
     match /tankProcurements/{docId} {
