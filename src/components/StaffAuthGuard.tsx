@@ -7,12 +7,19 @@ import {
   onAuthStateChanged,
   signInWithPopup,
   signInWithEmailAndPassword,
+  signOut,
   GoogleAuthProvider,
   User,
 } from "firebase/auth";
 import { collection, getDocs, query, where } from "firebase/firestore";
+import StaffJoinRequestPanel from "@/components/StaffJoinRequestPanel";
 import { DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
+import {
+  createOrUpdateOwnStaffJoinRequest,
+  getStaffJoinRequestByUidReadOnly,
+  type StaffJoinRequest,
+} from "@/lib/firebase/staff-join-requests";
 
 type StaffRole = "一般" | "準管理者" | "管理者";
 
@@ -34,11 +41,16 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   // パスコードログインは request.auth に乗らないため通常は無効。
   // 一時復活が必要な場合のみ NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN=true を設定する。
   const passcodeLoginEnabled = process.env.NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN === "true";
+  const staffJoinRequestsEnabled = process.env.NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS === "true";
   const authScreenRef = useRef<HTMLDivElement>(null);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [checking, setChecking] = useState(false);
+  const [joinRequestMode, setJoinRequestMode] = useState(false);
+  const [joinRequest, setJoinRequest] = useState<StaffJoinRequest | null>(null);
+  const [joinRequestLoading, setJoinRequestLoading] = useState(false);
+  const [joinRequestError, setJoinRequestError] = useState("");
 
   // Login form state
   const [loginMethod, setLoginMethod] = useState<"passcode" | "email">("email");
@@ -66,6 +78,33 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     window.setTimeout(resetScroll, 250);
   }, []);
 
+  const clearJoinRequestState = useCallback(() => {
+    setJoinRequestMode(false);
+    setJoinRequest(null);
+    setJoinRequestError("");
+    setJoinRequestLoading(false);
+  }, []);
+
+  const showJoinRequestPanel = useCallback(async (user: User) => {
+    localStorage.removeItem("staffSession");
+    setIsAuthenticated(false);
+    setError("");
+    setJoinRequestMode(true);
+    setJoinRequest(null);
+    setJoinRequestError("");
+    setJoinRequestLoading(true);
+
+    try {
+      const request = await getStaffJoinRequestByUidReadOnly(user.uid);
+      setJoinRequest(request);
+    } catch (e) {
+      console.error("Staff join request lookup failed:", e);
+      setJoinRequestError("申請状況を確認できませんでした。時間をおいて再度お試しください。");
+    } finally {
+      setJoinRequestLoading(false);
+    }
+  }, []);
+
   // iOS: 入力でズレた viewport を遷移前後でリセットする。body/html はロックしない。
   useEffect(() => {
     resetViewportAfterInput();
@@ -80,18 +119,24 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   }, [devAuthBypassEnabled]);
 
   // Helper: look up staff by email, set session, authenticate
-  const authenticateByEmail = useCallback(async (userEmail: string) => {
+  const authenticateByEmail = useCallback(async (userEmail: string, user?: User) => {
     try {
       const profile = await findActiveStaffByEmail(userEmail);
 
       if (!profile) {
-        setError("このメールアドレスはスタッフとして登録されていません。");
         localStorage.removeItem("staffSession");
         setIsAuthenticated(false);
+        if (staffJoinRequestsEnabled && user) {
+          await showJoinRequestPanel(user);
+          return false;
+        }
+        clearJoinRequestState();
+        setError("このメールアドレスはスタッフとして登録されていません。");
         return false;
       }
 
       if (allowedRoles && !allowedRoles.includes(profile.role as StaffRole)) {
+        clearJoinRequestState();
         setError("このページにアクセスする権限がありません");
         localStorage.removeItem("staffSession");
         setIsAuthenticated(false);
@@ -106,18 +151,20 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         email: profile.email,
       };
 
+      clearJoinRequestState();
       localStorage.setItem("staffSession", JSON.stringify(userSession));
       window.dispatchEvent(new Event("staffLogin"));
       setIsAuthenticated(true);
       return true;
     } catch (e) {
       console.error("Email staff lookup failed:", e);
+      clearJoinRequestState();
       setError("認証エラーが発生しました");
       localStorage.removeItem("staffSession");
       setIsAuthenticated(false);
       return false;
     }
-  }, [allowedRoles]);
+  }, [allowedRoles, clearJoinRequestState, showJoinRequestPanel, staffJoinRequestsEnabled]);
 
   // 1. Check Firebase Auth (Google / Email already logged in)
   useEffect(() => {
@@ -128,10 +175,11 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       if (!user) {
         localStorage.removeItem("staffSession");
         setIsAuthenticated(false);
+        clearJoinRequestState();
       }
     });
     return () => unsub();
-  }, [devAuthBypassEnabled]);
+  }, [clearJoinRequestState, devAuthBypassEnabled]);
 
   // 2. Firebase user exists → staff collection で有効スタッフか確認する。
   // localStorage staffSession だけでは認証済みにしない。
@@ -139,7 +187,14 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     if (devAuthBypassEnabled || !firebaseAuthChecked) return;
 
     if (firebaseUser?.email) {
-      authenticateByEmail(firebaseUser.email).then(() => {
+      authenticateByEmail(firebaseUser.email, firebaseUser).then(() => {
+        setLoading(false);
+      });
+      return;
+    }
+
+    if (staffJoinRequestsEnabled && firebaseUser) {
+      showJoinRequestPanel(firebaseUser).then(() => {
         setLoading(false);
       });
       return;
@@ -148,7 +203,14 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     localStorage.removeItem("staffSession");
     setIsAuthenticated(false);
     setLoading(false);
-  }, [devAuthBypassEnabled, firebaseAuthChecked, firebaseUser, authenticateByEmail]);
+  }, [
+    devAuthBypassEnabled,
+    firebaseAuthChecked,
+    firebaseUser,
+    authenticateByEmail,
+    showJoinRequestPanel,
+    staffJoinRequestsEnabled,
+  ]);
 
   // --- Passcode login handler (feature flag only) ---
   const handlePasscodeLogin = async (e: React.FormEvent) => {
@@ -215,7 +277,9 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     try {
       const result = await signInWithPopup(auth, new GoogleAuthProvider());
       if (result.user.email) {
-        await authenticateByEmail(result.user.email);
+        await authenticateByEmail(result.user.email, result.user);
+      } else if (staffJoinRequestsEnabled) {
+        await showJoinRequestPanel(result.user);
       } else {
         setError("Googleアカウントにメールアドレスがありません。");
       }
@@ -237,13 +301,55 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     try {
       const result = await signInWithEmailAndPassword(auth, email, password);
       if (result.user.email) {
-        await authenticateByEmail(result.user.email);
+        await authenticateByEmail(result.user.email, result.user);
+      } else if (staffJoinRequestsEnabled) {
+        await showJoinRequestPanel(result.user);
       }
     } catch (err: unknown) {
       console.error(err);
       setError("メールアドレスまたはパスワードが間違っています。");
     } finally {
       setChecking(false);
+    }
+  };
+
+  const handleJoinRequestSubmit = async (input: { requestedName: string; message: string }) => {
+    if (!firebaseUser) return;
+    if (!firebaseUser.email) {
+      setJoinRequestError("申請には Firebase Auth のメールアドレスが必要です。");
+      return;
+    }
+
+    setJoinRequestLoading(true);
+    setJoinRequestError("");
+    try {
+      await createOrUpdateOwnStaffJoinRequest({
+        uid: firebaseUser.uid,
+        authEmail: firebaseUser.email,
+        authDisplayName: firebaseUser.displayName,
+        requestedName: input.requestedName,
+        message: input.message,
+      });
+      const request = await getStaffJoinRequestByUidReadOnly(firebaseUser.uid);
+      setJoinRequest(request);
+    } catch (e) {
+      console.error("Staff join request save failed:", e);
+      setJoinRequestError("申請を保存できませんでした。時間をおいて再度お試しください。");
+    } finally {
+      setJoinRequestLoading(false);
+    }
+  };
+
+  const handleJoinRequestSignOut = async () => {
+    try {
+      await signOut(auth);
+    } finally {
+      localStorage.removeItem("staffSession");
+      setIsAuthenticated(false);
+      setFirebaseUser(null);
+      clearJoinRequestState();
+      setError("");
+      setLoading(false);
     }
   };
 
@@ -275,6 +381,25 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         )}
         {children}
       </>
+    );
+  }
+
+  if (staffJoinRequestsEnabled && joinRequestMode && firebaseUser) {
+    return (
+      <div style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
+        <div aria-hidden="true" style={{ height: "env(safe-area-inset-top, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
+        <div ref={authScreenRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", display: "flex", flexDirection: "column", padding: 20, boxSizing: "border-box" }}>
+          <StaffJoinRequestPanel
+            firebaseUser={firebaseUser}
+            existingRequest={joinRequest}
+            loading={joinRequestLoading}
+            error={joinRequestError}
+            onSubmit={handleJoinRequestSubmit}
+            onSignOut={handleJoinRequestSignOut}
+          />
+        </div>
+        <div aria-hidden="true" style={{ height: "env(safe-area-inset-bottom, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
+      </div>
     );
   }
 
