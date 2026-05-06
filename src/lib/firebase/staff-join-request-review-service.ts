@@ -55,6 +55,12 @@ function stringOrEmpty(value: unknown): string {
   return typeof value === "string" ? value.trim() : "";
 }
 
+function assertRequestUidMatchesPath(requestUid: string, pathUid: string): void {
+  if (requestUid !== pathUid) {
+    throw new Error("スタッフ利用申請の UID がドキュメント ID と一致しません。");
+  }
+}
+
 export async function approveStaffJoinRequestForExistingStaff(
   input: ApproveStaffJoinRequestInput
 ): Promise<void> {
@@ -73,6 +79,7 @@ export async function approveStaffJoinRequestForExistingStaff(
     }
 
     const request = buildStaffJoinRequest(uid, requestSnap.data());
+    assertRequestUidMatchesPath(request.uid, uid);
     if (!isPendingStaffJoinRequest(request)) {
       throw new Error("承認待ちではないスタッフ利用申請は承認できません。");
     }
@@ -144,6 +151,7 @@ export async function rejectStaffJoinRequest(input: RejectStaffJoinRequestInput)
     }
 
     const request = buildStaffJoinRequest(uid, requestSnap.data());
+    assertRequestUidMatchesPath(request.uid, uid);
     if (!isPendingStaffJoinRequest(request)) {
       throw new Error("承認待ちではないスタッフ利用申請は却下できません。");
     }
