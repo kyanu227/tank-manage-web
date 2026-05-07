@@ -20,6 +20,7 @@ import {
   getStaffJoinRequestByUidReadOnly,
   type StaffJoinRequest,
 } from "@/lib/firebase/staff-join-requests";
+import { linkStaffUidByEmailAuth } from "@/lib/firebase/staff-uid-link-service";
 
 type StaffRole = "一般" | "準管理者" | "管理者";
 
@@ -138,6 +139,14 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         clearJoinRequestState();
         setError("このメールアドレスはスタッフとして登録されていません。");
         return false;
+      }
+
+      if (user?.uid && user.email) {
+        await linkStaffUidByEmailAuth({
+          uid: user.uid,
+          email: user.email,
+          emailVerified: user.emailVerified,
+        });
       }
 
       if (allowedRoles && !allowedRoles.includes(profile.role as StaffRole)) {
