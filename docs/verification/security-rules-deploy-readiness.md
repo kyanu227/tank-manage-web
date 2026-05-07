@@ -35,6 +35,7 @@
 - `/admin/security-rules` overview と manual verification docs は更新済み。
 - `firebase.json` は `firestore.rules` を参照する設定に更新済み。
 - Firestore emulator による `firestore.rules` の非deploy構文確認は pass 済み。
+- 既存 `staffByEmail` 登録済み staff 向けの email-auth UID link / bootstrap 経路は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) に記録する。
 
 ---
 
@@ -45,11 +46,14 @@
 - `firebase.json` には PR #50 で Firestore Rules 接続を追加済み。
 - Firestore Rules 構文チェックは 2026-05-07 に非deploy emulator 起動で pass 済み。
 - `staffJoinRequests` / `staffByUid` の manual verification は [Security Rules Staff UID Manual Verification Result](./security-rules-staff-uid-manual-verification-result.md) で pass 済み。
+- active staff の `staffByUid` mirror readiness は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) で ready 確認済み。
+- 既存 `staffByEmail` staff の UID link 実行確認は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) で pass 済み。
 
 残る blocker:
 
 - portal / `customerUsers` / `transactions` / `tanks` / `logs` の manual verification が未実行。
-- active staff の `staffByUid` mirror readiness は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) で not ready。
+- Security Rules deploy 後に一般 staff self-link を許可するかは未決定。
+- self-link を許可する場合、`firestore.rules` の追加 hardening / manual verification が別途必要。
 - `staffByEmail` casing policy が未解決。
 - passcode localStorage session は Rules 上 staff ではない。
 - 既存 `isStaff()` は `staffByEmail` ベースのまま。
@@ -122,9 +126,11 @@ deploy 前に、少なくとも以下のカテゴリを検証する。
 ## 6. Data readiness plan
 
 - active staff の UID 紐付け状況を確認する必要がある。
-- `staffByUid` mirror readiness 結果は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) を参照する。
+- `staffByUid` mirror readiness 結果は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) を参照する。2026-05-07 時点で active staff mirror readiness は ready。
+- 既存 `staffByEmail` 登録済み staff は join request ではなく email-auth UID link / bootstrap 経路で紐付ける方針とする。
+- email-auth UID link / bootstrap の詳細は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) を参照する。
 - `staffByUid` mirror は staff 正本ではない。
-- `staffByUid` mirror は admin 承認 service 経由で作る。
+- `staffByUid` mirror は admin 承認 service または email-auth UID link service 経由で作る。
 - Firestore console で直接 `staffByUid` を手作業作成しない方針。
 - 本番で `staffJoinRequests` 承認 UI を使う前に、検証用 account で流れを確認する必要がある。
 - この PR では Firestore data を触らない。
