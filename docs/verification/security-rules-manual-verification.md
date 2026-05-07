@@ -31,6 +31,7 @@ PR #31 で Security Rules readiness audit を作成し、PR #32 で未deploy の
 - [Security Rules Staff UID Manual Verification Result](./security-rules-staff-uid-manual-verification-result.md)
 - [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md)
 - [Customer Users Status Field Policy](./customer-users-status-field-policy.md)
+- [Staff By Email Casing Policy](./staff-by-email-casing-policy.md)
 
 ---
 
@@ -587,7 +588,7 @@ rejected payload:
 
 一方、実装側の `staff-sync-service` は email key を lowercase で作る。Firebase Auth email に mixed case が入る場合、Rules 側で lowercase 正規化できないため staff 判定が失敗する可能性がある。
 
-この document では casing を検証観点として記録するが、rules / data / auth 方針の変更は別 PR で扱う。
+casing 方針と read-only aggregate 結果は [Staff By Email Casing Policy](./staff-by-email-casing-policy.md) を参照する。
 
 ### 7.2 passcode localStorage sessions
 
