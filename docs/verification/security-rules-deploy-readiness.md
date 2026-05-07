@@ -15,9 +15,10 @@
 ## 1. Current state
 
 - `firestore.rules` は repo draft として管理している。
+- `firebase.json` は PR #50 で `firestore.rules` に接続済み。
+- Firestore Rules の非deploy構文確認は 2026-05-07 に pass 済み。
 - Security Rules deploy は未実行。
-- `firebase.json` は Firestore Rules deploy 用には未接続。
-- Hosting deploy は済みだが、Security Rules deploy とは分離して扱う。
+- Hosting deploy は PR #48 の overview 反映時に実施済みだが、Security Rules deploy とは分離して扱う。
 - `NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS` は変更していない。
 - Firestore data は未操作。
 
@@ -32,13 +33,20 @@
 - approve service は `staff.authUid` / `staffByUid` / `staffJoinRequests.status` を transaction で更新する。
 - `firestore.rules` draft には `staffByUid` / `staffJoinRequests` rules が追加済み。
 - `/admin/security-rules` overview と manual verification docs は更新済み。
+- `firebase.json` は `firestore.rules` を参照する設定に更新済み。
+- Firestore emulator による `firestore.rules` の非deploy構文確認は pass 済み。
 
 ---
 
 ## 3. Deploy blockers
 
-- `firebase.json` に Firestore Rules 接続がない。
-- Firestore Rules 構文チェックが未実行。
+解消済み:
+
+- `firebase.json` には PR #50 で Firestore Rules 接続を追加済み。
+- Firestore Rules 構文チェックは 2026-05-07 に非deploy emulator 起動で pass 済み。
+
+残る blocker:
+
 - `staffJoinRequests` / `staffByUid` の manual verification が未実行。
 - active staff の `staffByUid` mirror 作成状況が未確認。
 - `staffByEmail` casing policy が未解決。
@@ -49,18 +57,43 @@
 
 ---
 
-## 4. Syntax check plan
+## 4. Syntax check result
 
-構文確認は deploy されないことが明確な方法だけを使う。
+構文確認は deploy されないことが明確な方法だけを使う。Security Rules deploy は実行しない。
 
-- `firebase.json` を変更しない範囲で Firestore Rules 構文確認が可能か調査する。
-- deploy 系コマンドは使わない。
-- `firebase deploy` は実行しない。
-- `firebase deploy --only firestore:rules` は実行しない。
-- `firebase.json` 接続が必要な場合は、今回の PR では実行せず、次の専用 PR に回す。
-- 構文確認ができなかった場合は「未実行」と理由を記録する。
+実行日:
 
-今回の readiness docs-only PR では、Rules 構文確認コマンドは実行しない。理由は、現行 `firebase.json` が Firestore Rules deploy 用に未接続であり、deploy と構文確認の境界を専用 PR で明確化するため。
+- 2026-05-07
+
+Java Runtime:
+
+```text
+openjdk version "21.0.11" 2026-04-21
+OpenJDK Runtime Environment Homebrew (build 21.0.11)
+OpenJDK 64-Bit Server VM Homebrew (build 21.0.11, mixed mode, sharing)
+```
+
+Firebase CLI:
+
+- `15.9.1`
+
+実行した非deployコマンド:
+
+```bash
+env XDG_CONFIG_HOME=/private/tmp/firebase-cli-config XDG_CACHE_HOME=/private/tmp/firebase-cli-cache PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home" firebase --config "/Users/yuki/Library/Mobile Documents/com~apple~CloudDocs/Project/タンク管理NEW/web/firebase.json" --project demo-tank-manage-web emulators:exec --only firestore --log-verbosity QUIET "true"
+```
+
+結果:
+
+- exit code 0。
+- `Running script: true`。
+- `Script exited successfully (code 0)`。
+- Firestore emulator 起動まで到達した。
+- `firestore.rules` の読み込みは pass と扱う。
+- 構文エラーは出ていない。
+- Security Rules deploy は未実行。
+- Hosting deploy は未実行。
+- Firestore data は未操作。
 
 ---
 
@@ -100,7 +133,7 @@ deploy 前に、少なくとも以下のカテゴリを検証する。
 
 - Hosting deploy と Security Rules deploy は分離する。
 - `firebase deploy` 無指定は禁止。
-- `firebase.json` 接続 PR、構文確認 PR、manual verification 結果 PR、Security Rules deploy 実行は分ける。
+- `firebase.json` 接続 PR、構文確認結果 PR、manual verification 結果 PR、Security Rules deploy 実行は分ける。
 - Security Rules deploy を実行する場合は、専用手順で `firebase deploy --only firestore:rules` 相当のみを実行する。
 - rollback 手順も deploy 前に用意する。
 
@@ -110,15 +143,15 @@ Security Rules deploy を行う PR / operation では、実行前に対象 commi
 
 ## 8. Next PR split
 
-A. docs-only deploy readiness
+A. docs-only deploy readiness: 完了済み
 
-B. `firebase.json` Firestore Rules 接続 draft PR
+B. `firebase.json` Firestore Rules 接続 draft PR: 完了済み
 
-C. Rules syntax check / emulator or Rules Playground verification PR
+C. Rules syntax check / emulator verification result docs: 完了済み
 
-D. `staffByUid` mirror readiness check docs
+D. manual verification result docs
 
-E. manual verification result docs
+E. `staffByUid` mirror readiness check docs
 
 F. Security Rules deploy PR / operation
 
