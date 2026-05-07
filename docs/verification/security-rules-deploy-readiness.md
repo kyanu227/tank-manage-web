@@ -51,10 +51,10 @@
 - 既存 `staffByEmail` staff の UID link 実行確認は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) で pass 済み。
 - portal / `customerUsers` / `transactions` / `tanks` / `logs` の static comparison は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) で pass 確認済み。
 - portal / `customerUsers` / `transactions` / `tanks` / `logs` の executable allow / deny verification は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) で pass 確認済み。
+- `customerUsers.status` existing field policy は [Customer Users Status Field Policy](./customer-users-status-field-policy.md) で ready 確認済み。
 
 残る blocker:
 
-- `customerUsers.status` 既存 field が残る data では、owner update が rules の `status` 禁止に抵触する可能性がある。
 - Security Rules deploy 後に一般 staff self-link を許可するかは未決定。
 - self-link を許可する場合、`firestore.rules` の追加 hardening / manual verification が別途必要。
 - `staffByEmail` casing policy が未解決。
@@ -169,7 +169,7 @@ F. portal / `customerUsers` / `transactions` / `tanks` / `logs` static verificat
 
 G. portal / `customerUsers` / `transactions` / `tanks` / `logs` executable allow / deny verification: 完了済み
 
-H. `customerUsers.status` existing field policy
+H. `customerUsers.status` existing field policy: 完了済み
 
 I. `staffByEmail` casing policy
 
