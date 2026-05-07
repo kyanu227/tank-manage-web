@@ -53,11 +53,14 @@
 - portal / `customerUsers` / `transactions` / `tanks` / `logs` の executable allow / deny verification は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) で pass 確認済み。
 - `customerUsers.status` existing field policy は [Customer Users Status Field Policy](./customer-users-status-field-policy.md) で ready 確認済み。
 - `staffByEmail` casing policy は [Staff By Email Casing Policy](./staff-by-email-casing-policy.md) で ready 確認済み。
+- self-link rule decision は [Staff Self-Link Rule Policy](./staff-self-link-rule-policy.md) で ready 確認済み。現時点では self-link rule を導入しない。
 
 残る blocker:
 
-- Security Rules deploy 後に一般 staff self-link を許可するかは未決定。
-- self-link を許可する場合、`firestore.rules` の追加 hardening / manual verification が別途必要。
+- Security Rules deploy operation / rollback 手順が未作成。
+
+deploy blocker ではなく別フェーズで扱う caution:
+
 - passcode localStorage session は Rules 上 staff ではない。
 - 既存 `isStaff()` は `staffByEmail` ベースのまま。
 - AuthGuard staffByUid-first migration は未実施。
@@ -163,7 +166,7 @@ C. Rules syntax check / emulator verification result docs: 完了済み
 
 D. staff UID manual verification result docs: 完了済み
 
-E. `staffByUid` mirror readiness check docs: not ready として記録
+E. `staffByUid` mirror readiness check docs: 完了済み
 
 F. portal / `customerUsers` / `transactions` / `tanks` / `logs` static verification result docs: 完了済み
 
@@ -173,13 +176,15 @@ H. `customerUsers.status` existing field policy: 完了済み
 
 I. `staffByEmail` casing policy: 完了済み
 
-J. self-link rule decision
+J. self-link rule decision: 完了済み
 
-K. Security Rules deploy PR / operation
+K. Security Rules deploy operation / rollback procedure docs
 
-L. AuthGuard staffByUid-first migration
+L. Security Rules deploy PR / operation
 
-M. feature flag enablement decision
+M. AuthGuard staffByUid-first migration
+
+N. feature flag enablement decision
 
 ---
 
