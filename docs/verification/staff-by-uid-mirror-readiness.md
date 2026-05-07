@@ -116,7 +116,8 @@ Mismatch detail:
 - active staff の `authUid` が未設定。
 - active staff に対応する `staffByUid` mirror が未作成。
 - `staffByUid` mirror は staff 正本ではないため、Firestore console で直接手作業作成しない。
-- `staffByUid` mirror は admin 承認 service 経由で作る方針を維持する。
+- `staffByUid` mirror は admin 承認 service または既存 `staffByEmail` staff 向けの email-auth UID link service 経由で作る方針を維持する。
+- 既存 `staffByEmail` staff 向けの UID link / bootstrap 方針は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) を参照する。
 - 本番で `staffJoinRequests` 承認 UI を使う前に、検証用 account で申請から承認までの流れを確認する必要がある。
 - AuthGuard staffByUid-first migration は未実施。
 - `NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS` は本番有効化していない。
