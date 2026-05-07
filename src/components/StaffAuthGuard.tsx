@@ -141,20 +141,20 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         return false;
       }
 
-      if (user?.uid && user.email) {
-        await linkStaffUidByEmailAuth({
-          uid: user.uid,
-          email: user.email,
-          emailVerified: user.emailVerified,
-        });
-      }
-
       if (allowedRoles && !allowedRoles.includes(profile.role as StaffRole)) {
         clearJoinRequestState();
         setError("このページにアクセスする権限がありません");
         localStorage.removeItem("staffSession");
         setIsAuthenticated(false);
         return false;
+      }
+
+      if (user?.uid && user.email) {
+        await linkStaffUidByEmailAuth({
+          uid: user.uid,
+          email: user.email,
+          emailVerified: user.emailVerified,
+        });
       }
 
       const userSession: StaffUser = {

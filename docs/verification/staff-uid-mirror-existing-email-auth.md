@@ -56,9 +56,12 @@ service の責務:
 
 - `findActiveStaffByEmail(userEmail)` が成功した後、session 作成前に `linkStaffUidByEmailAuth()` を呼ぶ。
 - user が存在し、`user.uid` と `user.email` がある場合だけ UID link を試行する。
+- `allowedRoles` が指定された page では、権限確認に成功した後だけ UID link を試行する。
 - passcode / localStorage session / dev auth bypass では UID link を実行しない。
 - UID link が失敗した場合は認証失敗として扱い、session を作らない。
 - Firestore transaction の詳細は `StaffAuthGuard.tsx` に置かない。
+
+email/password Firebase Auth account で `emailVerified === false` の場合、UID link は失敗し staff session も作らない。Google login では通常 verified email として扱われるが、未確認メールを許可する場合は別途方針変更が必要。
 
 `staffJoinRequests` は、`staffByEmail` に未登録のユーザーがスタッフ利用を申請する経路として維持する。
 
