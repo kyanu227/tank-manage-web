@@ -17,7 +17,7 @@
 - `firestore.rules` は repo draft として管理している。
 - `firebase.json` は PR #50 で `firestore.rules` に接続済み。
 - Firestore Rules の非deploy構文確認は 2026-05-07 に pass 済み。
-- Security Rules deploy は未実行。
+- Security Rules deploy は 2026-05-08 に実行済み。結果は [Security Rules Deploy Result](../deploy/security-rules-deploy-result.md) を参照する。
 - Hosting deploy は PR #48 の overview 反映時に実施済みだが、Security Rules deploy とは分離して扱う。
 - `NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS` は変更していない。
 - PR #54 の app-flow verification で、アプリ通常フローによる `staff.authUid` / `staffByUid` write は実施済み。
@@ -55,10 +55,14 @@
 - `staffByEmail` casing policy は [Staff By Email Casing Policy](./staff-by-email-casing-policy.md) で ready 確認済み。
 - self-link rule decision は [Staff Self-Link Rule Policy](./staff-self-link-rule-policy.md) で ready 確認済み。現時点では self-link rule を導入しない。
 - Security Rules deploy operation / rollback 手順は [Security Rules Deploy Operation](../deploy/security-rules-deploy-operation.md) に記録済み。
+- Security Rules deploy result は [Security Rules Deploy Result](../deploy/security-rules-deploy-result.md) に記録済み。
 
-残る blocker:
+Security Rules deploy status:
 
-- Security Rules deploy は未実行。
+- Security Rules deploy は実行済み。
+- Deploy exit code は 0。
+- Rollback は不要。
+- Post-deploy smoke test は partial。staff / admin は pass、portal は setup-incomplete account のため追加確認余地あり。
 
 deploy blocker ではなく別フェーズで扱う caution:
 
@@ -181,11 +185,13 @@ J. self-link rule decision: 完了済み
 
 K. Security Rules deploy operation / rollback procedure docs: 完了済み
 
-L. Security Rules deploy PR / operation
+L. Security Rules deploy PR / operation: 完了済み
 
-M. AuthGuard staffByUid-first migration
+M. post-deploy portal smoke test with setup-complete customer account
 
-N. feature flag enablement decision
+N. AuthGuard staffByUid-first migration
+
+O. feature flag enablement decision
 
 ---
 
