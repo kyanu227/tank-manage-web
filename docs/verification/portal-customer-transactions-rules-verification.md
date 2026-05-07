@@ -20,11 +20,11 @@
 | item | value |
 |---|---|
 | 検証日 | 2026-05-07 |
-| 対象 commit | `586cc2b6e6bdd1274e3a2c3d10abbdc16e837dca` |
+| 対象 commit | `672142d0f9751e5a6a6ed5a0102bcbd20e81138f` |
 | 対象 `firestore.rules` commit | `c7e58f6952a60dd2ea71590626fe6ead1b191584` |
-| 検証方法 | `firestore.rules` と実装 payload / repository / service の静的照合 |
-| 検証環境 | local repository |
-| Result | partial: static comparison pass, executable allow / deny verification not run |
+| 検証方法 | `firestore.rules` と実装 payload / repository / service の静的照合、Firestore emulator / rules-unit-test 実行検証 |
+| 検証環境 | local repository + Firestore emulator |
+| Result | pass: static comparison pass, executable allow / deny verification pass |
 | Security Rules deploy | 未実行 |
 | Hosting deploy | この verification 作業では未実行 |
 | `firebase deploy` | 未実行 |
@@ -54,35 +54,63 @@ Firestore Console / script による本番 Firestore data の create / update / 
 - `src/app/portal/return/page.tsx`
 - `src/app/portal/unfilled/page.tsx`
 
-今回は docs-only / static comparison であり、emulator / Rules Playground / production app flow による allow / deny 実行検証は行っていない。
+実行検証は Firestore emulator と repo 外の一時 rules-unit-test script で行った。
+
+一時依存:
+
+- `@firebase/rules-unit-testing`: `5.0.1`
+- `firebase`: `12.10.0`
+
+実行環境:
+
+```text
+Firebase CLI: 15.9.1
+openjdk version "21.0.11" 2026-04-21
+OpenJDK Runtime Environment Homebrew (build 21.0.11)
+OpenJDK 64-Bit Server VM Homebrew (build 21.0.11, mixed mode, sharing)
+```
+
+実行コマンド:
+
+```bash
+env XDG_CONFIG_HOME=/private/tmp/firebase-cli-config XDG_CACHE_HOME=/private/tmp/firebase-cli-cache PATH="/opt/homebrew/opt/openjdk@21/bin:$PATH" JAVA_HOME="/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home" firebase --config "/Users/yuki/Library/Mobile Documents/com~apple~CloudDocs/Project/タンク管理NEW/web/firebase.json" --project demo-tank-rules-exec emulators:exec --only firestore --log-verbosity QUIET "node /private/tmp/tank-rules-exec-verify/portal-rules-exec-test.mjs"
+```
+
+結果:
+
+- exit code 0。
+- `Running script: node /private/tmp/tank-rules-exec-verify/portal-rules-exec-test.mjs`。
+- `Script exited successfully (code 0)`。
+- 19 / 19 scenario pass。
+- deny scenario の `PERMISSION_DENIED` log は `assertFails` の期待結果として扱う。
+
+一時 script / 一時 npm package は repo 外の `/private/tmp/tank-rules-exec-verify` に作成し、検証後に削除した。repo の package files は変更していない。
 
 ---
 
 ## 3. Scenario Results
 
-| scenario | expected | static actual | result | memo |
+| scenario | expected | actual | result | memo |
 |---|---|---|---|---|
-| `customerUsers` first login create | allow | `ensureCustomerUser()` は required keys を作成し、`status` は Firestore に保存しない | pass | `uid`, `email`, initial setup fields, timestamps が rules と一致 |
-| `customerUsers` login update | allow | `ensureCustomerUser()` の既存 user merge update は `email`, `displayName`, `lastLoginAt`, `updatedAt` のみ | pass | `customerId`, `customerName`, `disabled`, `createdAt` は変更しない |
-| `customerUsers` setup complete | allow | `completeCustomerUserSetup()` は `selfCompanyName`, `selfName`, `lineName`, `setupCompleted`, `updatedAt` のみ更新 | pass | `setupCompleted: true` には non-empty name fields が必要 |
-| customer self-write `status` | deny | portal user code は `status` を Firestore に保存しない | pass | 既存 `status` field がある data は別 blocker |
-| linked portal order create | allow | `createPortalOrder()` は linked identity で `status: "pending"` / `source: "customer_portal"` を作る | pass | repository が `createdAt` / `updatedAt` を付与 |
-| unlinked portal order create | allow | `createPortalOrder()` は unlinked identity で `status: "pending_link"` / `customerId: null` / `customerName: ""` を作る | pass | requested snapshot fields を含む |
-| portal return create | allow | `createPortalReturnRequests()` は `status: "pending_return"` と `condition` allowlist 値を作る | pass | `source` は `customer_portal` または `auto_schedule` |
-| portal uncharged report create | allow | `createPortalUnfilledReports()` は `type: "uncharged_report"` / `status: "completed"` / `source: "customer_app"` を作る | pass | linked customer identity が前提 |
-| portal `settings/portal` get | allow | `/portal/return` は `settings/portal` を read する | pass | rules は signed-in user の `settings/portal` get を許可 |
-| linked portal `tanks` read | allow | portal pages は `location == linked customerName` と `status == 貸出中` で read する | pass | rules は `customerId` または `location` が linked customer と一致すれば read 可 |
-| linked portal `logs` read | allow | `/portal` は `logStatus == active` と `location == linked customerName` で read する | pass | rules は linked customer resource read を許可 |
-| unlinked portal `tanks` / `logs` read | deny / not attempted | UI は unlinked identity では read せず empty 表示にする | pass | rules 側も `hasLinkedCustomer()` が必要 |
-| `transactions` own get / list | allow | rules は `createdByUid == request.auth.uid` の active customer に限り read 可 | partial | 現行 portal checked files は主に create flow。read query の executable 検証は未実行 |
-| staff order approve update | allow | `approveOrder()` payload は `isStaffOrderApproveUpdate()` の allowed keys と required actor fields に一致 | pass | Firebase Auth staff + `staffByEmail` が前提 |
-| staff order fulfill update | allow | `fulfillOrder()` の transaction update は allowed keys と required actor fields に一致 | pass | 同 batch の `tanks` / `logs` write は broad staff allow |
-| staff return tag completion update | allow | `processReturnTags()` は `pending_return -> completed` と `finalCondition` を書く | pass | `updatedAt` は rules 上 optional affected key |
-| pending_link order customer linking update | allow | `linkCustomerUsersToCustomers()` は `pending_link -> pending` と linked actor fields を書く | pass | `customerUsers` assignment update は adminStaff rule 側の範囲 |
-| staff `tanks` create / update / delete | allow | `applyBulkTankOperations()` は staff session 前提で tank update を行う | pass | 現行 draft は staff write を広く許可。future hardening 対象 |
-| staff `logs` create / update / delete | allow | `applyBulkTankOperations()` / log edit flows は staff session 前提で logs write を行う | pass | 現行 draft は staff write を広く許可。future hardening 対象 |
-| passcode-only staff write | deny | rules は Firebase Auth + `staffByEmail` を要求する | pass | localStorage passcode session は Rules 上 staff ではない |
-| missing `staffByEmail` staff write | deny | `isStaff()` が false になる | pass | `staffByUid` は既存 `isStaff()` の正本ではない |
+| `customerUsers` first login create | allow | allow | pass | required keys を作成し、`status` は Firestore に保存しない |
+| `customerUsers` login update | allow | allow | pass | `email`, `displayName`, `lastLoginAt`, `updatedAt` のみ |
+| `customerUsers` setup complete | allow | allow | pass | `selfCompanyName`, `selfName`, `lineName`, `setupCompleted`, `updatedAt` のみ |
+| customer self-write `status` | deny | deny | pass | `assertFails` の期待結果 |
+| linked portal order create | allow | allow | pass | `status: "pending"` / `source: "customer_portal"` |
+| unlinked portal order create | allow | allow | pass | `status: "pending_link"` / `customerId: null` / `customerName: ""` |
+| portal return create | allow | allow | pass | `status: "pending_return"` / `condition: "normal"` |
+| portal uncharged report create | allow | allow | pass | `type: "uncharged_report"` / `status: "completed"` / `source: "customer_app"` |
+| linked portal `tanks` read | allow | allow | pass | linked customer resource read |
+| linked portal `logs` read | allow | allow | pass | linked customer resource read |
+| unlinked portal `tanks` / `logs` read | deny | deny | pass | `assertFails` の期待結果 |
+| own transactions read | allow | allow | pass | `createdByUid == request.auth.uid` |
+| other customer transactions read | deny | deny | pass | `assertFails` の期待結果 |
+| staff order approve update | allow | allow | pass | Firebase Auth staff + `staffByEmail` 前提 |
+| staff order fulfill update | allow | allow | pass | required actor fields を含む |
+| staff return completion update | allow | allow | pass | `pending_return -> completed` |
+| pending_link order customer linking update | allow | allow | pass | `pending_link -> pending` |
+| passcode-only staff write | deny | deny | pass | unauthenticated context で検証 |
+| missing `staffByEmail` staff write | deny | deny | pass | `assertFails` の期待結果 |
 
 ---
 
@@ -101,7 +129,6 @@ Firestore Console / script による本番 Firestore data の create / update / 
 
 今回実行していないこと:
 
-- emulator / Rules Playground / rules unit test による allow / deny 実行検証。
 - 本番 Firestore data の create / update / delete。
 - production app flow による portal order / return / uncharged report 作成。
 - Security Rules deploy。
@@ -112,9 +139,8 @@ Firestore Console / script による本番 Firestore data の create / update / 
 
 ## 6. Deploy Blockers
 
-この static comparison で field mismatch は見つからなかったが、Security Rules deploy 前には以下が残る。
+static comparison と executable allow / deny verification は pass したが、Security Rules deploy 前には以下が残る。
 
-- portal / `customerUsers` / `transactions` / `tanks` / `logs` の executable allow / deny verification は未実行。
 - `customerUsers.status` 既存 field が残る data では、owner update が rules の `status` 禁止に抵触する可能性がある。
 - `staffByEmail` casing policy が未解決。
 - passcode localStorage session は Rules 上 staff ではない。
@@ -131,7 +157,7 @@ Firestore Console / script による本番 Firestore data の create / update / 
 - staff UID mirror readiness: ready
 - staff UID rules manual verification: pass
 - portal / customer / transactions / tanks / logs static comparison: pass
-- portal / customer / transactions / tanks / logs executable allow / deny verification: not run
+- portal / customer / transactions / tanks / logs executable allow / deny verification: pass
 - Security Rules deploy readiness: not ready
 
 Security Rules deploy はまだ実行しない。
@@ -140,8 +166,7 @@ Security Rules deploy はまだ実行しない。
 
 ## 8. Next Steps
 
-1. portal / customer / transactions / tanks / logs の executable allow / deny verification を emulator / Rules Playground 相当で行う。
-2. `customerUsers.status` 既存 field の read-only aggregate と方針を確認する。
-3. `staffByEmail` casing policy を決める。
-4. self-link rule が必要かを決める。
-5. Security Rules deploy 専用 operation / rollback 手順を別 PR で用意する。
+1. `customerUsers.status` 既存 field の read-only aggregate と方針を確認する。
+2. `staffByEmail` casing policy を決める。
+3. self-link rule が必要かを決める。
+4. Security Rules deploy 専用 operation / rollback 手順を別 PR で用意する。
