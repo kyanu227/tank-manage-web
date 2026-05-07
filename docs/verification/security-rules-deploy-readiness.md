@@ -54,10 +54,11 @@
 - `customerUsers.status` existing field policy は [Customer Users Status Field Policy](./customer-users-status-field-policy.md) で ready 確認済み。
 - `staffByEmail` casing policy は [Staff By Email Casing Policy](./staff-by-email-casing-policy.md) で ready 確認済み。
 - self-link rule decision は [Staff Self-Link Rule Policy](./staff-self-link-rule-policy.md) で ready 確認済み。現時点では self-link rule を導入しない。
+- Security Rules deploy operation / rollback 手順は [Security Rules Deploy Operation](../deploy/security-rules-deploy-operation.md) に記録済み。
 
 残る blocker:
 
-- Security Rules deploy operation / rollback 手順が未作成。
+- Security Rules deploy は未実行。
 
 deploy blocker ではなく別フェーズで扱う caution:
 
@@ -178,7 +179,7 @@ I. `staffByEmail` casing policy: 完了済み
 
 J. self-link rule decision: 完了済み
 
-K. Security Rules deploy operation / rollback procedure docs
+K. Security Rules deploy operation / rollback procedure docs: 完了済み
 
 L. Security Rules deploy PR / operation
 
