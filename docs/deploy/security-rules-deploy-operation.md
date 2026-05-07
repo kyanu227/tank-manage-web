@@ -28,7 +28,7 @@ Security Rules deploy は Hosting deploy と分離する。
 
 対象 commit:
 
-- `4e709a7af394ff95458d9272f99a0b52c20041eb`
+- `9d9ac16c68b6adf2401e6b78184580ec709380fb`
 
 deploy 対象:
 
@@ -254,8 +254,8 @@ Smoke test result:
 ## 12. Current Status
 
 - Security Rules deploy operation / rollback procedure: documented
-- Security Rules deploy: not run
+- Security Rules deploy: executed on 2026-05-08
 - Hosting deploy: not run
-- Firestore data edit: not run
+- Firestore Console / script direct data edit: not run
 
-この document が merge された後、次は専用 Security Rules deploy operation に進める。
+deploy result は [Security Rules Deploy Result](./security-rules-deploy-result.md) を参照する。
