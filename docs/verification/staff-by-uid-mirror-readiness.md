@@ -15,12 +15,13 @@
 
 ## 1. Summary
 
-- deploy judgment: not ready
+- deploy judgment: ready for active staff mirror readiness
 - active staff は 1 件。
-- active staff の `authUid` 設定済みは 0 件。
-- `staffByUid` mirror は 0 件。
+- active staff の `authUid` 設定済みは 1 件。
+- `staffByUid` mirror は 1 件。
 - `staffByEmail` mirror は既存互換として確認済み。
-- active staff の UID 紐付けが未完了のため、Security Rules deploy / AuthGuard staffByUid-first migration 前の blocker として残す。
+- 既存 `staffByEmail` staff 向けの email-auth UID link / bootstrap により、active staff の UID mirror readiness blocker は解消済み。
+- Security Rules deploy readiness 全体は、他の manual verification / Rules self-link 方針が残るためまだ ready ではない。
 
 ---
 
@@ -69,6 +70,27 @@ node /private/tmp/staff-by-uid-oauth-readiness-check.mjs
 
 ## 4. Result
 
+2026-05-07 app-flow verification 後:
+
+| item | result |
+|---|---:|
+| staff total | 1 |
+| active staff count | 1 |
+| active staff with `authUid` | 1 |
+| active staff without `authUid` | 0 |
+| `staffByUid` docs count | 1 |
+| `staffByEmail` docs count | 1 |
+| `staffJoinRequests` docs count | 0 |
+
+after detail:
+
+- `staffByUid` mirror exists: true
+- `staffByUid.staffId` matches active staff: true
+- `staffByUid.email` / `role` / `rank` match active staff aggregate expectation.
+- target `staffJoinRequests/{uid}` exists: false
+
+2026-05-07 PR #53 readiness check 時点:
+
 | item | result |
 |---|---:|
 | staff total | 1 |
@@ -100,29 +122,36 @@ Mismatch detail:
 
 ## 5. Deploy Judgment
 
-判定: not ready
+判定: ready for active staff mirror readiness
 
 理由:
 
-- active staff 1 件のうち `authUid` 設定済みは 0 件。
-- `staffByUid` mirror は 0 件。
-- `staffByEmail` mirror は確認できているが、`staffByUid` mirror readiness の代替にはしない。
-- Security Rules deploy 前に、active staff の UID 紐付けと `staffByUid` mirror 作成方針を別作業で確認する必要がある。
+- active staff 1 件のうち `authUid` 設定済みは 1 件。
+- `staffByUid` mirror は 1 件。
+- `staffByEmail` mirror は既存互換として残っている。
+- `staffJoinRequests` は 0 件のまま。
+- active staff の UID mirror readiness blocker は解消済み。
+- Security Rules deploy readiness 全体は、他の manual verification / Rules self-link 方針が残るためまだ ready ではない。
 
 ---
 
 ## 6. Blockers
 
-- active staff の `authUid` が未設定。
-- active staff に対応する `staffByUid` mirror が未作成。
+解消済み:
+
+- active staff の `authUid` 設定。
+- active staff に対応する `staffByUid` mirror 作成。
+
+残る blocker:
+
 - `staffByUid` mirror は staff 正本ではないため、Firestore console で直接手作業作成しない。
 - `staffByUid` mirror は admin 承認 service または既存 `staffByEmail` staff 向けの email-auth UID link service 経由で作る方針を維持する。
 - 既存 `staffByEmail` staff 向けの UID link / bootstrap 方針は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) を参照する。
-- 本番で `staffJoinRequests` 承認 UI を使う前に、検証用 account で申請から承認までの流れを確認する必要がある。
+- 本番で `staffJoinRequests` 承認 UI を使う前に、必要であれば検証用 account で申請から承認までの流れを確認する必要がある。
 - AuthGuard staffByUid-first migration は未実施。
 - `NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS` は本番有効化していない。
 
-Security Rules deploy はまだ不可。deploy 前に上記 blocker を別 PR / 別 operation で解消または明示的に受容する必要がある。
+Security Rules deploy はまだ不可。deploy 前に staff UID mirror 以外の残 blocker を別 PR / 別 operation で解消または明示的に受容する必要がある。
 
 ---
 

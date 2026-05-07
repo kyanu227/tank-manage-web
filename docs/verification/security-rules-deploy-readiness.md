@@ -46,12 +46,14 @@
 - `firebase.json` には PR #50 で Firestore Rules 接続を追加済み。
 - Firestore Rules 構文チェックは 2026-05-07 に非deploy emulator 起動で pass 済み。
 - `staffJoinRequests` / `staffByUid` の manual verification は [Security Rules Staff UID Manual Verification Result](./security-rules-staff-uid-manual-verification-result.md) で pass 済み。
+- active staff の `staffByUid` mirror readiness は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) で ready 確認済み。
+- 既存 `staffByEmail` staff の UID link 実行確認は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) で pass 済み。
 
 残る blocker:
 
 - portal / `customerUsers` / `transactions` / `tanks` / `logs` の manual verification が未実行。
-- active staff の `staffByUid` mirror readiness は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) で not ready。
-- 既存 `staffByEmail` staff の UID link 実行確認は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) で未完了。
+- Security Rules deploy 後に一般 staff self-link を許可するかは未決定。
+- self-link を許可する場合、`firestore.rules` の追加 hardening / manual verification が別途必要。
 - `staffByEmail` casing policy が未解決。
 - passcode localStorage session は Rules 上 staff ではない。
 - 既存 `isStaff()` は `staffByEmail` ベースのまま。
@@ -124,7 +126,7 @@ deploy 前に、少なくとも以下のカテゴリを検証する。
 ## 6. Data readiness plan
 
 - active staff の UID 紐付け状況を確認する必要がある。
-- `staffByUid` mirror readiness 結果は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) を参照する。
+- `staffByUid` mirror readiness 結果は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) を参照する。2026-05-07 時点で active staff mirror readiness は ready。
 - 既存 `staffByEmail` 登録済み staff は join request ではなく email-auth UID link / bootstrap 経路で紐付ける方針とする。
 - email-auth UID link / bootstrap の詳細は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) を参照する。
 - `staffByUid` mirror は staff 正本ではない。
