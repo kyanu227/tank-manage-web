@@ -29,6 +29,7 @@ PR #31 で Security Rules readiness audit を作成し、PR #32 で未deploy の
 - [Security Rules Deploy Readiness](./security-rules-deploy-readiness.md)
 - Firestore Rules の非deploy構文確認結果は deploy readiness doc の "Syntax check result" を参照する。
 - [Security Rules Staff UID Manual Verification Result](./security-rules-staff-uid-manual-verification-result.md)
+- [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md)
 
 ---
 

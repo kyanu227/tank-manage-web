@@ -20,7 +20,8 @@
 - Security Rules deploy は未実行。
 - Hosting deploy は PR #48 の overview 反映時に実施済みだが、Security Rules deploy とは分離して扱う。
 - `NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS` は変更していない。
-- Firestore data は未操作。
+- PR #54 の app-flow verification で、アプリ通常フローによる `staff.authUid` / `staffByUid` write は実施済み。
+- Firestore Console / script による直接 create / update / delete は未実行。
 
 この document は docs-only の readiness 記録であり、Security Rules deploy、Hosting deploy、Firestore data 操作は行わない。
 
@@ -48,10 +49,12 @@
 - `staffJoinRequests` / `staffByUid` の manual verification は [Security Rules Staff UID Manual Verification Result](./security-rules-staff-uid-manual-verification-result.md) で pass 済み。
 - active staff の `staffByUid` mirror readiness は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) で ready 確認済み。
 - 既存 `staffByEmail` staff の UID link 実行確認は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) で pass 済み。
+- portal / `customerUsers` / `transactions` / `tanks` / `logs` の static comparison は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) で pass 確認済み。
 
 残る blocker:
 
-- portal / `customerUsers` / `transactions` / `tanks` / `logs` の manual verification が未実行。
+- portal / `customerUsers` / `transactions` / `tanks` / `logs` の executable allow / deny verification は未実行。
+- `customerUsers.status` 既存 field が残る data では、owner update が rules の `status` 禁止に抵触する可能性がある。
 - Security Rules deploy 後に一般 staff self-link を許可するかは未決定。
 - self-link を許可する場合、`firestore.rules` の追加 hardening / manual verification が別途必要。
 - `staffByEmail` casing policy が未解決。
@@ -111,6 +114,7 @@ deploy 前に、少なくとも以下のカテゴリを検証する。
 - `customerUsers` first login / update / setup
 - portal order / return / uncharged report create
 - staff transaction update
+- portal / `customerUsers` / `transactions` / `tanks` / `logs` static comparison result は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) を参照する
 - `staffJoinRequests` owner create / get / pending update
 - `staffJoinRequests` admin review update
 - `staffJoinRequests` sub-admin review deny
@@ -161,13 +165,15 @@ D. staff UID manual verification result docs: 完了済み
 
 E. `staffByUid` mirror readiness check docs: not ready として記録
 
-F. portal / `customerUsers` / `transactions` / `tanks` / `logs` manual verification result docs
+F. portal / `customerUsers` / `transactions` / `tanks` / `logs` static verification result docs: 完了済み
 
-G. Security Rules deploy PR / operation
+G. portal / `customerUsers` / `transactions` / `tanks` / `logs` executable allow / deny verification
 
-H. AuthGuard staffByUid-first migration
+H. Security Rules deploy PR / operation
 
-I. feature flag enablement decision
+I. AuthGuard staffByUid-first migration
+
+J. feature flag enablement decision
 
 ---
 
