@@ -27,6 +27,7 @@ PR #31 で Security Rules readiness audit を作成し、PR #32 で未deploy の
 関連:
 
 - [Security Rules Deploy Readiness](./security-rules-deploy-readiness.md)
+- Firestore Rules の非deploy構文確認結果は deploy readiness doc の "Syntax check result" を参照する。
 
 ---
 
@@ -35,7 +36,8 @@ PR #31 で Security Rules readiness audit を作成し、PR #32 で未deploy の
 - 検証対象の branch / commit を記録する。
 - 検証対象の `firestore.rules` がどの commit のものかを記録する。
 - `firestore.rules` は本番未deploy の draft として扱う。
-- `firebase.json` は Firestore Rules に接続しない。
+- `firebase.json` は PR #50 で Firestore Rules に接続済み。
+- この manual verification 作業では `firebase.json` を変更しない。
 - Security Rules deploy はこの検証手順には含めない。
 - Hosting deploy と Security Rules deploy を混ぜない。
 - Firestore console で本番 data を直接編集して検証状態を作らない。
@@ -47,7 +49,7 @@ PR #31 で Security Rules readiness audit を作成し、PR #32 で未deploy の
 
 - `firebase deploy --only firestore:rules` を実行しない。
 - `firebase deploy` や Hosting deploy を実行しない。
-- `firebase.json` を変更しない。
+- この manual verification 作業で `firebase.json` を変更しない。
 - `src/**` を変更しない。
 - Firestore data を直接書き換えない。
 - package files を変更しない。
@@ -693,7 +695,7 @@ deploy 前には、少なくとも以下を確認する。
 ## 10. Security Rules deploy 前 checklist
 
 - [ ] `firestore.rules` draft の対象 commit を確認した。
-- [ ] `firebase.json` を変更していない。
+- [ ] この manual verification 作業で `firebase.json` を変更していない。
 - [ ] Hosting deploy と Security Rules deploy を同じ作業に混ぜていない。
 - [ ] `customerUsers` first login / login update / setup complete の allow を確認した。
 - [ ] linked portal order create の allow を確認した。
