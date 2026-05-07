@@ -92,7 +92,7 @@ env XDG_CONFIG_HOME=/private/tmp/firebase-cli-config XDG_CACHE_HOME=/private/tmp
 - `firestore.rules` の読み込みは pass と扱う。
 - 構文エラーは出ていない。
 - Security Rules deploy は未実行。
-- Hosting deploy は未実行。
+- この syntax check 作業では Hosting deploy は未実行。
 - Firestore data は未操作。
 
 ---
