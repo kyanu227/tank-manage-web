@@ -50,10 +50,10 @@
 - active staff の `staffByUid` mirror readiness は [Staff By UID Mirror Readiness](./staff-by-uid-mirror-readiness.md) で ready 確認済み。
 - 既存 `staffByEmail` staff の UID link 実行確認は [Staff UID Mirror Existing Email Auth](./staff-uid-mirror-existing-email-auth.md) で pass 済み。
 - portal / `customerUsers` / `transactions` / `tanks` / `logs` の static comparison は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) で pass 確認済み。
+- portal / `customerUsers` / `transactions` / `tanks` / `logs` の executable allow / deny verification は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) で pass 確認済み。
 
 残る blocker:
 
-- portal / `customerUsers` / `transactions` / `tanks` / `logs` の executable allow / deny verification は未実行。
 - `customerUsers.status` 既存 field が残る data では、owner update が rules の `status` 禁止に抵触する可能性がある。
 - Security Rules deploy 後に一般 staff self-link を許可するかは未決定。
 - self-link を許可する場合、`firestore.rules` の追加 hardening / manual verification が別途必要。
@@ -114,7 +114,7 @@ deploy 前に、少なくとも以下のカテゴリを検証する。
 - `customerUsers` first login / update / setup
 - portal order / return / uncharged report create
 - staff transaction update
-- portal / `customerUsers` / `transactions` / `tanks` / `logs` static comparison result は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) を参照する
+- portal / `customerUsers` / `transactions` / `tanks` / `logs` static comparison / executable allow-deny result は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) を参照する
 - `staffJoinRequests` owner create / get / pending update
 - `staffJoinRequests` admin review update
 - `staffJoinRequests` sub-admin review deny
@@ -167,13 +167,17 @@ E. `staffByUid` mirror readiness check docs: not ready として記録
 
 F. portal / `customerUsers` / `transactions` / `tanks` / `logs` static verification result docs: 完了済み
 
-G. portal / `customerUsers` / `transactions` / `tanks` / `logs` executable allow / deny verification
+G. portal / `customerUsers` / `transactions` / `tanks` / `logs` executable allow / deny verification: 完了済み
 
-H. Security Rules deploy PR / operation
+H. `customerUsers.status` existing field policy
 
-I. AuthGuard staffByUid-first migration
+I. `staffByEmail` casing policy
 
-J. feature flag enablement decision
+J. Security Rules deploy PR / operation
+
+K. AuthGuard staffByUid-first migration
+
+L. feature flag enablement decision
 
 ---
 
