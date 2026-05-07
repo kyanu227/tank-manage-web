@@ -24,6 +24,10 @@ PR #31 で Security Rules readiness audit を作成し、PR #32 で未deploy の
 
 この document は docs-only であり、実装コード、`firestore.rules`、`firebase.json`、Firestore data、deploy は変更しない。
 
+関連:
+
+- [Security Rules Deploy Readiness](./security-rules-deploy-readiness.md)
+
 ---
 
 ## 2. 前提条件
