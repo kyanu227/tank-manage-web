@@ -52,12 +52,12 @@
 - portal / `customerUsers` / `transactions` / `tanks` / `logs` の static comparison は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) で pass 確認済み。
 - portal / `customerUsers` / `transactions` / `tanks` / `logs` の executable allow / deny verification は [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md) で pass 確認済み。
 - `customerUsers.status` existing field policy は [Customer Users Status Field Policy](./customer-users-status-field-policy.md) で ready 確認済み。
+- `staffByEmail` casing policy は [Staff By Email Casing Policy](./staff-by-email-casing-policy.md) で ready 確認済み。
 
 残る blocker:
 
 - Security Rules deploy 後に一般 staff self-link を許可するかは未決定。
 - self-link を許可する場合、`firestore.rules` の追加 hardening / manual verification が別途必要。
-- `staffByEmail` casing policy が未解決。
 - passcode localStorage session は Rules 上 staff ではない。
 - 既存 `isStaff()` は `staffByEmail` ベースのまま。
 - AuthGuard staffByUid-first migration は未実施。
@@ -171,13 +171,15 @@ G. portal / `customerUsers` / `transactions` / `tanks` / `logs` executable allow
 
 H. `customerUsers.status` existing field policy: 完了済み
 
-I. `staffByEmail` casing policy
+I. `staffByEmail` casing policy: 完了済み
 
-J. Security Rules deploy PR / operation
+J. self-link rule decision
 
-K. AuthGuard staffByUid-first migration
+K. Security Rules deploy PR / operation
 
-L. feature flag enablement decision
+L. AuthGuard staffByUid-first migration
+
+M. feature flag enablement decision
 
 ---
 
