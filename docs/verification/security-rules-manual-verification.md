@@ -32,6 +32,7 @@ PR #31 で Security Rules readiness audit を作成し、PR #32 で未deploy の
 - [Portal Customer Transactions Rules Verification](./portal-customer-transactions-rules-verification.md)
 - [Customer Users Status Field Policy](./customer-users-status-field-policy.md)
 - [Staff By Email Casing Policy](./staff-by-email-casing-policy.md)
+- [Staff Self-Link Rule Policy](./staff-self-link-rule-policy.md)
 
 ---
 
