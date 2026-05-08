@@ -2,6 +2,8 @@
 
 実施日時: 2026-05-08 21:09 JST
 
+追加実施日時: 2026-05-08 21:15 JST
+
 対象 commit: `48e47869a6f3a348e35957611d8c226fa1a99d1a`
 
 対象 project: `okmarine-tankrental`
@@ -31,8 +33,9 @@ Overall result: `partial`
 | portal setup complete | pass | アプリ通常フローで setup 完了 |
 | portal protected route read | pass | `/portal` / `/portal/order` / `/portal/return` / `/portal/unfilled` に到達 |
 | portal order create | pass | marker 付き order を 1 件作成 |
-| staff order visibility | partial | unlinked customer の仮受付 order のため staff 受注一覧には未表示 |
-| admin portal user visibility | pass | admin のポータル利用者画面で marker 付き未紐付け user を確認 |
+| customer linking | pass | admin のポータル利用者画面で `SH` に紐付け |
+| staff order visibility | pass | customer linking 後、staff 受注一覧に marker 付き order が表示 |
+| order approve | skipped | 現行 UI では承認ボタンが見当たらず、order 詳細は tank scan / fulfillment 画面に入る |
 | tank state change | skipped | 検証用 tank 未指定のため実行せず |
 | delete / void / direct edit | skipped | 今回対象外 |
 
@@ -52,6 +55,7 @@ Firestore Console / script direct edit は実行していない。
 |---|---|---|---|
 | portal setup complete | `customerUsers/{uid}` profile / setup fields | pass | 検証用 marker `VERIFY-20260508` を会社名・LINE名に設定 |
 | portal order create | `transactions` order create | pass | 引き取り / スチール 10L / 1 本 / marker 付き memo |
+| customer linking | `customerUsers/{uid}` customer link update、対象 `pending_link` transaction の `pending` 化 | pass | admin `/admin/customers/users` で `SH` に紐付け |
 
 作成された order:
 
@@ -59,7 +63,8 @@ Firestore Console / script direct edit は実行していない。
 - note marker: `VERIFY-20260508 portal order read/write check`
 - delivery type: 引き取り
 - item: スチール 10L x 1
-- customer state: 未紐付け customerUser のため仮受付扱い
+- initial customer state: 未紐付け customerUser のため仮受付扱い
+- linked customer for verification: `SH`
 
 個人情報は docs には記録しない。
 
@@ -92,32 +97,57 @@ Result: `pass`
 
 ---
 
-## 5. Staff / Admin Visibility
+## 5. Customer Linking / Staff Visibility
 
-### Staff
+### Observed Initial Behavior
 
-`/staff/lend` の受注 tab を確認した。
+`/portal/setup` の氏名欄は Firebase Auth の `displayName` を初期値として表示した。
 
-Result: `partial`
+この検証では、氏名欄に既存 displayName 由来の値が入っていた。これは `ensureCustomerUser()` / setup page の現行挙動であり、今回の検証では変更していない。
 
-Memo:
+仮受付 order は `pending_link` として作成され、customer linking 前は staff 受注一覧には表示されなかった。
 
-- visible permission-denied / 404 / runtime error はなし。
-- 作成した `#O6LB7Q` / `VERIFY-20260508` order は staff 受注一覧には表示されなかった。
-- portal account が customer 未紐付けのため、作成 order は仮受付 / pending link 扱いと判断した。
-- 本番 customer への紐付けは影響範囲があるため実行していない。
+この挙動は、現行 staff 受注一覧が `pending` / `pending_approval` / `approved` を取得し、`pending_link` を直接表示しないためと整理する。
 
-### Admin
+### Admin Linking
 
-`/admin/customers/users` を確認した。
+`/admin/customers/users` で marker `VERIFY-20260508` の portal user を `SH` に紐付けた。
 
 Result: `pass`
 
 Memo:
 
 - visible permission-denied / 404 / runtime error はなし。
-- marker `VERIFY-20260508` の未紐付け portal user が表示された。
-- customer 紐付け保存は実行していない。
+- Firestore Console / script direct edit は未実行。
+- app normal flow の保存のみ実行した。
+- 保存後、portal user は `紐付け済` / `SH` として表示された。
+- 紐付けにより、対象 `pending_link` order は `pending` に移った。
+
+### Staff
+
+`/staff/lend` の受注 tab を確認した。
+
+Result: `pass`
+
+Memo:
+
+- visible permission-denied / 404 / runtime error はなし。
+- customer linking 前、作成した `#O6LB7Q` / `VERIFY-20260508` order は staff 受注一覧には表示されなかった。
+- customer linking 後、staff 受注一覧に `SH` / `VERIFY-20260508 portal order read/write check` / スチール 10L x 1 が表示された。
+- header の受注 count は `2` から `3` に増えた。
+
+### Order Detail / Approve
+
+staff 受注一覧から marker 付き order を開いた。
+
+Result: `partial`
+
+Memo:
+
+- visible permission-denied / 404 / runtime error はなし。
+- order detail は tank scan / fulfillment 画面に入った。
+- 現行 UI 上、明示的な `approve` button は見当たらなかった。
+- tank scan / fulfillment は tank state change を伴うため実行していない。
 
 ---
 
@@ -133,7 +163,6 @@ Memo:
 - Firestore Console / script による直接 data edit
 - tank lend / return / fill / damage / repair / inspection / inhouse
 - order approve / fulfill
-- customer linking
 - permissions / settings / billing writes
 
 Tank state change: なし。
@@ -151,7 +180,7 @@ Cleanup: `optional`
 - deploy は実行していない。
 - Firestore Console / script による直接 edit は実行していない。
 - tank state change は実行していない。
-- app-flow write として、検証用 portal setup と portal order が本番 data に残っている。
+- app-flow write として、検証用 portal setup、portal order、customer linking が本番 data に残っている。
 
 Cleanup が必要な場合は、別途専用手順で対象 data と方法を決める。この検証では削除や direct edit は実行しない。
 
@@ -161,14 +190,14 @@ Cleanup が必要な場合は、別途専用手順で対象 data と方法を決
 
 残る確認:
 
-- 検証用 customer を明確にした上での portal user linking。
-- customer linking 後の staff order visibility。
-- 検証用 tank を明確にした上での order approve / fulfill。
+- order approve の画面導線 / UI 方針確認。
+- 検証用 tank を明確にした上での order fulfill。
 - 検証用 tank を明確にした上での return / fill / damage / repair / inspection / inhouse。
 - delete / void / permissions / settings / billing は専用手順で別途確認。
 
 次の推奨:
 
-1. `VERIFY-20260508` の portal user をどの検証用 customer に紐付けるか決める。
-2. 紐付け後、`#O6LB7Q` が staff 受注一覧に出るか確認する。
-3. tank state change を伴う検証は、検証用 tank が決まるまで実行しない。
+1. setup 氏名欄に Firebase Auth `displayName` を初期値として入れる UX を維持するか決める。
+2. `pending_link` order を staff 受注一覧にも出すべきか、admin linking 後だけ出すべきか決める。
+3. order approve の UI 方針を確認する。
+4. tank state change を伴う検証は、検証用 tank が決まるまで実行しない。
