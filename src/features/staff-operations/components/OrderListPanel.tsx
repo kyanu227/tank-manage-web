@@ -127,15 +127,15 @@ export default function OrderListPanel({
                 {memoList.length > 0 && (
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {memoList.map((memo) => (
-                    <p style={{
-                      margin: 0,
-                      fontSize: 12,
-                      color: "#64748b",
-                      fontWeight: 600,
-                      overflowWrap: "anywhere",
-                    }}>
-                      メモ: {memo}
-                    </p>
+                      <p key={memo} style={{
+                        margin: 0,
+                        fontSize: 12,
+                        color: "#64748b",
+                        fontWeight: 600,
+                        overflowWrap: "anywhere",
+                      }}>
+                        メモ: {memo}
+                      </p>
                     ))}
                   </div>
                 )}
