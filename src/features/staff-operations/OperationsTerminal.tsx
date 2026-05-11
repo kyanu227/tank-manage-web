@@ -153,6 +153,8 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         <OrderListPanel
           ordersLoading={orders.ordersLoading}
           pendingOrders={orders.pendingOrders}
+          approveOrder={orders.approveOrder}
+          approvingOrderId={orders.approvingOrderId}
           openFulfillment={orders.openFulfillment}
         />
       )}
