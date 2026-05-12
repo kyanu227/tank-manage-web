@@ -14,6 +14,13 @@ interface BulkReturnByLocationPanelProps {
 }
 
 const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
+  normal: {
+    key: "normal",
+    label: "通常返却",
+    shortLabel: "通常",
+    color: "#2563eb",
+    background: "#eff6ff",
+  },
   customer_requests: {
     key: "customer_requests",
     label: "返却タグ処理待ち",
@@ -23,17 +30,10 @@ const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customer
   },
   long_term: {
     key: "long_term",
-    label: "長期 / 持ち越し確認",
+    label: "長期貸出",
     shortLabel: "長期",
     color: "#d97706",
     background: "#fffbeb",
-  },
-  normal: {
-    key: "normal",
-    label: "通常返却",
-    shortLabel: "通常",
-    color: "#2563eb",
-    background: "#eff6ff",
   },
 };
 
@@ -86,7 +86,7 @@ export default function BulkReturnByLocationPanel({
       stats[segment].taggedCount += tanks.filter((tank) => tank.tag !== "normal").length;
     });
 
-    return [stats.customer_requests, stats.long_term, stats.normal];
+    return [stats.normal, stats.customer_requests, stats.long_term];
   }, [groupedTanks, locationKeys, locationSegments]);
 
   const filteredLocationKeys = useMemo(

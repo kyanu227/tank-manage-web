@@ -38,15 +38,15 @@ const MENU_ITEMS: Array<{
   label: string;
   offsetY: number;
 }> = [
-  { key: "customer_requests", label: "タグ待ち", offsetY: -SLOT_HEIGHT_PX },
-  { key: "long_term", label: "長期", offsetY: 0 },
-  { key: "normal", label: "通常", offsetY: SLOT_HEIGHT_PX },
+  { key: "normal", label: "通常", offsetY: -SLOT_HEIGHT_PX },
+  { key: "customer_requests", label: "タグ待ち", offsetY: 0 },
+  { key: "long_term", label: "長期", offsetY: SLOT_HEIGHT_PX },
 ];
 
 function resolveSegmentFromDrag(dy: number): ReturnSegmentKey {
-  if (dy < -SLOT_HEIGHT_PX * 0.55) return "customer_requests";
-  if (dy > SLOT_HEIGHT_PX * 0.55) return "normal";
-  return "long_term";
+  if (dy < -SLOT_HEIGHT_PX * 0.55) return "normal";
+  if (dy > SLOT_HEIGHT_PX * 0.55) return "long_term";
+  return "customer_requests";
 }
 
 export default function ReturnSegmentGestureLauncher({
@@ -319,19 +319,20 @@ export default function ReturnSegmentGestureLauncher({
         {segments.map((segment) => {
           const isActive = activeSegment === segment.key;
           const isHovered = hoveredKey === segment.key;
+          const hasItems = segment.customerCount > 0 || segment.tankCount > 0;
           return (
             <div
               key={segment.key}
               title={`${segment.label}: ${segment.customerCount}顧客 / ${segment.tankCount}本`}
               style={{
                 ...selectionSuppressionStyle,
-                width: isActive || isHovered ? 8 : 5,
-                height: isActive || isHovered ? 8 : 5,
+                width: isActive || isHovered ? 8 : hasItems ? 7 : 5,
+                height: isActive || isHovered ? 8 : hasItems ? 7 : 5,
                 borderRadius: 999,
-                border: isActive || isHovered ? `2px solid ${segment.color}` : "1px solid rgba(100,116,139,0.34)",
-                background: isActive || isHovered ? segment.background : "rgba(100,116,139,0.28)",
-                opacity: isOpen ? 0.95 : isActive ? 0.85 : 0.42,
-                boxShadow: isHovered ? `0 0 0 5px ${segment.color}18` : "none",
+                border: isActive || isHovered || hasItems ? `2px solid ${segment.color}` : "1px solid rgba(100,116,139,0.34)",
+                background: isActive || isHovered || hasItems ? segment.background : "rgba(100,116,139,0.24)",
+                opacity: isOpen ? 0.95 : isActive ? 0.85 : hasItems ? 0.7 : 0.32,
+                boxShadow: isHovered ? `0 0 0 5px ${segment.color}18` : hasItems ? `0 0 0 3px ${segment.color}10` : "none",
                 transform: isHovered ? "scale(1.25)" : isActive ? "scale(1.1)" : "scale(1)",
                 transition: motionTransition,
               }}

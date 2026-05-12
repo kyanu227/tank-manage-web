@@ -28,7 +28,17 @@ interface OperationsTerminalProps {
   initialMode: OpMode;
 }
 
+const AUTO_COLLAPSE_CUSTOMER_THRESHOLD = 5;
+const RETURN_SEGMENT_ORDER: ReturnSegmentKey[] = ["normal", "customer_requests", "long_term"];
+
 const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
+  normal: {
+    key: "normal",
+    label: "通常返却",
+    shortLabel: "通常",
+    color: "#2563eb",
+    background: "#eff6ff",
+  },
   customer_requests: {
     key: "customer_requests",
     label: "返却タグ処理待ち",
@@ -38,17 +48,10 @@ const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "c
   },
   long_term: {
     key: "long_term",
-    label: "長期 / 持ち越し確認",
+    label: "長期貸出",
     shortLabel: "長期",
     color: "#d97706",
     background: "#fffbeb",
-  },
-  normal: {
-    key: "normal",
-    label: "通常返却",
-    shortLabel: "通常",
-    color: "#2563eb",
-    background: "#eff6ff",
   },
 };
 
@@ -134,8 +137,11 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
       stats[segment].taggedCount += tanks.filter((tank) => tank.tag !== "normal").length;
     });
 
-    return [stats.customer_requests, stats.long_term, stats.normal];
+    return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
   }, [bulk.groupedTanks, bulk.locationKeys, returnTagProcessing.returnGroups]);
+
+  const totalReturnCustomerCount = returnSegmentStats.reduce((sum, segment) => sum + segment.customerCount, 0);
+  const shouldShowReturnContent = activeReturnSegment !== null || totalReturnCustomerCount <= AUTO_COLLAPSE_CUSTOMER_THRESHOLD;
 
   const activeReturnSegmentStat = activeReturnSegment
     ? returnSegmentStats.find((segment) => segment.key === activeReturnSegment) ?? null
@@ -240,49 +246,87 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           />
 
           <div style={{ height: "100%", overflowY: "auto", padding: 16 }}>
-          <button
-            onClick={openManualReturn}
-            style={{
-              width: "100%", padding: "10px", borderRadius: 12, border: "1.5px solid #e2e8f0",
-              background: "#fff", color: "#10b981", fontSize: 13, fontWeight: 800,
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              cursor: "pointer", marginBottom: 16, transition: "all 0.15s",
-            }}
-          >
-            <ArrowDownToLine size={16} />
-            手動返却
-          </button>
+            <button
+              onClick={openManualReturn}
+              style={{
+                width: "100%", padding: "10px", borderRadius: 12, border: "1.5px solid #e2e8f0",
+                background: "#fff", color: "#10b981", fontSize: 13, fontWeight: 800,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                cursor: "pointer", marginBottom: 12, transition: "all 0.15s",
+              }}
+            >
+              <ArrowDownToLine size={16} />
+              手動返却
+            </button>
 
-          {activeReturnSegment === "customer_requests" && activeReturnSegmentStat && (
-            <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 14, background: activeReturnSegmentStat.background, color: activeReturnSegmentStat.color, fontSize: 12, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-              <span>
-                {activeReturnSegmentStat.label} {activeReturnSegmentStat.customerCount}顧客 / {activeReturnSegmentStat.tankCount}本
-              </span>
-              <button
-                type="button"
-                onClick={() => setActiveReturnSegment(null)}
-                style={{ border: "1px solid #d1fae5", background: "#fff", color: "#047857", borderRadius: 999, padding: "5px 9px", fontSize: 11, fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" }}
-              >
-                全て表示
-              </button>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginBottom: 12 }}>
+              {returnSegmentStats.map((segment) => {
+                const isActive = activeReturnSegment === segment.key;
+                const hasItems = segment.customerCount > 0 || segment.tankCount > 0;
+                return (
+                  <button
+                    key={segment.key}
+                    type="button"
+                    onClick={() => setActiveReturnSegment(isActive ? null : segment.key)}
+                    style={{
+                      border: `1.5px solid ${isActive || hasItems ? segment.color : "#e2e8f0"}`,
+                      background: isActive || hasItems ? segment.background : "#fff",
+                      color: isActive || hasItems ? segment.color : "#94a3b8",
+                      borderRadius: 14,
+                      padding: "10px 8px",
+                      minHeight: 72,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      gap: 6,
+                      textAlign: "left",
+                      cursor: "pointer",
+                      opacity: hasItems || isActive ? 1 : 0.58,
+                      boxShadow: isActive ? `0 8px 18px ${segment.color}22` : hasItems ? `0 0 0 3px ${segment.color}10` : "none",
+                      transform: isActive ? "translateY(-1px)" : "translateY(0)",
+                      transition: "transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 140ms, opacity 120ms",
+                    }}
+                  >
+                    <span style={{ fontSize: 12, fontWeight: 900, lineHeight: 1.2 }}>{segment.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: hasItems || isActive ? segment.color : "#cbd5e1" }}>
+                      {segment.customerCount}顧客 / {segment.tankCount}本
+                    </span>
+                  </button>
+                );
+              })}
             </div>
-          )}
 
-          {(activeReturnSegment === null || activeReturnSegment === "customer_requests") && (
-            <ReturnRequestList
-              pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
-              returnGroups={returnTagProcessing.returnGroups}
-              openReturnTagGroup={returnTagProcessing.openReturnTagGroup}
-            />
-          )}
+            {shouldShowReturnContent && activeReturnSegment === "customer_requests" && activeReturnSegmentStat && (
+              <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 14, background: activeReturnSegmentStat.background, color: activeReturnSegmentStat.color, fontSize: 12, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                <span>
+                  {activeReturnSegmentStat.label} {activeReturnSegmentStat.customerCount}顧客 / {activeReturnSegmentStat.tankCount}本
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setActiveReturnSegment(null)}
+                  style={{ border: "1px solid #d1fae5", background: "#fff", color: "#047857", borderRadius: 999, padding: "5px 9px", fontSize: 11, fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" }}
+                >
+                  全て表示
+                </button>
+              </div>
+            )}
 
-          {activeReturnSegment !== "customer_requests" && (
-            <BulkReturnByLocationPanel
-              bulk={bulk}
-              activeSegment={activeReturnSegment}
-              onClearSegment={() => setActiveReturnSegment(null)}
-            />
-          )}
+            {shouldShowReturnContent && (activeReturnSegment === null || activeReturnSegment === "customer_requests") && (
+              <ReturnRequestList
+                pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
+                returnGroups={returnTagProcessing.returnGroups}
+                openReturnTagGroup={returnTagProcessing.openReturnTagGroup}
+              />
+            )}
+
+            {shouldShowReturnContent && activeReturnSegment !== "customer_requests" && (
+              <BulkReturnByLocationPanel
+                bulk={bulk}
+                activeSegment={activeReturnSegment}
+                onClearSegment={() => setActiveReturnSegment(null)}
+              />
+            )}
           </div>
         </div>
       )}
