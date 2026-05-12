@@ -8,6 +8,8 @@
 
 この document は、顧客ポータルの未充填報告 `transactions.type == "uncharged_report"` について、Phase 2 の最小実装範囲を確定する。
 
+> Superseded note: 返却画面統合型の顧客申請タグレビュー方針は [return-screen-customer-request-review-design.md](./return-screen-customer-request-review-design.md) を正とする。この document の独立 staff handling workflow 方針は履歴として残すが、今後の実装では未充填報告を返却画面の顧客申請タグ確認導線へ統合する。
+
 今回の範囲:
 
 - docs-only
