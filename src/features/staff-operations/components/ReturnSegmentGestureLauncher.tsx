@@ -1,7 +1,6 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
-import { CircleDotDashed } from "lucide-react";
 
 export type ReturnSegmentKey = "customer_requests" | "long_term" | "normal";
 
@@ -22,22 +21,25 @@ interface ReturnSegmentGestureLauncherProps {
   onSelectSegment: (segment: ReturnSegmentKey) => void;
 }
 
-type MenuKey = ReturnSegmentKey | "manual";
-
 const LONG_PRESS_MS = 300;
 const MOVE_TOLERANCE_PX = 12;
+const SLOT_HEIGHT_PX = 48;
 
 const MENU_ITEMS: Array<{
-  key: MenuKey;
+  key: ReturnSegmentKey;
   label: string;
-  disabled?: boolean;
-  position: { right: number; top: number };
+  offsetY: number;
 }> = [
-  { key: "customer_requests", label: "顧客申請あり", position: { right: 58, top: -92 } },
-  { key: "long_term", label: "長期 / 持ち越し", position: { right: 76, top: -32 } },
-  { key: "normal", label: "通常返却", position: { right: 58, top: 28 } },
-  { key: "manual", label: "手動 未接続", disabled: true, position: { right: 118, top: -156 } },
+  { key: "customer_requests", label: "申請", offsetY: -SLOT_HEIGHT_PX },
+  { key: "long_term", label: "長期", offsetY: 0 },
+  { key: "normal", label: "通常", offsetY: SLOT_HEIGHT_PX },
 ];
+
+function resolveSegmentFromDrag(dy: number): ReturnSegmentKey {
+  if (dy < -SLOT_HEIGHT_PX * 0.55) return "customer_requests";
+  if (dy > SLOT_HEIGHT_PX * 0.55) return "normal";
+  return "long_term";
+}
 
 export default function ReturnSegmentGestureLauncher({
   activeSegment,
@@ -45,16 +47,21 @@ export default function ReturnSegmentGestureLauncher({
   onSelectSegment,
 }: ReturnSegmentGestureLauncherProps) {
   const [isOpen, setIsOpen] = useState(false);
-  const [hoveredKey, setHoveredKey] = useState<MenuKey | null>(null);
+  const [hoveredKey, setHoveredKey] = useState<ReturnSegmentKey | null>(null);
+  const [reducedMotion, setReducedMotion] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
-  const itemRefs = useRef<Partial<Record<MenuKey, HTMLButtonElement | null>>>({});
   const gestureRef = useRef<{
     pointerId: number;
     startX: number;
     startY: number;
+    anchorY: number;
     timer: number | null;
     opened: boolean;
+    movedAfterOpen: boolean;
   } | null>(null);
+  const motionTransition = reducedMotion
+    ? "none"
+    : "transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), opacity 120ms, box-shadow 140ms, border-color 120ms, background 120ms";
 
   const clearGesture = useCallback(() => {
     const gesture = gestureRef.current;
@@ -73,24 +80,13 @@ export default function ReturnSegmentGestureLauncher({
     clearGesture();
   }, [clearGesture]);
 
-  const findMenuItem = useCallback((clientX: number, clientY: number): MenuKey | null => {
-    for (const item of MENU_ITEMS) {
-      const node = itemRefs.current[item.key];
-      if (!node) continue;
-      const rect = node.getBoundingClientRect();
-      if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
-        return item.key;
-      }
-    }
-    return null;
-  }, []);
-
   const openMenu = useCallback(() => {
     const gesture = gestureRef.current;
     if (!gesture || gesture.opened) return;
     gesture.opened = true;
     gesture.timer = null;
     setIsOpen(true);
+    setHoveredKey(null);
     rootRef.current?.setPointerCapture?.(gesture.pointerId);
   }, []);
 
@@ -102,8 +98,10 @@ export default function ReturnSegmentGestureLauncher({
       pointerId: event.pointerId,
       startX: event.clientX,
       startY: event.clientY,
+      anchorY: event.clientY,
       timer,
       opened: false,
+      movedAfterOpen: false,
     };
   };
 
@@ -121,16 +119,16 @@ export default function ReturnSegmentGestureLauncher({
     }
 
     event.preventDefault();
-    setHoveredKey(findMenuItem(event.clientX, event.clientY));
+    gesture.movedAfterOpen = true;
+    setHoveredKey(resolveSegmentFromDrag(event.clientY - gesture.anchorY));
   };
 
-  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
+  const handlePointerUp = () => {
     const gesture = gestureRef.current;
     if (!gesture) return;
 
-    const selectedKey = gesture.opened ? findMenuItem(event.clientX, event.clientY) : null;
-    if (selectedKey && selectedKey !== "manual") {
-      onSelectSegment(selectedKey);
+    if (gesture.opened && gesture.movedAfterOpen && hoveredKey) {
+      onSelectSegment(hoveredKey);
     }
     closeMenu();
   };
@@ -139,9 +137,15 @@ export default function ReturnSegmentGestureLauncher({
     closeMenu();
   };
 
-  const activeLabel = segments.find((segment) => segment.key === activeSegment)?.shortLabel ?? "全体";
-
   useEffect(() => clearGesture, [clearGesture]);
+
+  useEffect(() => {
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const update = () => setReducedMotion(media.matches);
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
 
   return (
     <div
@@ -154,11 +158,11 @@ export default function ReturnSegmentGestureLauncher({
       aria-label="返却セグメント切替ランチャー"
       style={{
         position: "fixed",
-        right: 8,
+        right: 0,
         top: "48%",
         zIndex: 30,
-        width: 74,
-        minHeight: 158,
+        width: 36,
+        height: 168,
         touchAction: "pan-y",
         userSelect: "none",
       }}
@@ -168,51 +172,73 @@ export default function ReturnSegmentGestureLauncher({
           style={{
             position: "absolute",
             right: 20,
-            top: 58,
+            top: 84,
             width: 1,
             height: 1,
             pointerEvents: "none",
           }}
         >
           {MENU_ITEMS.map((item) => {
-            const segment = item.key === "manual"
-              ? null
-              : segments.find((candidate) => candidate.key === item.key);
+            const segment = segments.find((candidate) => candidate.key === item.key);
             const isHovered = hoveredKey === item.key;
             const isActive = activeSegment === item.key;
             const color = segment?.color ?? "#64748b";
-            const background = item.disabled ? "#f8fafc" : segment?.background ?? "#fff";
+            const background = segment?.background ?? "#fff";
+            const count = segment?.customerCount ?? 0;
 
             return (
-              <button
+              <div
                 key={item.key}
-                ref={(node) => { itemRefs.current[item.key] = node; }}
-                type="button"
-                disabled={item.disabled}
                 style={{
                   position: "absolute",
-                  right: item.position.right,
-                  top: item.position.top,
-                  minWidth: item.key === "manual" ? 92 : 112,
-                  padding: "9px 11px",
+                  right: 20,
+                  top: item.offsetY - 18,
+                  minWidth: 82,
+                  padding: "8px 10px",
                   borderRadius: 999,
-                  border: `2px solid ${isHovered || isActive ? color : "#e2e8f0"}`,
+                  border: `1.5px solid ${isHovered || isActive ? color : "#e2e8f0"}`,
                   background: isHovered || isActive ? background : "#fff",
-                  color: item.disabled ? "#94a3b8" : "#0f172a",
+                  color: isHovered || isActive ? color : "#475569",
                   fontSize: 12,
                   fontWeight: 900,
-                  boxShadow: isHovered ? `0 8px 18px ${color}33` : "0 4px 12px rgba(15,23,42,0.12)",
-                  opacity: item.disabled ? 0.72 : 1,
-                  pointerEvents: "auto",
+                  boxShadow: isHovered ? `0 10px 22px ${color}33` : "0 5px 14px rgba(15,23,42,0.12)",
+                  opacity: isHovered ? 1 : isActive ? 0.92 : 0.64,
                   whiteSpace: "nowrap",
-                  transform: isHovered ? "scale(1.04)" : "scale(1)",
-                  transition: "transform 0.12s, border-color 0.12s, box-shadow 0.12s",
+                  transform: isHovered
+                    ? "translateX(-8px) scale(1.06)"
+                    : isActive
+                      ? "translateX(-3px) scale(0.98)"
+                      : "translateX(0) scale(0.9)",
+                  transition: motionTransition,
                 }}
               >
-                {item.label}
-              </button>
+                {item.label} {count}
+              </div>
             );
           })}
+
+          <div
+            style={{
+              position: "absolute",
+              right: 82,
+              top: -104,
+              minWidth: 92,
+              padding: "8px 10px",
+              borderRadius: 999,
+              border: "1px solid #e2e8f0",
+              background: "#f8fafc",
+              color: "#94a3b8",
+              fontSize: 11,
+              fontWeight: 900,
+              opacity: 0.72,
+              whiteSpace: "nowrap",
+              boxShadow: "0 5px 14px rgba(15,23,42,0.10)",
+              transform: "scale(0.88)",
+              transition: motionTransition,
+            }}
+          >
+            手動 未接続
+          </div>
         </div>
       )}
 
@@ -220,49 +246,42 @@ export default function ReturnSegmentGestureLauncher({
         style={{
           position: "absolute",
           right: 0,
-          top: 0,
-          width: 58,
-          padding: "8px 6px",
-          borderRadius: 999,
-          border: "1px solid rgba(148, 163, 184, 0.35)",
-          background: "rgba(255,255,255,0.92)",
-          boxShadow: "0 8px 22px rgba(15, 23, 42, 0.16)",
+          top: 45,
+          width: 16,
+          padding: "7px 4px",
+          borderRadius: 12,
+          border: isOpen ? "1px solid rgba(148, 163, 184, 0.40)" : "1px solid rgba(148, 163, 184, 0.18)",
+          background: isOpen ? "rgba(255,255,255,0.90)" : "rgba(255,255,255,0.36)",
+          boxShadow: isOpen ? "0 8px 22px rgba(15, 23, 42, 0.15)" : "none",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: 8,
-          backdropFilter: "blur(8px)",
+          gap: 7,
+          backdropFilter: "blur(6px)",
+          transition: motionTransition,
         }}
       >
-        <CircleDotDashed size={14} color="#64748b" />
         {segments.map((segment) => {
           const isActive = activeSegment === segment.key;
+          const isHovered = hoveredKey === segment.key;
           return (
             <div
               key={segment.key}
               title={`${segment.label}: ${segment.customerCount}顧客 / ${segment.tankCount}本`}
               style={{
-                width: "100%",
-                minHeight: 28,
+                width: isActive || isHovered ? 8 : 5,
+                height: isActive || isHovered ? 8 : 5,
                 borderRadius: 999,
-                border: `1.5px solid ${isActive ? segment.color : "#e2e8f0"}`,
-                background: isActive ? segment.background : "#fff",
-                color: isActive ? segment.color : "#64748b",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: 3,
-                fontSize: 10,
-                fontWeight: 900,
-                lineHeight: 1,
+                border: isActive || isHovered ? `2px solid ${segment.color}` : "1px solid rgba(100,116,139,0.34)",
+                background: isActive || isHovered ? segment.background : "rgba(100,116,139,0.28)",
+                opacity: isOpen ? 0.95 : isActive ? 0.85 : 0.42,
+                boxShadow: isHovered ? `0 0 0 5px ${segment.color}18` : "none",
+                transform: isHovered ? "scale(1.25)" : isActive ? "scale(1.1)" : "scale(1)",
+                transition: motionTransition,
               }}
-            >
-              <span>{segment.shortLabel}</span>
-              <span>{segment.customerCount}</span>
-            </div>
+            />
           );
         })}
-        <span style={{ fontSize: 9, color: "#94a3b8", fontWeight: 800 }}>{activeLabel}</span>
       </div>
     </div>
   );
