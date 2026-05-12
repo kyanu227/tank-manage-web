@@ -64,6 +64,8 @@ export interface TransactionDoc {
   id: string;
   type: TransactionType;
   status: string;
+  tankId?: string;
+  source?: string;
   customerId?: string;
   customerName?: string;
   createdByUid?: string;

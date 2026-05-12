@@ -15,6 +15,7 @@ const CARD_DEFS = [
   { key: "renting", label: "貸出中", icon: Truck, color: "#0ea5e9", bg: "#f0f9ff" },
   { key: "activeStaff", label: "稼働スタッフ", icon: Users, color: "#10b981", bg: "#ecfdf5" },
   { key: "pending", label: "要対応", icon: AlertTriangle, color: "#f59e0b", bg: "#fffbeb" },
+  { key: "qualityReports", label: "品質報告", icon: AlertTriangle, color: "#dc2626", bg: "#fef2f2" },
 ] as const;
 
 type CardKey = (typeof CARD_DEFS)[number]["key"];
@@ -26,6 +27,7 @@ export default function AdminDashboardPage() {
     renting: 0,
     activeStaff: 0,
     pending: 0,
+    qualityReports: 0,
   });
 
   useEffect(() => {
@@ -36,13 +38,15 @@ export default function AdminDashboardPage() {
         const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0);
 
         // 3つのクエリを並列実行
-        const [logs, tanks, pendingTxs] = await Promise.all([
+        const [logs, tanks, pendingTxs, unchargedReports] = await Promise.all([
           // 本日のログ → 操作件数 + ユニークスタッフ数
           logsRepository.getActiveLogs({ from: todayStart }),
           // 貸出中タンク数
           tanksRepository.getTanks({ status: STATUS.LENT }),
           // 要対応トランザクション（受注待ち + 返却タグ処理待ち）
           transactionsRepository.getPendingTransactions(),
+          // 顧客起点の未充填報告。read-only visibility 用で、要対応 status には混ぜない。
+          transactionsRepository.getUnchargedReports(),
         ]);
 
         // ログからユニークスタッフ数を集計
@@ -58,6 +62,7 @@ export default function AdminDashboardPage() {
           renting: tanks.length,
           activeStaff: staffSet.size,
           pending: pendingTxs.length,
+          qualityReports: unchargedReports.length,
         });
       } catch (err) {
         console.error("ダッシュボードデータ取得エラー:", err);
