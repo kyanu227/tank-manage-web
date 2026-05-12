@@ -17,8 +17,8 @@ interface BulkReturnByLocationPanelProps {
 const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
   customer_requests: {
     key: "customer_requests",
-    label: "顧客申請あり",
-    shortLabel: "申請",
+    label: "返却タグ処理待ち",
+    shortLabel: "タグ待ち",
     color: "#dc2626",
     background: "#fef2f2",
   },

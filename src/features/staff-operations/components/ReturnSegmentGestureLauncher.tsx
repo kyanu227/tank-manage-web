@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type PointerEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
 
 export type ReturnSegmentKey = "customer_requests" | "long_term" | "normal";
 
@@ -24,13 +24,20 @@ interface ReturnSegmentGestureLauncherProps {
 const LONG_PRESS_MS = 300;
 const MOVE_TOLERANCE_PX = 12;
 const SLOT_HEIGHT_PX = 48;
+const MANUAL_OVERSWIPE_PX = -110;
+const selectionSuppressionStyle: CSSProperties = {
+  userSelect: "none",
+  WebkitUserSelect: "none",
+  WebkitTouchCallout: "none",
+  WebkitTapHighlightColor: "transparent",
+};
 
 const MENU_ITEMS: Array<{
   key: ReturnSegmentKey;
   label: string;
   offsetY: number;
 }> = [
-  { key: "customer_requests", label: "申請", offsetY: -SLOT_HEIGHT_PX },
+  { key: "customer_requests", label: "タグ待ち", offsetY: -SLOT_HEIGHT_PX },
   { key: "long_term", label: "長期", offsetY: 0 },
   { key: "normal", label: "通常", offsetY: SLOT_HEIGHT_PX },
 ];
@@ -48,6 +55,7 @@ export default function ReturnSegmentGestureLauncher({
 }: ReturnSegmentGestureLauncherProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [hoveredKey, setHoveredKey] = useState<ReturnSegmentKey | null>(null);
+  const [manualHinted, setManualHinted] = useState(false);
   const [reducedMotion, setReducedMotion] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const gestureRef = useRef<{
@@ -58,6 +66,7 @@ export default function ReturnSegmentGestureLauncher({
     timer: number | null;
     opened: boolean;
     movedAfterOpen: boolean;
+    manualHinted: boolean;
   } | null>(null);
   const motionTransition = reducedMotion
     ? "none"
@@ -77,6 +86,7 @@ export default function ReturnSegmentGestureLauncher({
   const closeMenu = useCallback(() => {
     setIsOpen(false);
     setHoveredKey(null);
+    setManualHinted(false);
     clearGesture();
   }, [clearGesture]);
 
@@ -87,6 +97,7 @@ export default function ReturnSegmentGestureLauncher({
     gesture.timer = null;
     setIsOpen(true);
     setHoveredKey(null);
+    setManualHinted(false);
     rootRef.current?.setPointerCapture?.(gesture.pointerId);
   }, []);
 
@@ -102,6 +113,7 @@ export default function ReturnSegmentGestureLauncher({
       timer,
       opened: false,
       movedAfterOpen: false,
+      manualHinted: false,
     };
   };
 
@@ -120,14 +132,18 @@ export default function ReturnSegmentGestureLauncher({
 
     event.preventDefault();
     gesture.movedAfterOpen = true;
-    setHoveredKey(resolveSegmentFromDrag(event.clientY - gesture.anchorY));
+    const dy = event.clientY - gesture.anchorY;
+    const nextManualHinted = dy < MANUAL_OVERSWIPE_PX;
+    gesture.manualHinted = nextManualHinted;
+    setManualHinted(nextManualHinted);
+    setHoveredKey(nextManualHinted ? null : resolveSegmentFromDrag(dy));
   };
 
   const handlePointerUp = () => {
     const gesture = gestureRef.current;
     if (!gesture) return;
 
-    if (gesture.opened && gesture.movedAfterOpen && hoveredKey) {
+    if (gesture.opened && gesture.movedAfterOpen && !gesture.manualHinted && hoveredKey) {
       onSelectSegment(hoveredKey);
     }
     closeMenu();
@@ -147,6 +163,18 @@ export default function ReturnSegmentGestureLauncher({
     return () => media.removeEventListener("change", update);
   }, []);
 
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node) return;
+    const preventSelection = (event: Event) => event.preventDefault();
+    node.addEventListener("selectstart", preventSelection);
+    node.addEventListener("dragstart", preventSelection);
+    return () => {
+      node.removeEventListener("selectstart", preventSelection);
+      node.removeEventListener("dragstart", preventSelection);
+    };
+  }, []);
+
   return (
     <div
       ref={rootRef}
@@ -157,6 +185,7 @@ export default function ReturnSegmentGestureLauncher({
       onContextMenu={(event) => event.preventDefault()}
       aria-label="返却セグメント切替ランチャー"
       style={{
+        ...selectionSuppressionStyle,
         position: "fixed",
         right: 0,
         top: "48%",
@@ -164,12 +193,12 @@ export default function ReturnSegmentGestureLauncher({
         width: 36,
         height: 168,
         touchAction: "pan-y",
-        userSelect: "none",
       }}
     >
       {isOpen && (
         <div
           style={{
+            ...selectionSuppressionStyle,
             position: "absolute",
             right: 20,
             top: 84,
@@ -190,6 +219,7 @@ export default function ReturnSegmentGestureLauncher({
               <div
                 key={item.key}
                 style={{
+                  ...selectionSuppressionStyle,
                   position: "absolute",
                   right: 20,
                   top: item.offsetY - 18,
@@ -219,21 +249,22 @@ export default function ReturnSegmentGestureLauncher({
 
           <div
             style={{
+              ...selectionSuppressionStyle,
               position: "absolute",
-              right: 82,
+              right: 28,
               top: -104,
-              minWidth: 92,
+              minWidth: 96,
               padding: "8px 10px",
               borderRadius: 999,
-              border: "1px solid #e2e8f0",
-              background: "#f8fafc",
-              color: "#94a3b8",
+              border: `1.5px solid ${manualHinted ? "#64748b" : "#e2e8f0"}`,
+              background: manualHinted ? "#f1f5f9" : "#f8fafc",
+              color: manualHinted ? "#475569" : "#94a3b8",
               fontSize: 11,
               fontWeight: 900,
-              opacity: 0.72,
+              opacity: manualHinted ? 0.92 : 0.72,
               whiteSpace: "nowrap",
-              boxShadow: "0 5px 14px rgba(15,23,42,0.10)",
-              transform: "scale(0.88)",
+              boxShadow: manualHinted ? "0 10px 22px rgba(100,116,139,0.22)" : "0 5px 14px rgba(15,23,42,0.10)",
+              transform: manualHinted ? "translateX(-4px) scale(0.94)" : "scale(0.88)",
               transition: motionTransition,
             }}
           >
@@ -244,6 +275,7 @@ export default function ReturnSegmentGestureLauncher({
 
       <div
         style={{
+          ...selectionSuppressionStyle,
           position: "absolute",
           right: 0,
           top: 45,
@@ -269,6 +301,7 @@ export default function ReturnSegmentGestureLauncher({
               key={segment.key}
               title={`${segment.label}: ${segment.customerCount}顧客 / ${segment.tankCount}本`}
               style={{
+                ...selectionSuppressionStyle,
                 width: isActive || isHovered ? 8 : 5,
                 height: isActive || isHovered ? 8 : 5,
                 borderRadius: 999,
