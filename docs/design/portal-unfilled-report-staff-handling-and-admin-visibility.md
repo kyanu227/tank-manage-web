@@ -89,7 +89,88 @@ Superseded docs:
 
 ---
 
-## 3. Terminology Changes
+## 3. Business Responsibility vs Implementation Layers
+
+この document の Layer Model は business responsibility model であり、implementation layer そのものではない。
+
+責務整理:
+
+- Customer Report Layer は「顧客が報告した事実を誰の責務として扱うか」の整理。
+- Staff Handling Layer は「現場 staff が報告をどう対応するか」の整理。
+- Admin Visibility / Notification Layer は「管理者・責任者がどう把握し、通知を受けるか」の整理。
+
+これらは実装上の階層名ではない。実装では、read/write separation を優先する。
+
+### 3.1 Write Side
+
+write side は service / command 層に集約する。
+
+方針:
+
+- page / hook から Firestore に直接 write しない。
+- portal report create と staff handling update は用途別 service に分ける。
+- portal write は portal unfilled report create service が担当する。
+- staff write は staff handling service が担当する。
+- staff handling service は `handlingStatus` / `handledBy...` / `handlingNote` などの handling metadata だけを更新する。
+- tank update / logs create / billing / reward write は Phase 2 handling service に含めない。
+
+### 3.2 Read Side
+
+read side は repository / query 層に集約する。
+
+方針:
+
+- source of truth は `transactions.type == "uncharged_report"`。
+- staff UI は staff 用 hook を介して report list を読む。
+- 現状は `transactionsRepository.getUnchargedReports()` を使う。
+- 将来は `useStaffUnfilledReports()` または `useStaffQualityReports()` のような hook を検討する。
+- admin UI は raw reports を直接処理せず、quality report stats layer を介して読む。
+- 将来は `useAdminQualityReportStats()` のような hook を検討する。
+
+### 3.3 Future `uncharged_report` Structure
+
+将来構成:
+
+| concern | candidate |
+|---|---|
+| source of truth | `transactions.type == "uncharged_report"` |
+| portal write | portal unfilled report create service |
+| staff write | staff handling service |
+| staff read | `transactionsRepository.getUnchargedReports()` / future staff report hook |
+| admin read | quality report stats layer / future admin stats hook |
+| notification | future notification service |
+
+admin stats layer の候補:
+
+- count
+- trend
+- customer aggregation
+- tank aggregation
+- handlingStatus 別 count
+- notification state
+
+notification は `handlingStatus` とは分離する。LINE 通知は future notification service として扱う。
+
+### 3.4 Current Gap
+
+現状:
+
+- `tanks` / `logs` / `transactions` の読み取り repository 化は既にかなり進んでいる。
+- write service 化も order / return / customer / settings 系では一部進んでいる。
+- ただし admin stats layer と report 系の hook / stats architecture はまだ未整理。
+
+この PR では、上記の実装レイヤー整理そのものには入らない。次の大きな設計タスクとして残す。
+
+Future task:
+
+- `implementation-layer-architecture.md` のような docs を作る。
+- write side / read side / hooks / admin stats layer を整理する。
+- shared / feature components の境界を整理する。
+- service / repository / domain operation service の境界を整理する。
+
+---
+
+## 4. Terminology Changes
 
 admin review 前提の用語を staff handling 前提に置き換える。
 
@@ -121,7 +202,7 @@ lastNotificationAttemptAt
 
 ---
 
-## 4. `handlingStatus` Values
+## 5. `handlingStatus` Values
 
 候補:
 
@@ -144,7 +225,7 @@ lastNotificationAttemptAt
 
 ---
 
-## 5. Staff UI Policy
+## 6. Staff UI Policy
 
 現状:
 
@@ -182,7 +263,7 @@ UI 文言:
 
 ---
 
-## 6. Admin UI Policy
+## 7. Admin UI Policy
 
 Admin は報告処理の owner ではない。
 
@@ -217,7 +298,7 @@ Admin は報告処理の owner ではない。
 
 ---
 
-## 7. Notification Policy
+## 8. Notification Policy
 
 将来的に、未充填報告が作成された時に LINE 通知を送るのは有用。
 
@@ -254,7 +335,7 @@ lastNotificationAttemptAt
 
 ---
 
-## 8. Security Rules Policy Correction
+## 9. Security Rules Policy Correction
 
 PR #76 の admin-only update 方針は superseded。
 
@@ -318,7 +399,7 @@ Rules design notes:
 
 ---
 
-## 9. Phase 2 Implementation Blockers
+## 10. Phase 2 Implementation Blockers
 
 実装前 blocker:
 
@@ -334,7 +415,7 @@ Rules design notes:
 
 ---
 
-## 10. Recommended PR Split
+## 11. Recommended PR Split
 
 推奨順:
 
@@ -394,7 +475,7 @@ Deploy separation:
 
 ---
 
-## 11. Non-Goals
+## 12. Non-Goals
 
 この docs PR では以下を行わない。
 
