@@ -57,10 +57,10 @@ export default function BulkReturnByLocationPanel({
     const segments: Record<string, ReturnSegmentKey> = {};
     locationKeys.forEach((loc) => {
       const tanks = groupedTanks[loc] ?? [];
-      const hasTaggedTank = tanks.some((tank) => tank.tag !== "normal");
+      const hasKeepTag = tanks.some((tank) => tank.tag === "keep");
       const hasLongTermTank = tanks.some((tank) => tank.status === STATUS.UNRETURNED);
-      if (hasTaggedTank) {
-        segments[loc] = "customer_requests";
+      if (hasKeepTag) {
+        segments[loc] = "long_term";
       } else if (hasLongTermTank) {
         segments[loc] = "long_term";
       } else {
@@ -162,6 +162,7 @@ export default function BulkReturnByLocationPanel({
             const tanks = groupedTanks[loc];
             const isExpanded = expanded[loc];
             const isReturning = returning[loc];
+            const hasKeepTag = tanks.some((tank) => tank.tag === "keep");
             const taggedPreview = tanks.filter((tank) => tank.tag !== "normal").slice(0, 3);
             const hiddenTaggedCount = Math.max(0, tanks.filter((tank) => tank.tag !== "normal").length - taggedPreview.length);
 
@@ -193,13 +194,13 @@ export default function BulkReturnByLocationPanel({
                               style={{
                                 padding: "3px 6px",
                                 borderRadius: 999,
-                                background: tank.tag === "uncharged" ? "#fef2f2" : "#ecfdf5",
-                                color: tank.tag === "uncharged" ? "#dc2626" : "#059669",
+                                background: tank.tag === "uncharged" ? "#fef2f2" : tank.tag === "keep" ? "#fffbeb" : "#ecfdf5",
+                                color: tank.tag === "uncharged" ? "#dc2626" : tank.tag === "keep" ? "#d97706" : "#059669",
                                 fontSize: 10,
                                 fontWeight: 900,
                               }}
                             >
-                              {tank.id} {tank.tag === "uncharged" ? "未充填" : "未使用"}
+                              {tank.id} {tank.tag === "uncharged" ? "未充填" : tank.tag === "keep" ? "持ち越し" : "未使用"}
                             </span>
                           ))}
                           {hiddenTaggedCount > 0 && (
@@ -216,18 +217,18 @@ export default function BulkReturnByLocationPanel({
                   <div onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleBulkReturnForLocation(loc)}
-                      disabled={isReturning}
+                      disabled={isReturning || hasKeepTag}
                       style={{
                         padding: "8px 16px", borderRadius: 10, border: "none",
-                        background: isReturning ? "#e2e8f0" : "#0f172a",
-                        color: isReturning ? "#94a3b8" : "#fff",
-                        fontSize: 13, fontWeight: 700, cursor: isReturning ? "not-allowed" : "pointer",
+                        background: isReturning || hasKeepTag ? "#e2e8f0" : "#0f172a",
+                        color: isReturning || hasKeepTag ? "#94a3b8" : "#fff",
+                        fontSize: 13, fontWeight: 700, cursor: isReturning || hasKeepTag ? "not-allowed" : "pointer",
                         display: "flex", alignItems: "center", gap: 6, transition: "all 0.15s",
-                        boxShadow: isReturning ? "none" : "0 2px 4px rgba(0,0,0,0.1)",
+                        boxShadow: isReturning || hasKeepTag ? "none" : "0 2px 4px rgba(0,0,0,0.1)",
                       }}
                     >
                       {isReturning ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <ArrowDownToLine size={16} />}
-                      一括返却
+                      {hasKeepTag ? "持ち越し未接続" : "一括返却"}
                     </button>
                   </div>
                 </div>
@@ -235,7 +236,7 @@ export default function BulkReturnByLocationPanel({
                 {/* アコーディオンボディ */}
                 {isExpanded && (
                   <div style={{ padding: "16px 20px", background: "#fff" }}>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))", gap: 12 }}>
+                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
                       {tanks.map((tank) => (
                         <div
                           key={tank.id}
@@ -250,13 +251,14 @@ export default function BulkReturnByLocationPanel({
                             </span>
                           </div>
                           {/* タグセレクター */}
-                          <div style={{ width: 180, flexShrink: 0 }}>
+                          <div style={{ width: 220, flexShrink: 0 }}>
                             <ReturnTagSelector
                               value={tank.tag}
                               onChange={(value) => updateTag(loc, tank.id, value)}
                               options={[
                                 { value: "uncharged", label: "未充填" },
                                 { value: "unused", label: "未使用" },
+                                { value: "keep", label: "持ち越し" },
                               ]}
                               compact
                             />

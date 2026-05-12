@@ -28,7 +28,6 @@ interface OperationsTerminalProps {
   initialMode: OpMode;
 }
 
-const AUTO_COLLAPSE_CUSTOMER_THRESHOLD = 5;
 const RETURN_SEGMENT_ORDER: ReturnSegmentKey[] = ["normal", "customer_requests", "long_term"];
 
 const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
@@ -127,9 +126,8 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
     bulk.locationKeys.forEach((loc) => {
       const tanks = bulk.groupedTanks[loc] ?? [];
-      const hasRestoredTag = tanks.some((tank) => tank.tag !== "normal");
-      if (hasRestoredTag) return;
-      const segment: ReturnSegmentKey = tanks.some((tank) => tank.status === STATUS.UNRETURNED)
+      const hasKeepTag = tanks.some((tank) => tank.tag === "keep");
+      const segment: ReturnSegmentKey = hasKeepTag || tanks.some((tank) => tank.status === STATUS.UNRETURNED)
         ? "long_term"
         : "normal";
       stats[segment].customerCount += 1;
@@ -140,8 +138,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
   }, [bulk.groupedTanks, bulk.locationKeys, returnTagProcessing.returnGroups]);
 
-  const totalReturnCustomerCount = returnSegmentStats.reduce((sum, segment) => sum + segment.customerCount, 0);
-  const shouldShowReturnContent = activeReturnSegment !== null || totalReturnCustomerCount <= AUTO_COLLAPSE_CUSTOMER_THRESHOLD;
+  const shouldShowReturnContent = activeReturnSegment !== null;
 
   const activeReturnSegmentStat = activeReturnSegment
     ? returnSegmentStats.find((segment) => segment.key === activeReturnSegment) ?? null
@@ -269,8 +266,8 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
                     type="button"
                     onClick={() => setActiveReturnSegment(isActive ? null : segment.key)}
                     style={{
-                      border: `1.5px solid ${isActive || hasItems ? segment.color : "#e2e8f0"}`,
-                      background: isActive || hasItems ? segment.background : "#fff",
+                      border: `1.5px solid ${isActive ? segment.color : hasItems ? `${segment.color}66` : "#e2e8f0"}`,
+                      background: isActive ? segment.background : "#fff",
                       color: isActive || hasItems ? segment.color : "#94a3b8",
                       borderRadius: 14,
                       padding: "10px 8px",
