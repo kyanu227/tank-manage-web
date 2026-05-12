@@ -227,9 +227,23 @@ export async function findPendingLinksByUid(uid: string): Promise<TransactionDoc
 
 /** type == "uncharged_report" のクエリ。 */
 export async function getUnchargedReports(
-  _options?: GetUnchargedReportsOptions,
+  options?: GetUnchargedReportsOptions,
 ): Promise<TransactionDoc[]> {
-  throw new Error("not implemented in Phase 1");
+  const constraints: QueryConstraint[] = [where("type", "==", "uncharged_report")];
+  if (options?.status !== undefined) {
+    constraints.push(where("status", "==", options.status));
+  }
+  if (options?.customerId !== undefined) {
+    constraints.push(where("customerId", "==", options.customerId));
+  }
+  // Phase 1 visibility では index 追加を避けるため orderBy は付けず、呼び出し側で createdAt を並べ替える。
+
+  const snap = await getDocs(query(collection(db, "transactions"), ...constraints));
+  const list: TransactionDoc[] = [];
+  snap.forEach((d) => {
+    list.push({ id: d.id, ...d.data() } as TransactionDoc);
+  });
+  return list;
 }
 
 /** 受注画面用のスナップショット購読。 */

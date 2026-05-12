@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ArrowDownWideNarrow,
   ArrowUpNarrowWide,
+  AlertTriangle,
   Building2,
   CheckCircle2,
   CheckSquare,
@@ -23,7 +24,8 @@ import {
   collection,
   getDocs,
 } from "firebase/firestore";
-import { logsRepository } from "@/lib/firebase/repositories";
+import { logsRepository, transactionsRepository } from "@/lib/firebase/repositories";
+import type { TransactionDoc } from "@/lib/firebase/repositories/types";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
 import { requireStaffIdentity, useStaffSession } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
@@ -111,6 +113,7 @@ export default function StaffDashboard() {
   const tankIds = useMemo(() => tanks.map((t) => t.id), [tanks]);
 
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [unfilledReports, setUnfilledReports] = useState<TransactionDoc[]>([]);
   const [customerOptions, setCustomerOptions] = useState<CustomerSnapshot[]>([]);
   const [logSortOrder, setLogSortOrder] = useState<LogSortOrder>("desc");
   const [dashboardLoading, setDashboardLoading] = useState(true);
@@ -141,17 +144,23 @@ export default function StaffDashboard() {
   const fetchData = useCallback(async () => {
     setDashboardLoading(true);
     try {
-      const [logs, customerSnap] = await Promise.all([
+      const [logs, customerSnap, unfilledReports] = await Promise.all([
         // orderBy: null は Firestore 側で timestamp desc を付けない指定。
         // dashboard はクライアントで originalAt ?? timestamp で再ソートするため、
         // timestamp フィールドを持たない revision ログ等の取りこぼしを防ぐ。
         logsRepository.getActiveLogs({ orderBy: null }),
         getDocs(collection(db, "customers")),
+        // 顧客未充填報告は品質報告として read-only 表示する。tank/logs の状態はここでは動かさない。
+        transactionsRepository.getUnchargedReports(),
       ]);
 
       // 取得時点の素のログを保持し、表示時に sort order に従って並べ替える。
       const entries = logs as unknown as LogEntry[];
       setLogs(entries.slice(0, 200));
+      const sortedReports = [...unfilledReports].sort(
+        (a, b) => (timestampToMillis(b.createdAt) ?? 0) - (timestampToMillis(a.createdAt) ?? 0)
+      );
+      setUnfilledReports(sortedReports.slice(0, 10));
 
       const customers: CustomerSnapshot[] = [];
       customerSnap.forEach((d) => {
@@ -236,6 +245,8 @@ export default function StaffDashboard() {
       .sort((a, b) => b.count - a.count || a.action.localeCompare(b.action));
     return { total, breakdown };
   }, [logs]);
+
+  const recentUnfilledReports = useMemo(() => unfilledReports.slice(0, 5), [unfilledReports]);
 
   const loading = dashboardLoading || tanksLoading;
 
@@ -669,6 +680,81 @@ export default function StaffDashboard() {
                     >
                       {row.count}
                     </span>
+                  </div>
+                ))}
+              </DashboardPanel>
+
+              <DashboardPanel
+                icon={<AlertTriangle size={14} color="#dc2626" />}
+                title="顧客未充填報告"
+                badge={`${unfilledReports.length}件`}
+                emptyText="顧客未充填報告はありません"
+                isEmpty={recentUnfilledReports.length === 0}
+              >
+                {recentUnfilledReports.map((report) => (
+                  <div
+                    key={report.id}
+                    style={{
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: 5,
+                      padding: "9px 10px",
+                      borderRadius: 8,
+                      background: "#fff7ed",
+                      border: "1px solid #fed7aa",
+                    }}
+                  >
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "auto minmax(0, 1fr) auto",
+                        alignItems: "center",
+                        gap: 8,
+                      }}
+                    >
+                      <span
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 900,
+                          color: "#9a3412",
+                          fontFamily: "ui-monospace, SFMono-Regular, monospace",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {report.tankId || "-"}
+                      </span>
+                      <span
+                        title={report.customerName || ""}
+                        style={{
+                          fontSize: 13,
+                          fontWeight: 800,
+                          color: "#0f172a",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {report.customerName || "顧客未設定"}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: 11,
+                          fontWeight: 800,
+                          color: "#b45309",
+                          background: "#ffedd5",
+                          padding: "2px 7px",
+                          borderRadius: 6,
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {formatReportStatus(report.status)}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, color: "#9a3412", fontWeight: 700 }}>
+                      <span>{formatTime(report.createdAt)}</span>
+                      <span>{formatReportSource(report.source)}</span>
+                      <span>read-only</span>
+                    </div>
                   </div>
                 ))}
               </DashboardPanel>
@@ -1407,6 +1493,19 @@ function formatTime(value: unknown): string {
   const date = toDate(value);
   if (!date) return "-";
   return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+}
+
+function formatReportSource(source?: string): string {
+  if (source === "customer_portal") return "顧客ポータル";
+  if (source === "customer_app") return "顧客アプリ";
+  if (!source) return "source未設定";
+  return source;
+}
+
+function formatReportStatus(status?: string): string {
+  if (status === "completed") return "記録済み";
+  if (!status) return "status未設定";
+  return status;
 }
 
 function statusLabel(status?: LogStatus): string {
