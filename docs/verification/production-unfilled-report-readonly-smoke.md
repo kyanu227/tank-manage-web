@@ -124,6 +124,14 @@ Memo:
 
 ## 6. Follow-Up
 
+追加確認試行:
+
+- 2026-05-12 11:45 JST に本番 `/staff/dashboard` と `/admin` を再確認した。
+- Codex in-app browser の本番オリジンには staff/admin のログイン済み session がなく、どちらもログイン画面に到達した。
+- Google / email-password の通常ログイン操作は、本人 credential 入力が必要なため Codex 側では完了していない。
+- visible permission-denied / runtime error / browser error は引き続き発生しなかった。
+- 保護画面内の read-only UI は未確認のままなので、overall result は `partial` を維持する。
+
 次に必要な確認:
 
 - 本番オリジンで staff/admin として通常ログインする。
