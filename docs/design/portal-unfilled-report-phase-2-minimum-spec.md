@@ -88,15 +88,49 @@ duplicateOfTransactionId
 | `handledByStaffName` | 最後に handling state を更新した staff display name | yes |
 | `handledByStaffEmail` | 最後に handling state を更新した staff email | yes when available |
 | `handlingNote` | staff の対応メモ | optional |
-| `duplicateOfTransactionId` | 重複先の transaction id | only for `duplicate` |
+| `duplicateOfTransactionId` | 重複先の transaction id | allowed only for `duplicate`, optional in Phase 2 |
 
 方針:
 
 - `handlingStatus` が missing の既存 document は read/UI 側で `open` とみなす。
-- `handledAt` / `handledBy...` は「最後に handling metadata を更新した staff」を表す。
+- `handledAt` / `handledBy...` は「最後に handling metadata を更新した時刻・staff snapshot」を表す。
 - `handlingNote` は staff handling の補足であり、admin notification の結果を書かない。
-- `duplicateOfTransactionId` は `duplicate` のときだけ使う。初期 UI で重複先選択まで実装しない場合は optional のままにする。
+- `duplicateOfTransactionId` は `handlingStatus == "duplicate"` のときだけ許可する field とする。
+- ただし、初期 Phase では duplicate target selection UI を必須にしないため、`duplicateOfTransactionId` は必須 field にはしない。
 - `transactions.status` は更新しない。
+
+### 3.2 Last Handling Update Metadata
+
+`handledAt` / `handledByStaffId` / `handledByStaffName` / `handledByStaffEmail` は、必ずしも「resolved にした時刻・対応完了者」だけを意味しない。
+
+Phase 2 minimum では、次のような staff handling metadata の最終更新を表す。
+
+- `open -> in_progress`
+- `in_progress -> resolved`
+- `open -> duplicate`
+- `open -> rejected`
+- `resolved -> in_progress`
+- `duplicate -> in_progress`
+- `rejected -> in_progress`
+- `handlingNote` の更新を status update と同時に行う場合
+
+つまり `handledAt` は completion-only timestamp ではなく、last handling update timestamp である。`handledBy...` も completion-only actor ではなく、last handling update staff snapshot として扱う。
+
+将来的に completion-only metadata が必要になった場合は、`resolvedAt` / `resolvedBy...` のような別 field を追加する。より厳密な命名へ寄せる場合は、`handlingUpdatedAt` / `handlingUpdatedBy...` も検討できる。ただし Phase 2 minimum では既存方針との整合を優先し、`handledAt` / `handledBy...` を last handling update metadata として扱う。
+
+### 3.3 Duplicate Target Policy
+
+`duplicateOfTransactionId` は `handlingStatus == "duplicate"` のときだけ許可される field とする。
+
+ただし Phase 2 minimum では、duplicate target selection UI を必須にしない。したがって、`handlingStatus == "duplicate"` でも `duplicateOfTransactionId` missing を許容する。
+
+理由:
+
+- `duplicate` state は delete / void せず重複報告を閉じるために必要。
+- 重複先 transaction の厳密な選択 UI は初期実装を大きくする。
+- 初期 Phase で `duplicateOfTransactionId` を required にすると、重複先選択 UI なしでは `duplicate` にできなくなる。
+
+将来、重複先選択 UI を追加する場合は、`duplicateOfTransactionId` を required に寄せる余地を残す。
 
 ---
 
@@ -395,6 +429,7 @@ future task:
 - 現行 Rules で staff が handling metadata を安全に update できるか確認する。
 - 必要なら `uncharged_report` handling metadata 専用の update rule を設計する。
 - allowed fields を `handlingStatus` / `handledAt` / `handledBy...` / `handlingNote` / `duplicateOfTransactionId` に限定する。
+- `duplicateOfTransactionId` は `handlingStatus == "duplicate"` のときだけ許可する。ただし初期 Phase では `duplicate` でも missing を許容する可能性がある。
 - `transactions.status` を handling update で変更できないことを確認する。
 - Rules deploy は別途 review 後に行う。
 
