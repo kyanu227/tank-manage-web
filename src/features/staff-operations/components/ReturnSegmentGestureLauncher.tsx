@@ -320,20 +320,21 @@ export default function ReturnSegmentGestureLauncher({
           const isActive = activeSegment === segment.key;
           const isHovered = hoveredKey === segment.key;
           const hasItems = segment.customerCount > 0 || segment.tankCount > 0;
+          const isSelected = isActive || isHovered;
           return (
             <div
               key={segment.key}
               title={`${segment.label}: ${segment.customerCount}顧客 / ${segment.tankCount}本`}
               style={{
                 ...selectionSuppressionStyle,
-                width: isActive || isHovered ? 8 : hasItems ? 7 : 5,
-                height: isActive || isHovered ? 8 : hasItems ? 7 : 5,
+                width: isSelected ? 8 : hasItems ? 7 : 5,
+                height: isSelected ? 8 : hasItems ? 7 : 5,
                 borderRadius: 999,
-                border: isActive || isHovered || hasItems ? `2px solid ${segment.color}` : "1px solid rgba(100,116,139,0.34)",
-                background: isActive || isHovered || hasItems ? segment.background : "rgba(100,116,139,0.24)",
-                opacity: isOpen ? 0.95 : isActive ? 0.85 : hasItems ? 0.7 : 0.32,
+                border: isSelected || hasItems ? `2px solid ${segment.color}` : "1px solid rgba(100,116,139,0.34)",
+                background: isSelected ? "#0f172a" : "#fff",
+                opacity: isOpen ? 0.95 : isSelected ? 0.9 : hasItems ? 0.78 : 0.34,
                 boxShadow: isHovered ? `0 0 0 5px ${segment.color}18` : hasItems ? `0 0 0 3px ${segment.color}10` : "none",
-                transform: isHovered ? "scale(1.25)" : isActive ? "scale(1.1)" : "scale(1)",
+                transform: isHovered ? "scale(1.25)" : isActive ? "scale(1.12)" : "scale(1)",
                 transition: motionTransition,
               }}
             />

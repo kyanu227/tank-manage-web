@@ -18,8 +18,8 @@ const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customer
     key: "normal",
     label: "通常返却",
     shortLabel: "通常",
-    color: "#2563eb",
-    background: "#eff6ff",
+    color: "#0891b2",
+    background: "#ecfeff",
   },
   customer_requests: {
     key: "customer_requests",
@@ -32,10 +32,26 @@ const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customer
     key: "long_term",
     label: "長期貸出",
     shortLabel: "長期",
-    color: "#d97706",
-    background: "#fffbeb",
+    color: "#be123c",
+    background: "#fff1f2",
   },
 };
+
+function toMillis(value: unknown): number | null {
+  if (!value) return null;
+  if (typeof value === "number") return value;
+  if (typeof value === "object" && "toMillis" in value && typeof value.toMillis === "function") {
+    return value.toMillis();
+  }
+  return null;
+}
+
+function getOldestUpdatedAt(tanks: Array<{ updatedAt: unknown }>): number {
+  const values = tanks
+    .map((tank) => toMillis(tank.updatedAt))
+    .filter((value): value is number => value !== null);
+  return values.length > 0 ? Math.min(...values) : Number.MAX_SAFE_INTEGER;
+}
 
 export default function BulkReturnByLocationPanel({
   bulk,
@@ -57,11 +73,8 @@ export default function BulkReturnByLocationPanel({
     const segments: Record<string, ReturnSegmentKey> = {};
     locationKeys.forEach((loc) => {
       const tanks = groupedTanks[loc] ?? [];
-      const hasKeepTag = tanks.some((tank) => tank.tag === "keep");
       const hasLongTermTank = tanks.some((tank) => tank.status === STATUS.UNRETURNED);
-      if (hasKeepTag) {
-        segments[loc] = "long_term";
-      } else if (hasLongTermTank) {
+      if (hasLongTermTank) {
         segments[loc] = "long_term";
       } else {
         segments[loc] = "normal";
@@ -89,12 +102,18 @@ export default function BulkReturnByLocationPanel({
     return [stats.normal, stats.customer_requests, stats.long_term];
   }, [groupedTanks, locationKeys, locationSegments]);
 
-  const filteredLocationKeys = useMemo(
-    () => activeSegment
+  const filteredLocationKeys = useMemo(() => {
+    const keys = activeSegment
       ? locationKeys.filter((loc) => locationSegments[loc] === activeSegment)
-      : locationKeys,
-    [activeSegment, locationKeys, locationSegments],
-  );
+      : locationKeys;
+    if (activeSegment !== "long_term") return keys;
+    return [...keys].sort((a, b) => {
+      const oldestA = getOldestUpdatedAt(groupedTanks[a] ?? []);
+      const oldestB = getOldestUpdatedAt(groupedTanks[b] ?? []);
+      if (oldestA !== oldestB) return oldestA - oldestB;
+      return a.localeCompare(b);
+    });
+  }, [activeSegment, groupedTanks, locationKeys, locationSegments]);
 
   const activeSegmentStat = activeSegment
     ? segmentStats.find((segment) => segment.key === activeSegment) ?? null

@@ -35,8 +35,8 @@ const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "c
     key: "normal",
     label: "通常返却",
     shortLabel: "通常",
-    color: "#2563eb",
-    background: "#eff6ff",
+    color: "#0891b2",
+    background: "#ecfeff",
   },
   customer_requests: {
     key: "customer_requests",
@@ -49,8 +49,8 @@ const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "c
     key: "long_term",
     label: "長期貸出",
     shortLabel: "長期",
-    color: "#d97706",
-    background: "#fffbeb",
+    color: "#be123c",
+    background: "#fff1f2",
   },
 };
 
@@ -126,8 +126,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
     bulk.locationKeys.forEach((loc) => {
       const tanks = bulk.groupedTanks[loc] ?? [];
-      const hasKeepTag = tanks.some((tank) => tank.tag === "keep");
-      const segment: ReturnSegmentKey = hasKeepTag || tanks.some((tank) => tank.status === STATUS.UNRETURNED)
+      const segment: ReturnSegmentKey = tanks.some((tank) => tank.status === STATUS.UNRETURNED)
         ? "long_term"
         : "normal";
       stats[segment].customerCount += 1;
@@ -137,8 +136,6 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
     return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
   }, [bulk.groupedTanks, bulk.locationKeys, returnTagProcessing.returnGroups]);
-
-  const shouldShowReturnContent = activeReturnSegment !== null;
 
   const activeReturnSegmentStat = activeReturnSegment
     ? returnSegmentStats.find((segment) => segment.key === activeReturnSegment) ?? null
@@ -294,7 +291,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
               })}
             </div>
 
-            {shouldShowReturnContent && activeReturnSegment === "customer_requests" && activeReturnSegmentStat && (
+            {activeReturnSegment === "customer_requests" && activeReturnSegmentStat && (
               <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 14, background: activeReturnSegmentStat.background, color: activeReturnSegmentStat.color, fontSize: 12, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
                 <span>
                   {activeReturnSegmentStat.label} {activeReturnSegmentStat.customerCount}顧客 / {activeReturnSegmentStat.tankCount}本
@@ -309,7 +306,14 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
               </div>
             )}
 
-            {shouldShowReturnContent && (activeReturnSegment === null || activeReturnSegment === "customer_requests") && (
+            {activeReturnSegment === null && (
+              <BulkReturnByLocationPanel
+                bulk={bulk}
+                activeSegment="normal"
+              />
+            )}
+
+            {(activeReturnSegment === null || activeReturnSegment === "customer_requests") && (
               <ReturnRequestList
                 pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
                 returnGroups={returnTagProcessing.returnGroups}
@@ -317,7 +321,14 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
               />
             )}
 
-            {shouldShowReturnContent && activeReturnSegment !== "customer_requests" && (
+            {activeReturnSegment === null && (
+              <BulkReturnByLocationPanel
+                bulk={bulk}
+                activeSegment="long_term"
+              />
+            )}
+
+            {activeReturnSegment !== null && activeReturnSegment !== "customer_requests" && (
               <BulkReturnByLocationPanel
                 bulk={bulk}
                 activeSegment={activeReturnSegment}
