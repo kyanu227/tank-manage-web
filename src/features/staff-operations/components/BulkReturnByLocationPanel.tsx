@@ -1,17 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import { ArrowDownToLine, CheckCircle2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { STATUS } from "@/lib/tank-rules";
 import type { UseBulkReturnByLocationResult } from "../hooks/useBulkReturnByLocation";
-import ReturnSegmentGestureLauncher, {
-  type ReturnSegmentKey,
-  type ReturnSegmentStat,
-} from "./ReturnSegmentGestureLauncher";
+import type { ReturnSegmentKey, ReturnSegmentStat } from "./ReturnSegmentGestureLauncher";
 
 interface BulkReturnByLocationPanelProps {
   bulk: UseBulkReturnByLocationResult;
+  activeSegment?: ReturnSegmentKey | null;
+  onClearSegment?: () => void;
 }
 
 const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
@@ -19,8 +18,8 @@ const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customer
     key: "customer_requests",
     label: "返却タグ処理待ち",
     shortLabel: "タグ待ち",
-    color: "#dc2626",
-    background: "#fef2f2",
+    color: "#10b981",
+    background: "#ecfdf5",
   },
   long_term: {
     key: "long_term",
@@ -38,8 +37,11 @@ const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customer
   },
 };
 
-export default function BulkReturnByLocationPanel({ bulk }: BulkReturnByLocationPanelProps) {
-  const [activeSegment, setActiveSegment] = useState<ReturnSegmentKey | null>(null);
+export default function BulkReturnByLocationPanel({
+  bulk,
+  activeSegment = null,
+  onClearSegment,
+}: BulkReturnByLocationPanelProps) {
   const {
     bulkLoading,
     groupedTanks,
@@ -100,14 +102,6 @@ export default function BulkReturnByLocationPanel({ bulk }: BulkReturnByLocation
 
   return (
     <div style={{ position: "relative" }}>
-      {!bulkLoading && locationKeys.length > 0 && (
-        <ReturnSegmentGestureLauncher
-          activeSegment={activeSegment}
-          segments={segmentStats}
-          onSelectSegment={setActiveSegment}
-        />
-      )}
-
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
         <h3 style={{ fontSize: 14, fontWeight: 800, color: "#475569", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 4, height: 16, borderRadius: 2, background: activeSegmentStat?.color ?? "#3b82f6", display: "inline-block" }} />
@@ -116,10 +110,10 @@ export default function BulkReturnByLocationPanel({ bulk }: BulkReturnByLocation
             UI試作
           </span>
         </h3>
-        {activeSegmentStat && (
+        {activeSegmentStat && onClearSegment && (
           <button
             type="button"
-            onClick={() => setActiveSegment(null)}
+            onClick={onClearSegment}
             style={{
               border: "1px solid #e2e8f0",
               background: "#fff",

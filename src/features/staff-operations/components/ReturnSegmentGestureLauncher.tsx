@@ -19,6 +19,7 @@ interface ReturnSegmentGestureLauncherProps {
   activeSegment: ReturnSegmentKey | null;
   segments: ReturnSegmentStat[];
   onSelectSegment: (segment: ReturnSegmentKey) => void;
+  onSelectManualReturn?: () => void;
 }
 
 const LONG_PRESS_MS = 300;
@@ -52,6 +53,7 @@ export default function ReturnSegmentGestureLauncher({
   activeSegment,
   segments,
   onSelectSegment,
+  onSelectManualReturn,
 }: ReturnSegmentGestureLauncherProps) {
   const [isOpen, setIsOpen] = useState(false);
   const [hoveredKey, setHoveredKey] = useState<ReturnSegmentKey | null>(null);
@@ -139,12 +141,17 @@ export default function ReturnSegmentGestureLauncher({
     setHoveredKey(nextManualHinted ? null : resolveSegmentFromDrag(dy));
   };
 
-  const handlePointerUp = () => {
+  const handlePointerUp = (event: PointerEvent<HTMLDivElement>) => {
     const gesture = gestureRef.current;
     if (!gesture) return;
 
-    if (gesture.opened && gesture.movedAfterOpen && !gesture.manualHinted && hoveredKey) {
-      onSelectSegment(hoveredKey);
+    if (gesture.opened) {
+      event.preventDefault();
+      if (gesture.movedAfterOpen && gesture.manualHinted) {
+        onSelectManualReturn?.();
+      } else if (gesture.movedAfterOpen && hoveredKey) {
+        onSelectSegment(hoveredKey);
+      }
     }
     closeMenu();
   };
@@ -199,9 +206,24 @@ export default function ReturnSegmentGestureLauncher({
         <div
           style={{
             ...selectionSuppressionStyle,
+            position: "fixed",
+            inset: 0,
+            zIndex: 0,
+            background: "transparent",
+            pointerEvents: "auto",
+            touchAction: "none",
+          }}
+        />
+      )}
+
+      {isOpen && (
+        <div
+          style={{
+            ...selectionSuppressionStyle,
             position: "absolute",
             right: 20,
             top: 84,
+            zIndex: 2,
             width: 1,
             height: 1,
             pointerEvents: "none",
@@ -268,7 +290,7 @@ export default function ReturnSegmentGestureLauncher({
               transition: motionTransition,
             }}
           >
-            手動 未接続
+            手動
           </div>
         </div>
       )}
@@ -279,6 +301,7 @@ export default function ReturnSegmentGestureLauncher({
           position: "absolute",
           right: 0,
           top: 45,
+          zIndex: 3,
           width: 16,
           padding: "7px 4px",
           borderRadius: 12,
