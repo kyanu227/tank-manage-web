@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ArrowDownToLine } from "lucide-react";
 import { useTanks } from "@/hooks/useTanks";
+import { STATUS } from "@/lib/tank-rules";
 import { DEFAULT_OP_STYLE, MODE_CONFIG } from "./constants";
 import { useBulkReturnByLocation } from "./hooks/useBulkReturnByLocation";
 import { useDestinations } from "./hooks/useDestinations";
@@ -17,11 +18,41 @@ import OrderFulfillmentScreen from "./components/OrderFulfillmentScreen";
 import OrderListPanel from "./components/OrderListPanel";
 import ReturnTagProcessingScreen from "./components/ReturnTagProcessingScreen";
 import ReturnRequestList from "./components/ReturnRequestList";
+import ReturnSegmentGestureLauncher, {
+  type ReturnSegmentKey,
+  type ReturnSegmentStat,
+} from "./components/ReturnSegmentGestureLauncher";
 import type { OpMode, OpStyle } from "./types";
 
 interface OperationsTerminalProps {
   initialMode: OpMode;
 }
+
+const RETURN_SEGMENT_ORDER: ReturnSegmentKey[] = ["normal", "customer_requests", "long_term"];
+
+const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
+  normal: {
+    key: "normal",
+    label: "通常返却",
+    shortLabel: "通常",
+    color: "#0891b2",
+    background: "#ecfeff",
+  },
+  customer_requests: {
+    key: "customer_requests",
+    label: "返却タグ処理待ち",
+    shortLabel: "タグ待ち",
+    color: "#10b981",
+    background: "#ecfdf5",
+  },
+  long_term: {
+    key: "long_term",
+    label: "長期貸出",
+    shortLabel: "長期",
+    color: "#be123c",
+    background: "#fff1f2",
+  },
+};
 
 export default function OperationsTerminal({ initialMode }: OperationsTerminalProps) {
   // mode は URL 由来で固定。ページ遷移時は OperationsTerminal 自体がリマウントされる。
@@ -58,6 +89,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
   // 返却モード: 手動返却画面の表示フラグ
   const [showManualReturn, setShowManualReturn] = useState(false);
+  const [activeReturnSegment, setActiveReturnSegment] = useState<ReturnSegmentKey | null>(null);
 
   // 操作完了後は tanks と destinations を両方再取得する（旧 fetchData 互換）。
   // これを怠ると allTanks が古いまま続けて validateTransition が走り、誤判定の原因になる。
@@ -80,6 +112,36 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     fetchData,
   });
 
+  const returnSegmentStats = useMemo<ReturnSegmentStat[]>(() => {
+    const stats: Record<ReturnSegmentKey, ReturnSegmentStat> = {
+      customer_requests: { ...RETURN_SEGMENT_CONFIG.customer_requests, customerCount: 0, tankCount: 0, taggedCount: 0 },
+      long_term: { ...RETURN_SEGMENT_CONFIG.long_term, customerCount: 0, tankCount: 0, taggedCount: 0 },
+      normal: { ...RETURN_SEGMENT_CONFIG.normal, customerCount: 0, tankCount: 0, taggedCount: 0 },
+    };
+
+    const returnTagWaitingTankCount = returnTagProcessing.returnGroups.reduce((sum, group) => sum + group.items.length, 0);
+    stats.customer_requests.customerCount = returnTagProcessing.returnGroups.length;
+    stats.customer_requests.tankCount = returnTagWaitingTankCount;
+    stats.customer_requests.taggedCount = returnTagWaitingTankCount;
+
+    bulk.locationKeys.forEach((loc) => {
+      const tanks = bulk.groupedTanks[loc] ?? [];
+      const segment: ReturnSegmentKey = tanks.some((tank) => tank.status === STATUS.UNRETURNED)
+        ? "long_term"
+        : "normal";
+      stats[segment].customerCount += 1;
+      stats[segment].tankCount += tanks.length;
+      stats[segment].taggedCount += tanks.filter((tank) => tank.tag !== "normal").length;
+    });
+
+    return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
+  }, [bulk.groupedTanks, bulk.locationKeys, returnTagProcessing.returnGroups]);
+
+  const openManualReturn = () => {
+    setActiveReturnSegment(null);
+    setShowManualReturn(true);
+  };
+
   // モード変更時: 手動キューのリセット＋各モードのデータ取得
   useEffect(() => {
     manual.reset();
@@ -91,6 +153,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
       bulk.fetchBulkTanks();
       returnTagProcessing.setSelectedReturnGroup(null);
       setShowManualReturn(false);
+      setActiveReturnSegment(null);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode]);
@@ -161,27 +224,98 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
       {/* 返却モード: 返却タグ処理待ち + 全貸出タンク */}
       {mode === "return" && !showManualReturn && (
-        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          <button
-            onClick={() => setShowManualReturn(true)}
-            style={{
-              width: "100%", padding: "10px", borderRadius: 12, border: "1.5px solid #e2e8f0",
-              background: "#fff", color: "#10b981", fontSize: 13, fontWeight: 800,
-              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-              cursor: "pointer", marginBottom: 16, transition: "all 0.15s",
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+          <ReturnSegmentGestureLauncher
+            activeSegment={activeReturnSegment}
+            segments={returnSegmentStats}
+            onSelectSegment={(segment) => {
+              setShowManualReturn(false);
+              setActiveReturnSegment(segment);
             }}
-          >
-            <ArrowDownToLine size={16} />
-            手動返却
-          </button>
-
-          <ReturnRequestList
-            pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
-            returnGroups={returnTagProcessing.returnGroups}
-            openReturnTagGroup={returnTagProcessing.openReturnTagGroup}
+            onSelectManualReturn={openManualReturn}
           />
 
-          <BulkReturnByLocationPanel bulk={bulk} />
+          <div style={{ height: "100%", overflowY: "auto", padding: 16 }}>
+            <button
+              onClick={openManualReturn}
+              style={{
+                width: "100%", padding: "10px", borderRadius: 12, border: "1.5px solid #e2e8f0",
+                background: "#fff", color: "#10b981", fontSize: 13, fontWeight: 800,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                cursor: "pointer", marginBottom: 12, transition: "all 0.15s",
+              }}
+            >
+              <ArrowDownToLine size={16} />
+              手動返却
+            </button>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginBottom: 12 }}>
+              {returnSegmentStats.map((segment) => {
+                const isActive = activeReturnSegment === segment.key;
+                const hasItems = segment.customerCount > 0 || segment.tankCount > 0;
+                return (
+                  <button
+                    key={segment.key}
+                    type="button"
+                    onClick={() => setActiveReturnSegment(isActive ? null : segment.key)}
+                    style={{
+                      border: `1.5px solid ${isActive ? segment.color : hasItems ? `${segment.color}66` : "#e2e8f0"}`,
+                      background: isActive ? segment.background : "#fff",
+                      color: isActive || hasItems ? segment.color : "#94a3b8",
+                      borderRadius: 14,
+                      padding: "10px 8px",
+                      minHeight: 72,
+                      display: "flex",
+                      flexDirection: "column",
+                      alignItems: "flex-start",
+                      justifyContent: "space-between",
+                      gap: 6,
+                      textAlign: "left",
+                      cursor: "pointer",
+                      opacity: hasItems || isActive ? 1 : 0.58,
+                      boxShadow: isActive ? `0 8px 18px ${segment.color}22` : hasItems ? `0 0 0 3px ${segment.color}10` : "none",
+                      transform: isActive ? "translateY(-1px)" : "translateY(0)",
+                      transition: "transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 140ms, opacity 120ms",
+                    }}
+                  >
+                    <span style={{ fontSize: 12, fontWeight: 900, lineHeight: 1.2 }}>{segment.label}</span>
+                    <span style={{ fontSize: 11, fontWeight: 800, color: hasItems || isActive ? segment.color : "#cbd5e1" }}>
+                      {segment.customerCount}顧客 / {segment.tankCount}本
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+
+            {activeReturnSegment === null && (
+              <BulkReturnByLocationPanel
+                bulk={bulk}
+                activeSegment="normal"
+              />
+            )}
+
+            {(activeReturnSegment === null || activeReturnSegment === "customer_requests") && (
+              <ReturnRequestList
+                pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
+                returnGroups={returnTagProcessing.returnGroups}
+                openReturnTagGroup={returnTagProcessing.openReturnTagGroup}
+              />
+            )}
+
+            {activeReturnSegment === null && (
+              <BulkReturnByLocationPanel
+                bulk={bulk}
+                activeSegment="long_term"
+              />
+            )}
+
+            {activeReturnSegment !== null && activeReturnSegment !== "customer_requests" && (
+              <BulkReturnByLocationPanel
+                bulk={bulk}
+                activeSegment={activeReturnSegment}
+              />
+            )}
+          </div>
         </div>
       )}
 

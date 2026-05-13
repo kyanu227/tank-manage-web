@@ -41,6 +41,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
         let tag: BulkTagType = "normal";
         if (tank.logNote === "[TAG:unused]") tag = "unused";
         if (tank.logNote === "[TAG:uncharged]") tag = "uncharged";
+        if (tank.logNote === "[TAG:keep]") tag = "keep";
         groups[loc].push({ ...tank, tag } as unknown as BulkTankWithTag);
       });
       Object.keys(groups).forEach(loc => {
@@ -62,11 +63,15 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   }, []);
 
   const updateTag = useCallback(async (loc: string, tankId: string, newTag: BulkTagType) => {
+    const currentTag = groupedTanks[loc]?.find((tank) => tank.id === tankId)?.tag;
     setGroupedTanks(prev => {
       const g = { ...prev };
       g[loc] = g[loc].map(t => (t.id === tankId ? { ...t, tag: newTag } : t));
       return g;
     });
+    if (newTag === "keep" || currentTag === "keep") {
+      return;
+    }
     try {
       let logNote = "";
       if (newTag === "unused") logNote = "[TAG:unused]";
@@ -76,7 +81,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       console.error("Failed to update tag", e);
       fetchBulkTanks();
     }
-  }, [fetchBulkTanks]);
+  }, [fetchBulkTanks, groupedTanks]);
 
   const handleBulkReturnForLocation = useCallback(async (loc: string) => {
     const tanksToReturn = groupedTanks[loc];
