@@ -195,10 +195,10 @@ export default function ReturnSegmentGestureLauncher({
         ...selectionSuppressionStyle,
         position: "fixed",
         right: 0,
-        top: "48%",
+        top: "8%",
+        bottom: "8%",
         zIndex: 30,
-        width: 36,
-        height: 168,
+        width: 40,
         touchAction: "pan-y",
       }}
     >
@@ -222,7 +222,7 @@ export default function ReturnSegmentGestureLauncher({
             ...selectionSuppressionStyle,
             position: "absolute",
             right: 20,
-            top: 84,
+            top: "50%",
             zIndex: 2,
             width: 1,
             height: 1,
@@ -300,7 +300,7 @@ export default function ReturnSegmentGestureLauncher({
           ...selectionSuppressionStyle,
           position: "absolute",
           right: 0,
-          top: 45,
+          top: "50%",
           zIndex: 3,
           width: 16,
           padding: "7px 4px",
@@ -313,6 +313,7 @@ export default function ReturnSegmentGestureLauncher({
           alignItems: "center",
           gap: 7,
           backdropFilter: "blur(6px)",
+          transform: "translateY(-50%)",
           transition: motionTransition,
         }}
       >

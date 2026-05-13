@@ -10,7 +10,6 @@ import type { ReturnSegmentKey, ReturnSegmentStat } from "./ReturnSegmentGesture
 interface BulkReturnByLocationPanelProps {
   bulk: UseBulkReturnByLocationResult;
   activeSegment?: ReturnSegmentKey | null;
-  onClearSegment?: () => void;
 }
 
 const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
@@ -56,7 +55,6 @@ function getOldestUpdatedAt(tanks: Array<{ updatedAt: unknown }>): number {
 export default function BulkReturnByLocationPanel({
   bulk,
   activeSegment = null,
-  onClearSegment,
 }: BulkReturnByLocationPanelProps) {
   const {
     bulkLoading,
@@ -125,37 +123,13 @@ export default function BulkReturnByLocationPanel({
         <h3 style={{ fontSize: 14, fontWeight: 800, color: "#475569", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 4, height: 16, borderRadius: 2, background: activeSegmentStat?.color ?? "#3b82f6", display: "inline-block" }} />
           {activeSegmentStat ? activeSegmentStat.label : "全貸出タンク"}
-          <span style={{ fontSize: 10, color: "#94a3b8", fontWeight: 900, border: "1px solid #e2e8f0", borderRadius: 999, padding: "2px 6px" }}>
-            UI試作
-          </span>
         </h3>
-        {activeSegmentStat && onClearSegment && (
-          <button
-            type="button"
-            onClick={onClearSegment}
-            style={{
-              border: "1px solid #e2e8f0",
-              background: "#fff",
-              color: "#475569",
-              borderRadius: 999,
-              padding: "6px 10px",
-              fontSize: 12,
-              fontWeight: 800,
-              cursor: "pointer",
-            }}
-          >
-            全て表示
-          </button>
-        )}
       </div>
 
       {activeSegmentStat && (
         <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 14, background: activeSegmentStat.background, color: activeSegmentStat.color, fontSize: 12, fontWeight: 900 }}>
           {activeSegmentStat.customerCount}顧客 / {activeSegmentStat.tankCount}本
           {activeSegmentStat.taggedCount > 0 ? ` / タグ付き${activeSegmentStat.taggedCount}本` : ""}
-          <span style={{ marginLeft: 8, color: "#64748b", fontWeight: 700 }}>
-            右側の点は長押しで切替
-          </span>
         </div>
       )}
 
@@ -247,7 +221,7 @@ export default function BulkReturnByLocationPanel({
                       }}
                     >
                       {isReturning ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <ArrowDownToLine size={16} />}
-                      {hasKeepTag ? "持ち越し未接続" : "一括返却"}
+                      {hasKeepTag ? "持ち越し確認" : "一括返却"}
                     </button>
                   </div>
                 </div>

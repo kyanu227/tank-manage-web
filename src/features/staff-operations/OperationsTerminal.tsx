@@ -137,10 +137,6 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
   }, [bulk.groupedTanks, bulk.locationKeys, returnTagProcessing.returnGroups]);
 
-  const activeReturnSegmentStat = activeReturnSegment
-    ? returnSegmentStats.find((segment) => segment.key === activeReturnSegment) ?? null
-    : null;
-
   const openManualReturn = () => {
     setActiveReturnSegment(null);
     setShowManualReturn(true);
@@ -291,21 +287,6 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
               })}
             </div>
 
-            {activeReturnSegment === "customer_requests" && activeReturnSegmentStat && (
-              <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 14, background: activeReturnSegmentStat.background, color: activeReturnSegmentStat.color, fontSize: 12, fontWeight: 900, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                <span>
-                  {activeReturnSegmentStat.label} {activeReturnSegmentStat.customerCount}顧客 / {activeReturnSegmentStat.tankCount}本
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setActiveReturnSegment(null)}
-                  style={{ border: "1px solid #d1fae5", background: "#fff", color: "#047857", borderRadius: 999, padding: "5px 9px", fontSize: 11, fontWeight: 900, cursor: "pointer", whiteSpace: "nowrap" }}
-                >
-                  全て表示
-                </button>
-              </div>
-            )}
-
             {activeReturnSegment === null && (
               <BulkReturnByLocationPanel
                 bulk={bulk}
@@ -332,7 +313,6 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
               <BulkReturnByLocationPanel
                 bulk={bulk}
                 activeSegment={activeReturnSegment}
-                onClearSegment={() => setActiveReturnSegment(null)}
               />
             )}
           </div>
