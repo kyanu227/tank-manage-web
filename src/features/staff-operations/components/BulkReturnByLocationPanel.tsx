@@ -116,25 +116,42 @@ export default function BulkReturnByLocationPanel({
   const activeSegmentStat = activeSegment
     ? segmentStats.find((segment) => segment.key === activeSegment) ?? null
     : null;
+  const totalStat = useMemo<ReturnSegmentStat>(() => {
+    const total = segmentStats.reduce(
+      (sum, segment) => ({
+        customerCount: sum.customerCount + segment.customerCount,
+        tankCount: sum.tankCount + segment.tankCount,
+        taggedCount: sum.taggedCount + segment.taggedCount,
+      }),
+      { customerCount: 0, tankCount: 0, taggedCount: 0 },
+    );
+    return {
+      key: "normal",
+      label: "全貸出タンク",
+      shortLabel: "全体",
+      color: "#64748b",
+      background: "#f8fafc",
+      ...total,
+    };
+  }, [segmentStats]);
+  const sectionStat = activeSegmentStat ?? totalStat;
+  const hasSectionItems = sectionStat.customerCount > 0 || sectionStat.tankCount > 0;
 
   return (
-    <div style={{ position: "relative" }}>
+    <div style={{ position: "relative", marginBottom: 24 }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
         <h3 style={{ fontSize: 14, fontWeight: 800, color: "#475569", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 4, height: 16, borderRadius: 2, background: activeSegmentStat?.color ?? "#3b82f6", display: "inline-block" }} />
-          {activeSegmentStat ? activeSegmentStat.label : "全貸出タンク"}
+          <span style={{ width: 4, height: 16, borderRadius: 2, background: sectionStat.color, display: "inline-block" }} />
+          {sectionStat.label}
         </h3>
+        <span style={{ fontSize: 11, color: hasSectionItems ? sectionStat.color : "#94a3b8", fontWeight: 900, border: "1px solid #e2e8f0", borderRadius: 999, padding: "3px 8px", background: "#fff" }}>
+          {sectionStat.customerCount}顧客 / {sectionStat.tankCount}本
+          {sectionStat.taggedCount > 0 ? ` / タグ${sectionStat.taggedCount}本` : ""}
+        </span>
       </div>
 
-      {activeSegmentStat && (
-        <div style={{ marginBottom: 12, padding: "10px 12px", borderRadius: 14, background: activeSegmentStat.background, color: activeSegmentStat.color, fontSize: 12, fontWeight: 900 }}>
-          {activeSegmentStat.customerCount}顧客 / {activeSegmentStat.tankCount}本
-          {activeSegmentStat.taggedCount > 0 ? ` / タグ付き${activeSegmentStat.taggedCount}本` : ""}
-        </div>
-      )}
-
       {bulkLoading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 40 }}>
+        <div style={{ display: "flex", justifyContent: "center", padding: 40, background: "#fff", border: "1px solid #e8eaed", borderRadius: 16 }}>
           <Loader2 size={20} color="#94a3b8" style={{ animation: "spin 1s linear infinite" }} />
         </div>
       ) : locationKeys.length === 0 ? (
@@ -171,7 +188,7 @@ export default function BulkReturnByLocationPanel({
                   }}
                 >
                   <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <div style={{ padding: 4, background: "#e0f2fe", borderRadius: 8, color: "#0284c7" }}>
+                    <div style={{ padding: 4, background: sectionStat.background, borderRadius: 8, color: sectionStat.color }}>
                       {isExpanded ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
                     </div>
                     <div>
