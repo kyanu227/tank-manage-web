@@ -185,16 +185,22 @@ export function useManualTankOperation({
 
           const currentTank = allTanks[item.tankId];
           let finalLocation = "倉庫";
-          let finalNote = "";
+          let finalTankNote = "";
+          let finalLogNote = "";
 
           if (mode === "lend") {
             finalLocation = effectiveCustomer?.customerName ?? "";
           } else if (mode === "return") {
             if (tag === RETURN_TAG.KEEP) {
               finalLocation = currentTank?.location || "不明";
-              finalNote = "[TAG:keep]";
-            } else if (tag === RETURN_TAG.UNUSED) finalNote = "[TAG:unused]";
-            else if (tag === RETURN_TAG.UNCHARGED) finalNote = "[TAG:uncharged]";
+              finalLogNote = "持ち越し";
+            } else if (tag === RETURN_TAG.UNUSED) {
+              finalTankNote = "[TAG:unused]";
+              finalLogNote = finalTankNote;
+            } else if (tag === RETURN_TAG.UNCHARGED) {
+              finalTankNote = "[TAG:uncharged]";
+              finalLogNote = finalTankNote;
+            }
           }
 
           return {
@@ -203,8 +209,8 @@ export function useManualTankOperation({
             currentStatus: item.status || "",
             context,
             location: finalLocation,
-            tankNote: finalNote,
-            logNote: finalNote,
+            tankNote: finalTankNote,
+            logNote: finalLogNote,
           };
         })
       );
