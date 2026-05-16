@@ -35,6 +35,7 @@ export const RETURN_TAG = {
   NORMAL: "normal",
   UNUSED: "unused",
   UNCHARGED: "uncharged",
+  KEEP: "keep",
 } as const;
 
 export type ReturnTag = (typeof RETURN_TAG)[keyof typeof RETURN_TAG];
@@ -210,6 +211,8 @@ export function resolveReturnAction(
   const isInHouse = fromStatus === STATUS.IN_HOUSE;
 
   switch (tag) {
+    case RETURN_TAG.KEEP:
+      return ACTION.CARRY_OVER;
     case RETURN_TAG.UNUSED:
       return isInHouse ? ACTION.IN_HOUSE_RETURN_UNUSED : ACTION.RETURN_UNUSED;
     case RETURN_TAG.UNCHARGED:
@@ -224,6 +227,7 @@ export function resolveReturnAction(
  * 返却タグから遷移先ステータスを直接解決する。
  */
 export function resolveReturnStatus(tag: ReturnTag): TankStatus {
+  if (tag === RETURN_TAG.KEEP) return STATUS.UNRETURNED;
   return tag === RETURN_TAG.UNUSED ? STATUS.FILLED : STATUS.EMPTY;
 }
 
