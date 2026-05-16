@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { ArrowDownToLine, CheckCircle2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
-import { STATUS } from "@/lib/tank-rules";
+import { RETURN_TAG, STATUS } from "@/lib/tank-rules";
 import type { UseBulkReturnByLocationResult } from "../hooks/useBulkReturnByLocation";
 import type { ReturnSegmentKey, ReturnSegmentStat } from "./ReturnSegmentGestureLauncher";
 
@@ -172,7 +172,7 @@ export default function BulkReturnByLocationPanel({
             const tanks = groupedTanks[loc];
             const isExpanded = expanded[loc];
             const isReturning = returning[loc];
-            const hasKeepTag = tanks.some((tank) => tank.tag === "keep");
+            const hasKeepTag = tanks.some((tank) => tank.tag === RETURN_TAG.KEEP);
             const taggedPreview = tanks.filter((tank) => tank.tag !== "normal").slice(0, 3);
             const hiddenTaggedCount = Math.max(0, tanks.filter((tank) => tank.tag !== "normal").length - taggedPreview.length);
 
@@ -227,18 +227,18 @@ export default function BulkReturnByLocationPanel({
                   <div onClick={(e) => e.stopPropagation()}>
                     <button
                       onClick={() => handleBulkReturnForLocation(loc)}
-                      disabled={isReturning || hasKeepTag}
+                      disabled={isReturning}
                       style={{
                         padding: "8px 16px", borderRadius: 10, border: "none",
-                        background: isReturning || hasKeepTag ? "#e2e8f0" : "#0f172a",
-                        color: isReturning || hasKeepTag ? "#94a3b8" : "#fff",
-                        fontSize: 13, fontWeight: 700, cursor: isReturning || hasKeepTag ? "not-allowed" : "pointer",
+                        background: isReturning ? "#e2e8f0" : "#0f172a",
+                        color: isReturning ? "#94a3b8" : "#fff",
+                        fontSize: 13, fontWeight: 700, cursor: isReturning ? "not-allowed" : "pointer",
                         display: "flex", alignItems: "center", gap: 6, transition: "all 0.15s",
-                        boxShadow: isReturning || hasKeepTag ? "none" : "0 2px 4px rgba(0,0,0,0.1)",
+                        boxShadow: isReturning ? "none" : "0 2px 4px rgba(0,0,0,0.1)",
                       }}
                     >
                       {isReturning ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <ArrowDownToLine size={16} />}
-                      {hasKeepTag ? "持ち越し確認" : "一括返却"}
+                      {hasKeepTag ? "返却/持ち越し" : "一括返却"}
                     </button>
                   </div>
                 </div>
@@ -266,9 +266,11 @@ export default function BulkReturnByLocationPanel({
                               value={tank.tag}
                               onChange={(value) => updateTag(loc, tank.id, value)}
                               options={[
-                                { value: "uncharged", label: "未充填" },
-                                { value: "unused", label: "未使用" },
-                                { value: "keep", label: "持ち越し" },
+                                { value: RETURN_TAG.UNCHARGED, label: "未充填" },
+                                { value: RETURN_TAG.UNUSED, label: "未使用" },
+                                ...(tank.status === STATUS.LENT
+                                  ? [{ value: RETURN_TAG.KEEP, label: "持ち越し" }]
+                                  : []),
                               ]}
                               compact
                             />

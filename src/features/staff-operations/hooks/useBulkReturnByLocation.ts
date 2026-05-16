@@ -41,7 +41,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
         let tag: BulkTagType = "normal";
         if (tank.logNote === "[TAG:unused]") tag = "unused";
         if (tank.logNote === "[TAG:uncharged]") tag = "uncharged";
-        if (tank.logNote === "[TAG:keep]") tag = "keep";
+        if (tank.status === STATUS.LENT && tank.logNote === "[TAG:keep]") tag = "keep";
         groups[loc].push({ ...tank, tag } as unknown as BulkTankWithTag);
       });
       Object.keys(groups).forEach(loc => {
@@ -63,19 +63,25 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   }, []);
 
   const updateTag = useCallback(async (loc: string, tankId: string, newTag: BulkTagType) => {
-    const currentTag = groupedTanks[loc]?.find((tank) => tank.id === tankId)?.tag;
+    const targetTank = groupedTanks[loc]?.find((tank) => tank.id === tankId);
+    if (!targetTank) return;
+    if (newTag === RETURN_TAG.KEEP && targetTank.status !== STATUS.LENT) {
+      alert("持ち越しは貸出中のタンクのみ選択できます。");
+      return;
+    }
     setGroupedTanks(prev => {
       const g = { ...prev };
       g[loc] = g[loc].map(t => (t.id === tankId ? { ...t, tag: newTag } : t));
       return g;
     });
-    if (newTag === "keep" || currentTag === "keep") {
-      return;
-    }
     try {
       let logNote = "";
-      if (newTag === "unused") logNote = "[TAG:unused]";
-      if (newTag === "uncharged") logNote = "[TAG:uncharged]";
+      if (newTag === RETURN_TAG.UNUSED) logNote = "[TAG:unused]";
+      if (newTag === RETURN_TAG.UNCHARGED) logNote = "[TAG:uncharged]";
+      if (newTag === RETURN_TAG.KEEP) {
+        await updateLogNote(tankId, "");
+        return;
+      }
       await updateLogNote(tankId, logNote);
     } catch (e) {
       console.error("Failed to update tag", e);
@@ -86,11 +92,17 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   const handleBulkReturnForLocation = useCallback(async (loc: string) => {
     const tanksToReturn = groupedTanks[loc];
     if (!tanksToReturn || tanksToReturn.length === 0) return;
-    if (tanksToReturn.some((tank) => tank.tag === "keep")) {
-      alert("持ち越しを含む一括返却はまだ実行できません。持ち越し対象を外してから処理してください。");
+    const invalidKeepTanks = tanksToReturn.filter((tank) => tank.tag === RETURN_TAG.KEEP && tank.status !== STATUS.LENT);
+    if (invalidKeepTanks.length > 0) {
+      alert("持ち越しは貸出中のタンクのみ処理できます。未返却タンクの持ち越しを外してください。");
       return;
     }
-    if (!confirm(`${loc} の貸出中タンク全 ${tanksToReturn.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`)) return;
+    const keepCount = tanksToReturn.filter((tank) => tank.tag === RETURN_TAG.KEEP).length;
+    const returnCount = tanksToReturn.length - keepCount;
+    const confirmMessage = keepCount > 0
+      ? `${loc} のタンクを処理しますか？\n返却: ${returnCount}本 / 持ち越し: ${keepCount}本`
+      : `${loc} のタンク全 ${tanksToReturn.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`;
+    if (!confirm(confirmMessage)) return;
 
     setReturning(prev => ({ ...prev, [loc]: true }));
     try {
@@ -99,17 +111,23 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       await applyBulkTankOperations(
         tanksToReturn.map((tank) => {
           const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
+          const isKeep = tag === RETURN_TAG.KEEP;
           return {
             tankId: tank.id,
             transitionAction: resolveReturnAction(tag, tank.status),
             currentStatus: tank.status,
             context,
-            location: "倉庫",
+            location: isKeep ? tank.location || loc || "不明" : "倉庫",
+            tankNote: "",
+            logNote: isKeep ? "持ち越し" : "",
           };
         })
       );
 
-      alert(`${loc} の一括返却が完了しました。`);
+      const completeMessage = keepCount > 0
+        ? `${loc} の処理が完了しました。\n返却: ${returnCount}本 / 持ち越し: ${keepCount}本`
+        : `${loc} の一括返却が完了しました。`;
+      alert(completeMessage);
       fetchBulkTanks();
     } catch (e: any) {
       alert("エラー: " + e.message);
