@@ -87,7 +87,10 @@ export function useManualTankOperation({
       valid = false;
       error = "未登録タンク";
     } else {
-      const v = validateTransition(currentStatus, config.action);
+      const actionToValidate: TankAction = mode === "return"
+        ? resolveReturnAction(returnTag as ReturnTag, currentStatus)
+        : config.action;
+      const v = validateTransition(currentStatus, actionToValidate);
       if (!v.ok) {
         valid = false;
         error = v.reason || `[${currentStatus}] は不可`;
@@ -104,7 +107,7 @@ export function useManualTankOperation({
     successTimeoutRef.current = setTimeout(() => {
       setLastAdded(null);
     }, 1500);
-  }, [allTanks, config.action, opQueue, returnTag]);
+  }, [allTanks, config.action, mode, opQueue, returnTag]);
 
   const handleInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/[^0-9]/g, "");
@@ -152,7 +155,16 @@ export function useManualTankOperation({
       return;
     }
 
-    if (!skipConfirm && !confirm(`${config.label}：${validItems.length}本を処理しますか？`)) return;
+    if (!skipConfirm) {
+      const keepCount = mode === "return"
+        ? validItems.filter((item) => item.tag === RETURN_TAG.KEEP).length
+        : 0;
+      const returnCount = validItems.length - keepCount;
+      const confirmMessage = keepCount > 0
+        ? `返却: ${returnCount}本 / 持ち越し: ${keepCount}本を処理しますか？`
+        : `${config.label}：${validItems.length}本を処理しますか？`;
+      if (!confirm(confirmMessage)) return;
+    }
 
     setSubmitting(true);
     try {
@@ -171,14 +183,24 @@ export function useManualTankOperation({
             ? resolveReturnAction(tag, item.status || "")
             : config.action;
 
+          const currentTank = allTanks[item.tankId];
           let finalLocation = "倉庫";
-          let finalNote = "";
+          let finalTankNote = "";
+          let finalLogNote = "";
 
           if (mode === "lend") {
             finalLocation = effectiveCustomer?.customerName ?? "";
           } else if (mode === "return") {
-            if (tag === RETURN_TAG.UNUSED) finalNote = "[TAG:unused]";
-            else if (tag === RETURN_TAG.UNCHARGED) finalNote = "[TAG:uncharged]";
+            if (tag === RETURN_TAG.KEEP) {
+              finalLocation = currentTank?.location || "不明";
+              finalLogNote = "持ち越し";
+            } else if (tag === RETURN_TAG.UNUSED) {
+              finalTankNote = "[TAG:unused]";
+              finalLogNote = finalTankNote;
+            } else if (tag === RETURN_TAG.UNCHARGED) {
+              finalTankNote = "[TAG:uncharged]";
+              finalLogNote = finalTankNote;
+            }
           }
 
           return {
@@ -187,8 +209,8 @@ export function useManualTankOperation({
             currentStatus: item.status || "",
             context,
             location: finalLocation,
-            tankNote: finalNote,
-            logNote: finalNote,
+            tankNote: finalTankNote,
+            logNote: finalLogNote,
           };
         })
       );
@@ -201,7 +223,7 @@ export function useManualTankOperation({
     } finally {
       setSubmitting(false);
     }
-  }, [config.action, config.label, fetchData, mode, opQueue, selectedCustomer]);
+  }, [allTanks, config.action, config.label, fetchData, mode, opQueue, selectedCustomer]);
 
   const validCount = useMemo(() => opQueue.filter(q => q.valid).length, [opQueue]);
 

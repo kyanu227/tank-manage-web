@@ -5,7 +5,7 @@ import type { TankAction } from "@/lib/tank-rules";
 import type { TankDoc } from "@/lib/tank-types";
 
 export type OpMode = "lend" | "return" | "fill";
-export type TagType = "normal" | "unused" | "uncharged";
+export type TagType = "normal" | "unused" | "uncharged" | "keep";
 export type BulkTagType = "normal" | "unused" | "uncharged" | "keep";
 export type OpStyle = "manual" | "order";
 

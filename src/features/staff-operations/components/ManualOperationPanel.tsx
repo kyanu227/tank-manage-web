@@ -4,7 +4,7 @@ import { ArrowLeft, Loader2, Send, X } from "lucide-react";
 import DrumRoll from "@/components/DrumRoll";
 import QuickSelect from "@/components/QuickSelect";
 import type { QuickSelectOption } from "@/components/QuickSelect";
-import ReturnTagSelector from "@/components/ReturnTagSelector";
+import ReturnTagSelector, { getReturnTagLabel, getReturnTagStyle } from "@/components/ReturnTagSelector";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
 import type { ModeConfigItem, OpMode, TagType } from "../types";
@@ -145,8 +145,17 @@ export default function ManualOperationPanel({
                         {item.tankId}
                       </span>
                       {!isFill && item.tag !== "normal" && (
-                        <span style={{ fontSize: 10, fontWeight: 800, padding: "2px 6px", borderRadius: 4, background: item.tag === "unused" ? "#d1fae5" : "#fee2e2", color: item.tag === "unused" ? "#047857" : "#b91c1c" }}>
-                          {item.tag === "unused" ? "未使用" : "未充填"}
+                        <span
+                          style={{
+                            fontSize: 10,
+                            fontWeight: 800,
+                            padding: "2px 6px",
+                            borderRadius: 4,
+                            background: getReturnTagStyle(item.tag).background,
+                            color: getReturnTagStyle(item.tag).color,
+                          }}
+                        >
+                          {getReturnTagLabel(item.tag)}
                         </span>
                       )}
                     </div>
@@ -190,6 +199,7 @@ export default function ManualOperationPanel({
               options={[
                 { value: "uncharged", label: "未充填" },
                 { value: "unused", label: "未使用" },
+                { value: "keep", label: "持ち越し" },
               ]}
               compact
             />

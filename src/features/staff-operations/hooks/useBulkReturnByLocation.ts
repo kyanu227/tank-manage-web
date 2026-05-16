@@ -86,6 +86,10 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   const handleBulkReturnForLocation = useCallback(async (loc: string) => {
     const tanksToReturn = groupedTanks[loc];
     if (!tanksToReturn || tanksToReturn.length === 0) return;
+    if (tanksToReturn.some((tank) => tank.tag === "keep")) {
+      alert("持ち越しを含む一括返却はまだ実行できません。持ち越し対象を外してから処理してください。");
+      return;
+    }
     if (!confirm(`${loc} の貸出中タンク全 ${tanksToReturn.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`)) return;
 
     setReturning(prev => ({ ...prev, [loc]: true }));
