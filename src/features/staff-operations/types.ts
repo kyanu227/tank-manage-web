@@ -7,6 +7,7 @@ import type { TankDoc } from "@/lib/tank-types";
 export type OpMode = "lend" | "return" | "fill";
 export type TagType = "normal" | "unused" | "uncharged" | "keep";
 export type BulkTagType = "normal" | "unused" | "uncharged" | "keep";
+export type BulkReturnDatePool = "today_lent" | "past_lent" | "unknown_lent" | "long_term";
 export type OpStyle = "manual" | "order";
 
 export interface QueueItem {
@@ -48,6 +49,15 @@ export interface BulkTankDoc {
   staff: string;
   updatedAt: any;
   logNote?: string;
+}
+
+export interface BulkReturnGroupMeta {
+  key: string;
+  location: string;
+  pool: BulkReturnDatePool;
+  poolLabel: string;
+  dateLabel: string;
+  sortMillis: number | null;
 }
 
 export interface ModeConfigItem {
