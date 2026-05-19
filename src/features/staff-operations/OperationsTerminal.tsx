@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownToLine } from "lucide-react";
 import { useTanks } from "@/hooks/useTanks";
-import { STATUS } from "@/lib/tank-rules";
 import { DEFAULT_OP_STYLE, MODE_CONFIG } from "./constants";
 import { useBulkReturnByLocation } from "./hooks/useBulkReturnByLocation";
 import { useDestinations } from "./hooks/useDestinations";
@@ -124,18 +123,27 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     stats.customer_requests.tankCount = returnTagWaitingTankCount;
     stats.customer_requests.taggedCount = returnTagWaitingTankCount;
 
-    bulk.locationKeys.forEach((loc) => {
-      const tanks = bulk.groupedTanks[loc] ?? [];
-      const segment: ReturnSegmentKey = tanks.some((tank) => tank.status === STATUS.UNRETURNED)
+    const locationsBySegment: Record<Extract<ReturnSegmentKey, "normal" | "long_term">, Set<string>> = {
+      long_term: new Set(),
+      normal: new Set(),
+    };
+
+    bulk.groupKeys.forEach((groupKey) => {
+      const tanks = bulk.groupedTanks[groupKey] ?? [];
+      const meta = bulk.groupMeta[groupKey];
+      const segment: Extract<ReturnSegmentKey, "normal" | "long_term"> = meta?.pool === "long_term"
         ? "long_term"
         : "normal";
+      if (meta) locationsBySegment[segment].add(meta.location);
       stats[segment].customerCount += 1;
       stats[segment].tankCount += tanks.length;
       stats[segment].taggedCount += tanks.filter((tank) => tank.tag !== "normal").length;
     });
+    stats.normal.customerCount = locationsBySegment.normal.size;
+    stats.long_term.customerCount = locationsBySegment.long_term.size;
 
     return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
-  }, [bulk.groupedTanks, bulk.locationKeys, returnTagProcessing.returnGroups]);
+  }, [bulk.groupMeta, bulk.groupKeys, bulk.groupedTanks, returnTagProcessing.returnGroups]);
 
   const openManualReturn = () => {
     setActiveReturnSegment(null);
