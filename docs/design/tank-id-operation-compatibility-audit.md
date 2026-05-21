@@ -140,6 +140,76 @@ Before deployment or broad helper connection, one of these must be chosen explic
 - implement compatibility reads such as canonical lookup first, then legacy raw lookup, with explicit logging and no automatic writes;
 - temporarily constrain procurement UI/service to the currently operable range if 100+ should not be usable yet.
 
+## Deploy block after PR #89
+
+PR #89 is already merged, but Hosting deploy should remain blocked until the operation compatibility gap is closed or explicitly accepted.
+
+The reason is not the `A-01` canonical form itself. For 1-99, the main staff operation UI already composes IDs such as `A-01`. The immediate deploy risk is that procurement can now create `A-100`, while several operation-side controls still assume exactly two numeric digits.
+
+If PR #89 were deployed as-is, production could create a tank that exists as `tanks/A-100` but cannot be entered through manual operation / order fulfillment and cannot be selected through `PrefixNumberPicker`. That creates an operationally stranded tank even though the domain helper is valid.
+
+Deploy should wait until one of these is true:
+
+- operation UI and picker flows support 2+ digit canonical IDs;
+- procurement temporarily rejects 100+ input at the UI/service boundary while the domain helper remains broader;
+- production operators explicitly agree not to register 100+ IDs until the operation-side support lands.
+
+This block is separate from Firestore data migration. No migration should be executed as part of PR #90.
+
+## Required read-only Firestore data audit
+
+Before connecting `tank-operation.ts`, manual operation, order fulfillment, return tag processing, or repositories to `src/lib/tank-id.ts`, a read-only Firestore data audit is required.
+
+The audit should inspect, without creating, updating, or deleting Firestore data:
+
+- `tanks` document ids that match `A01` or similar no-hyphen forms;
+- `tanks` document ids that match canonical `A-01` style forms;
+- `tanks` document ids with 100+ numbers such as `A-100`;
+- `tanks` document ids outside the numeric model, such as `A-OK` or other suffixes;
+- `logs.tankId` values that are raw, non-canonical, summary strings, or nonnumeric;
+- whether `logKind="procurement"` and `logKind="tank"` use compatible `tankId` meanings;
+- whether active tank lifecycle logs and current `tanks` document ids can be joined exactly.
+
+If any `tanks/A01` documents exist, a simple operation-side `normalizeTankId(raw) -> A-01` connection is unsafe. It can make existing documents unreachable through exact `doc(db, "tanks", tankId)` reads. In that case, one of these must be designed first:
+
+- a read compatibility strategy, such as canonical-first plus explicit legacy fallback;
+- a separate Firestore data migration plan;
+- a temporary policy that only list-driven flows operate legacy IDs until migration is complete.
+
+The data audit should also check whether nonnumeric IDs such as `A-OK` actually exist. If they do, they need a legacy/special ID policy. If they do not, future code can treat them as invalid more confidently.
+
+## Decision points before implementation
+
+### `A01` vs `A-01`
+
+If existing production data is already canonical `A-01`, connecting operation inputs to the helper is mostly a UI and boundary cleanup for 1-99.
+
+If existing production data contains `A01`, helper connection is a migration problem, not just a normalization refactor. Exact reads in `tankMap`, `tanksRepository.getTank`, `tank-operation.ts`, `logsRepository`, and trace queries can split between old and new IDs.
+
+### 100+ tank numbers
+
+There are three viable choices:
+
+| Option | Description | Tradeoff |
+|---|---|---|
+| A | Keep the domain helper broad and update operation UI / pickers to handle 3+ digits. | Best long-term model, but requires UI and validation work before deploy. |
+| B | Temporarily block 100+ creation in procurement while leaving `tank-id.ts` domain helper broad. | Fastest deploy safety, but adds a temporary UI/service constraint that must be removed later. |
+| C | Allow procurement/admin to create 100+ but do not deploy until operation UI support lands. | Preserves model purity, but delays production rollout. |
+
+Current recommendation: do not deploy PR #89 behavior until either option A or option B is implemented, or option C is explicitly accepted as a release hold.
+
+### `A-OK` and nonnumeric IDs
+
+`A-OK` is outside the prefix + positive number model. Existing staff inputs can emit it, but `src/lib/tank-id.ts` should not silently normalize it.
+
+Decision required:
+
+- if `A-OK` exists as a real tank or legacy document id, treat it as a legacy/special ID category and design compatibility or cleanup separately;
+- if it only exists as a UI shortcut and not as stored data, keep it out of the canonical helper and decide whether to retire or replace the shortcut;
+- if it does not exist in data and is not needed operationally, make it invalid in future UI changes.
+
+This decision depends on the read-only Firestore data audit.
+
 ## Safe connection boundaries
 
 ### UI input boundary
@@ -181,16 +251,15 @@ Bulk return, repair, inspection, in-house bulk return, portal return, and some d
 
 Do not connect all operation flows at once. A safe sequence is:
 
-1. Add docs or diagnostics confirming whether production `tanks` document ids are `A-01`, `A01`, mixed, or include 100+ values. This should not mutate data.
-2. Update `PrefixNumberPicker` and shared operation input UX to support variable-length numbers if `A-100` is allowed in procurement.
-3. Decide the `A-OK` policy before applying `tank-id.ts` to shared staff operation inputs.
-4. Add a compatibility read helper or explicit migration plan if any existing document ids are non-canonical.
-5. Connect `tank-operation.ts` to `tank-id.ts` only after the read strategy is settled.
+1. PR #91: add a read-only Firestore data audit script or a docs-only data-audit procedure. It must not mutate data.
+2. PR #92: either update operation UI / pickers for `A-100`, or temporarily constrain procurement creation to currently operable IDs.
+3. PR #93: connect operation-side normalization after the data-shape and UI compatibility decisions are settled.
 
 The smallest implementation PR after this audit should likely be one of:
 
 - update `PrefixNumberPicker` to parse canonical IDs with 2+ digits using `parseTankId` / `formatTankId`, while still selecting existing document ids;
 - update the staff numeric input components to support variable-length number confirmation without changing `tank-operation.ts`;
+- temporarily constrain procurement UI/service to 1-99 if that is the chosen release safety policy;
 - add a docs-only or read-only data-shape verification procedure for existing `tanks` ids;
 - add explicit unit-level tests around `tank-id.ts` if a test strategy is introduced separately.
 
