@@ -42,6 +42,35 @@ Credential options:
 
 The credential must have read access to the production Firestore project `okmarine-tankrental`.
 
+Service account JSON files and other credential files must stay local. Do not commit them, print their private key contents, or paste them into PRs / docs. The existing `.gitignore` excludes `firebase-service-account.json`, `*-firebase-adminsdk-*.json`, `.env*`, and generic `*.json` except allowed project metadata files.
+
+For this audit, Firebase Admin SDK with a service account credential is the recommended execution path. Web SDK execution is not recommended for this audit because it depends on Firebase Auth login state and Security Rules, which makes it unsuitable for a deterministic production data-shape inventory.
+
+## Credential and permission triage
+
+If the script returns `PERMISSION_DENIED`, check the credential and IAM setup before changing code:
+
+1. Confirm the credential belongs to the intended Firebase / Google Cloud project.
+   - The expected project is `okmarine-tankrental`.
+   - Check the local JSON `project_id` field without printing `private_key`.
+2. Confirm the service account email is the expected audit or admin service account.
+   - Check the local JSON `client_email` field.
+   - Do not commit or paste the JSON file.
+3. Confirm the service account has Firestore read permissions.
+   - For a read-only audit, an IAM role such as Firestore / Datastore Viewer is expected to be sufficient.
+   - If a narrower custom role is used, it must allow collection/document reads for `tanks`, `logs`, and `transactions`.
+4. Confirm the Admin SDK initializes against the expected `projectId`.
+   - `GOOGLE_CLOUD_PROJECT` / `GCLOUD_PROJECT` can override defaults.
+   - The script falls back to `okmarine-tankrental`.
+5. Confirm the expected Firestore database is being read.
+   - The script currently uses the Admin SDK default Firestore database.
+   - If the project uses a non-default database, the script must be adjusted deliberately before use.
+6. Avoid using Web SDK as the primary audit path.
+   - Web SDK reads can fail because of Security Rules or missing Firebase Auth state even when Admin SDK read access would be valid.
+   - A Web SDK permission error does not prove the production data is unreadable by an authorized Admin SDK credential.
+
+PR #91 should remain draft until this credential issue is resolved and aggregate production counts are recorded.
+
 ## Safety constraints
 
 - No Firestore data create/update/delete.
@@ -90,6 +119,8 @@ Execution attempts:
 | Web SDK using `.env.local` config, network allowed, `limit(1)` read | Failed before data read: `permission-denied`. |
 
 No Firestore data was created, updated, deleted, migrated, or deployed. No aggregate production counts were obtained in this run because both available credential paths lacked read permission.
+
+Because production counts are still missing, this PR is intentionally not ready for review yet. Its current value is the read-only audit method plus the permission triage record, not the final data-shape answer.
 
 ## Collections checked
 
@@ -169,6 +200,11 @@ Before any operation-side helper connection:
    - a temporary procurement creation limit until operation UI supports 100+ IDs.
 
 Until this data audit succeeds, operation-side normalization should remain blocked.
+
+PR #91 should move from draft to ready only after one of these happens:
+
+- the script successfully records aggregate counts for `tanks`, `logs`, and relevant `transactions` tankId values;
+- or the team explicitly decides that PR #91 is only a reusable audit-tooling PR and opens a separate follow-up PR for the actual data run.
 
 ## Explicit non-goals
 
