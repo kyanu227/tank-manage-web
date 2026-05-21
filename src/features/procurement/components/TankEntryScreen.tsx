@@ -17,6 +17,7 @@ import { db } from "@/lib/firebase/config";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import { STATUS } from "@/lib/tank-rules";
+import { tryParseTankId } from "@/lib/tank-id";
 import {
   submitTankEntryBatch,
   type TankEntryMode,
@@ -108,13 +109,17 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
     && (!isPurchase || (Number(unitCostInput) > 0 && !!purchaseDate));
 
   const addTankId = () => {
-    const normalized = normalizeTankId(tankIdInput);
-    if (!normalized) return;
+    if (!tankIdInput.trim()) return;
 
-    if (!isValidTankId(normalized)) {
-      setResult({ success: false, message: "タンクIDは A-01 の形式で入力してください" });
+    const parsed = tryParseTankId(tankIdInput);
+
+    if (!parsed.ok) {
+      setResult({ success: false, message: parsed.reason });
       return;
     }
+
+    const normalized = parsed.canonicalTankId;
+
     if (tankIds.includes(normalized)) {
       setResult({ success: false, message: `${normalized} は追加済みです` });
       return;
@@ -242,7 +247,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <input
                 value={tankIdInput}
-                onChange={(e) => setTankIdInput(normalizeTankId(e.target.value))}
+                onChange={(e) => setTankIdInput(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === "Enter") {
                     e.preventDefault();
@@ -535,17 +540,6 @@ function todayInputValue(): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function normalizeTankId(value: string): string {
-  return value
-    .toUpperCase()
-    .replace(/[‐‑‒–—―ーｰ−]/g, "-")
-    .replace(/\s+/g, "");
-}
-
-function isValidTankId(value: string): boolean {
-  return /^[A-Z]+-\d{2}$/.test(value);
 }
 
 function errorMessage(error: unknown): string {

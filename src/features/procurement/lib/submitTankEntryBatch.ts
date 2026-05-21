@@ -8,6 +8,7 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import type { OperationActor } from "@/lib/operation-context";
+import { normalizeTankId } from "@/lib/tank-id";
 
 export type TankEntryMode = "purchase" | "register";
 
@@ -135,21 +136,13 @@ function normalizeActor(actor: OperationActor): OperationActor {
   };
 }
 
-function normalizeTankId(tankId: string): string {
-  return tankId
-    .trim()
-    .toUpperCase()
-    .replace(/[‐‑‒–—―ーｰ−]/g, "-")
-    .replace(/\s+/g, "");
-}
-
 function uniqueTankIds(values: string[]): string[] {
   const result: string[] = [];
   const seen = new Set<string>();
 
   values.forEach((value) => {
+    if (!String(value || "").trim()) return;
     const normalized = normalizeTankId(value);
-    if (!normalized) return;
     if (seen.has(normalized)) return;
     seen.add(normalized);
     result.push(normalized);
