@@ -29,6 +29,7 @@ export type TankIdValidationResult =
 const MIN_DISPLAY_DIGITS = 2;
 const SORT_KEY_DIGITS = 6;
 const HYPHEN_VARIANTS_RE = /[‐‑‒–—―ーｰ−]/g;
+// Prefix is intentionally one or more ASCII letters so future multi-letter prefixes like AB-01 remain valid.
 const TANK_ID_RE = /^([A-Z]+)-?([0-9]+)$/;
 const PREFIX_RE = /^[A-Z]+$/;
 
@@ -38,7 +39,7 @@ const PREFIX_RE = /^[A-Z]+$/;
  */
 export function parseTankId(input: string): TankIdParts {
   const result = tryParseTankId(input);
-  if (!result.ok) {
+  if (result.ok === false) {
     throw new Error(result.reason);
   }
   return result.parts;
@@ -111,6 +112,7 @@ export function buildTankSortKey(
 }
 
 export function compareTankIdNatural(a: string, b: string): number {
+  // Invalid values throw through parseTankId. UI callers that need tolerant sorting should filter first.
   const left = parseTankId(a);
   const right = parseTankId(b);
   const prefixOrder = left.prefix.localeCompare(right.prefix);
