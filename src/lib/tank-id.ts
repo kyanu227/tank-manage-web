@@ -1,7 +1,15 @@
-export type TankIdParts = {
+export type NumericTankIdParts = {
   prefix: string;
+  kind: "numeric";
   number: number;
 };
+
+export type OkTankIdParts = {
+  prefix: string;
+  kind: "ok";
+};
+
+export type TankIdParts = NumericTankIdParts | OkTankIdParts;
 
 export type TankIdModel = TankIdParts & {
   canonicalTankId: string;
@@ -30,11 +38,12 @@ const MIN_DISPLAY_DIGITS = 2;
 const SORT_KEY_DIGITS = 6;
 const HYPHEN_VARIANTS_RE = /[‐‑‒–—―ーｰ−]/g;
 // Prefix is intentionally one or more ASCII letters so future multi-letter prefixes like AB-01 remain valid.
-const TANK_ID_RE = /^([A-Z]+)-?([0-9]+)$/;
+const TANK_ID_RE = /^([A-Z]+)-?([0-9]+|OK)$/;
 const PREFIX_RE = /^[A-Z]+$/;
+const OK_SORT_SUFFIX = `${"9".repeat(SORT_KEY_DIGITS)}:OK`;
 
 /**
- * Tank IDs are modeled as prefix + numeric value.
+ * Tank IDs are modeled as prefix + numeric value, with OK as the only reserved nonnumeric exception.
  * "01" is a display/input representation, not stored source data.
  */
 export function parseTankId(input: string): TankIdParts {
@@ -53,18 +62,33 @@ export function tryParseTankId(input: string): TankIdValidationResult {
 
   const match = normalizedInput.match(TANK_ID_RE);
   if (!match) {
-    return invalid(input, normalizedInput, "タンクIDは prefix + number の形式で入力してください");
+    return invalid(input, normalizedInput, "タンクIDは prefix + number または prefix + OK の形式で入力してください");
   }
 
   const prefix = match[1];
-  const numberText = match[2];
+  const suffix = match[2];
+  if (suffix === "OK") {
+    const parts: TankIdParts = { prefix, kind: "ok" };
+    const canonicalTankId = formatTankId(parts);
+    return {
+      ok: true,
+      input,
+      normalizedInput,
+      parts,
+      canonicalTankId,
+      displayTankId: canonicalTankId,
+      sortKey: buildTankSortKey(parts),
+    };
+  }
+
+  const numberText = suffix;
   const number = Number.parseInt(numberText, 10);
 
   if (!Number.isSafeInteger(number) || number < 1) {
     return invalid(input, normalizedInput, "タンクIDの番号は1以上で入力してください");
   }
 
-  const parts: TankIdParts = { prefix, number };
+  const parts: TankIdParts = { prefix, kind: "numeric", number };
   const canonicalTankId = formatTankId(parts);
   return {
     ok: true,
@@ -89,9 +113,12 @@ export function formatTankId(
 ): string {
   const parts =
     typeof partsOrPrefix === "string"
-      ? { prefix: partsOrPrefix, number: numberArg }
+      ? { prefix: partsOrPrefix, kind: "numeric" as const, number: numberArg }
       : partsOrPrefix;
   const prefix = normalizePrefix(parts.prefix);
+  if (parts.kind === "ok") {
+    return `${prefix}-OK`;
+  }
   const number = normalizeNumber(parts.number);
   return `${prefix}-${String(number).padStart(MIN_DISPLAY_DIGITS, "0")}`;
 }
@@ -104,9 +131,12 @@ export function buildTankSortKey(
 ): string {
   const parts =
     typeof partsOrPrefix === "string"
-      ? { prefix: partsOrPrefix, number: numberArg }
+      ? { prefix: partsOrPrefix, kind: "numeric" as const, number: numberArg }
       : partsOrPrefix;
   const prefix = normalizePrefix(parts.prefix);
+  if (parts.kind === "ok") {
+    return `${prefix}:${OK_SORT_SUFFIX}`;
+  }
   const number = normalizeNumber(parts.number);
   return `${prefix}:${String(number).padStart(SORT_KEY_DIGITS, "0")}`;
 }
@@ -117,6 +147,9 @@ export function compareTankIdNatural(a: string, b: string): number {
   const right = parseTankId(b);
   const prefixOrder = left.prefix.localeCompare(right.prefix);
   if (prefixOrder !== 0) return prefixOrder;
+  if (left.kind === "ok" && right.kind === "ok") return 0;
+  if (left.kind === "ok") return 1;
+  if (right.kind === "ok") return -1;
   return left.number - right.number;
 }
 
@@ -128,7 +161,6 @@ function normalizeInputForParse(input: string): string {
   return String(input ?? "")
     .trim()
     .replace(HYPHEN_VARIANTS_RE, "-")
-    .replace(/\s+/g, "")
     .toUpperCase();
 }
 
