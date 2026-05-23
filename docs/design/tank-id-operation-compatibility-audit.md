@@ -110,11 +110,11 @@ However:
 
 So `A-100` can be registered, can appear in list-driven flows like bulk return or portal return, but cannot be entered in the main manual operation / order fulfillment UI and cannot be selected in picker-based flows.
 
-### 4. `A-OK` is outside the helper model
+### 4. `A-OK` is a reserved helper exception
 
-Several staff flows allow `${prefix}-OK` as a special input. The pure helper models prefix + positive numeric number and intentionally rejects non-numeric suffixes.
+Several staff flows allow `${prefix}-OK` as a special input. The helper model should treat `OK` as the only reserved nonnumeric exception, not as an arbitrary suffix model.
 
-Before using the helper at UI boundaries, callers must decide whether `A-OK` is a legitimate legacy operation shortcut, a UI-only special case, or a candidate for removal. It should not be silently passed to `normalizeTankId`.
+That means `A-OK` / `AOK` / `a-ok` are valid and normalize to `A-OK`, while `A-NG`, `A-TEST`, and `A-SPARE` remain invalid. Before PR #91 records production audit counts, its classification should treat `A-OK` as a valid OK exception rather than a nonnumeric anomaly.
 
 ### 5. Logs and trace require exact key consistency
 
@@ -132,6 +132,7 @@ The code-level compatibility model is:
 | Existing docs are `A01` | Main manual/order input already emits `A-01`, so those docs are hard to operate manually. Bulk list flows can still process them because they use existing `tank.id`. | High if operation entry normalizes to `A-01` without fallback or migration. |
 | Mixed `A01` and `A-01` | Prefix list hides the distinction; manual input targets only `A-01`. Bulk/list flows preserve raw ids. | High. Duplicate physical IDs may exist under different document ids. |
 | Existing docs include `A-100` | Bulk/list flows can read raw ids. Manual/order/picker flows cannot select or enter them. | High until UI/picker supports variable digit length. |
+| Existing docs include `A-OK` | Some staff flows already have special handling for OK input. | Medium until all operation boundaries use the helper's reserved OK exception consistently. |
 
 Before deployment or broad helper connection, one of these must be chosen explicitly:
 
@@ -165,7 +166,8 @@ The audit should inspect, without creating, updating, or deleting Firestore data
 - `tanks` document ids that match `A01` or similar no-hyphen forms;
 - `tanks` document ids that match canonical `A-01` style forms;
 - `tanks` document ids with 100+ numbers such as `A-100`;
-- `tanks` document ids outside the numeric model, such as `A-OK` or other suffixes;
+- `tanks` document ids that use the reserved OK exception, such as `A-OK`;
+- `tanks` document ids outside the numeric + OK model, such as `A-NG` or other arbitrary suffixes;
 - `logs.tankId` values that are raw, non-canonical, summary strings, or nonnumeric;
 - whether `logKind="procurement"` and `logKind="tank"` use compatible `tankId` meanings;
 - whether active tank lifecycle logs and current `tanks` document ids can be joined exactly.
@@ -176,7 +178,7 @@ If any `tanks/A01` documents exist, a simple operation-side `normalizeTankId(raw
 - a separate Firestore data migration plan;
 - a temporary policy that only list-driven flows operate legacy IDs until migration is complete.
 
-The data audit should also check whether nonnumeric IDs such as `A-OK` actually exist. If they do, they need a legacy/special ID policy. If they do not, future code can treat them as invalid more confidently.
+The data audit should also check whether `A-OK` actually exists and whether any non-OK suffix IDs exist. `A-OK` should be classified as the reserved OK exception. Non-OK suffixes still need a legacy/special cleanup policy if they exist.
 
 ## Decision points before implementation
 
@@ -200,13 +202,13 @@ Current recommendation: do not deploy PR #89 behavior until either option A or o
 
 ### `A-OK` and nonnumeric IDs
 
-`A-OK` is outside the prefix + positive number model. Existing staff inputs can emit it, but `src/lib/tank-id.ts` should not silently normalize it.
+`A-OK` is part of the canonical helper model as the only reserved nonnumeric exception. Existing staff inputs can emit it, and helper-based parsing should normalize `AOK` / `A-OK` / `a-ok` to `A-OK`.
 
 Decision required:
 
-- if `A-OK` exists as a real tank or legacy document id, treat it as a legacy/special ID category and design compatibility or cleanup separately;
-- if it only exists as a UI shortcut and not as stored data, keep it out of the canonical helper and decide whether to retire or replace the shortcut;
-- if it does not exist in data and is not needed operationally, make it invalid in future UI changes.
+- keep `OK` as the only reserved nonnumeric suffix;
+- reject arbitrary suffixes such as `A-NG`, `A-TEST`, and `A-SPARE`;
+- classify `A-OK` separately from helper-parse failures in PR #91's read-only audit.
 
 This decision depends on the read-only Firestore data audit.
 
@@ -214,7 +216,7 @@ This decision depends on the read-only Firestore data audit.
 
 ### UI input boundary
 
-Using `tryParseTankId` at UI confirmation time is safe for procurement-style free text. It is not safe to blindly apply the helper to staff operation inputs while `A-OK` remains valid and while existing `A01` document ids may exist.
+Using `tryParseTankId` at UI confirmation time is safe for procurement-style free text. It is not safe to blindly apply the helper to staff operation inputs while existing `A01` document ids may exist. `A-OK` should be treated through the helper's reserved OK exception, not through ad hoc suffix handling.
 
 For manual operation and order fulfillment, the first UI improvement should likely be variable-length numeric entry plus explicit handling of the `OK` shortcut, not just replacing string assembly.
 
