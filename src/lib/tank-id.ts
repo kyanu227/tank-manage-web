@@ -44,7 +44,7 @@ const OK_SORT_SUFFIX = `${"9".repeat(SORT_KEY_DIGITS)}:OK`;
 
 /**
  * Tank IDs are modeled as prefix + numeric value, with OK as the only reserved nonnumeric exception.
- * "01" is a display/input representation, not stored source data.
+ * "00" and "01" are display/input representations, not stored source data.
  */
 export function parseTankId(input: string): TankIdParts {
   const result = tryParseTankId(input);
@@ -84,8 +84,8 @@ export function tryParseTankId(input: string): TankIdValidationResult {
   const numberText = suffix;
   const number = Number.parseInt(numberText, 10);
 
-  if (!Number.isSafeInteger(number) || number < 1) {
-    return invalid(input, normalizedInput, "タンクIDの番号は1以上で入力してください");
+  if (!Number.isSafeInteger(number) || number < 0) {
+    return invalid(input, normalizedInput, "タンクIDの番号は0以上で入力してください");
   }
 
   const parts: TankIdParts = { prefix, kind: "numeric", number };
@@ -173,8 +173,8 @@ function normalizePrefix(prefix: string): string {
 }
 
 function normalizeNumber(number: unknown): number {
-  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 1) {
-    throw new Error("タンクIDの番号は1以上で入力してください");
+  if (typeof number !== "number" || !Number.isSafeInteger(number) || number < 0) {
+    throw new Error("タンクIDの番号は0以上で入力してください");
   }
   return number;
 }

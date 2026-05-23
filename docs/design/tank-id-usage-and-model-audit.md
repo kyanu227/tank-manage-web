@@ -211,10 +211,13 @@ type TankIdModel = {
 };
 ```
 
-この設計では、numeric tankId の保存上の正本は `"01"` のような数字文字列ではなく、`prefix: "A"` と `number: 1` の組み合わせに寄せる。`OK` は `kind: "ok"` として表し、任意文字列 suffix は model に入れない。表示・document id・検索キーとして必要な文字列表現は helper で決定的に生成する。
+この設計では、numeric tankId の保存上の正本は `"00"` や `"01"` のような数字文字列ではなく、`prefix: "A"` と `number: 0` / `number: 1` の組み合わせに寄せる。`OK` は `kind: "ok"` として表し、任意文字列 suffix は model に入れない。表示・document id・検索キーとして必要な文字列表現は helper で決定的に生成する。
 
 | 入力 | parse 結果 | canonical / display |
 |---|---|---|
+| `A0` | `{ prefix: "A", kind: "numeric", number: 0 }` | `A-00` |
+| `A00` | `{ prefix: "A", kind: "numeric", number: 0 }` | `A-00` |
+| `A-00` | `{ prefix: "A", kind: "numeric", number: 0 }` | `A-00` |
 | `A1` | `{ prefix: "A", kind: "numeric", number: 1 }` | `A-01` |
 | `A01` | `{ prefix: "A", kind: "numeric", number: 1 }` | `A-01` |
 | `A-01` | `{ prefix: "A", kind: "numeric", number: 1 }` | `A-01` |
@@ -232,10 +235,10 @@ type TankIdModel = {
 | 項目 | 方針 |
 |---|---|
 | `prefix` | trim / uppercase 後の英字列。表記揺れは parser で吸収する |
-| `number` | integer。原則 `number >= 1` |
+| `number` | integer。原則 `number >= 0` |
 | `OK` | 唯一の reserved nonnumeric exception。`kind: "ok"` として扱う |
 | 任意 suffix | `NG`, `TEST`, `SPARE` などは invalid |
-| `00` | 現場運用で必要がない限り invalid |
+| `00` | 通常の numeric ID。`number: 0` として扱い、`A-00` に正規化する |
 | `number <= 99` | domain validation には入れない |
 | `displayTankId` | `formatTankId(prefix, number)` で生成 |
 | `canonicalTankId` | 短期案では `displayTankId` と同じ `A-01` 形式 |
@@ -250,6 +253,7 @@ type TankIdModel = {
 
 | prefix | number | display / canonical |
 |---|---:|---|
+| `A` | 0 | `A-00` |
 | `A` | 1 | `A-01` |
 | `A` | 9 | `A-09` |
 | `A` | 10 | `A-10` |
@@ -377,6 +381,7 @@ log は現在状態の source of truth にしない。
 自然順ソートは文字列ではなく、`prefix` と `number` に分解して行う。同一 prefix では numeric を先に自然順で並べ、reserved `OK` 例外は最後に置く。
 
 ```text
+A-00
 A-01
 A-02
 A-10
@@ -391,6 +396,7 @@ Firestore query で安定ソートが必要な場合は、`tanks` 側に project
 
 | prefix | number | sortKey |
 |---|---:|---|
+| `A` | 0 | `A:000000` |
 | `A` | 1 | `A:000001` |
 | `A` | 10 | `A:000010` |
 | `A` | 100 | `A:000100` |
@@ -408,8 +414,11 @@ Firestore query で安定ソートが必要な場合は、`tanks` 側に project
 
 例:
 
-| 入力 | canonical | 既存 `A-01` がある場合 |
+| 入力 | canonical | 既存 canonical ID がある場合 |
 |---|---|---|
+| `A0` | `A-00` | 既存 `A-00` があれば重複 |
+| `A00` | `A-00` | 既存 `A-00` があれば重複 |
+| `A-00` | `A-00` | 既存 `A-00` があれば重複 |
 | `A1` | `A-01` | 重複 |
 | `A01` | `A-01` | 重複 |
 | `A-01` | `A-01` | 重複 |
