@@ -17,14 +17,16 @@ import type { ServiceAccount } from "firebase-admin";
 import { getFirestore } from "firebase-admin/firestore";
 
 type TankIdCategory =
-  | "canonical_hyphen_numeric"
+  | "canonical_numeric"
   | "compact_numeric"
-  | "raw_no_zero"
-  | "canonical_three_or_more"
-  | "compact_three_or_more"
+  | "raw_numeric"
+  | "canonical_ok_exception"
+  | "compact_ok_exception"
+  | "canonical_three_or_more_numeric"
+  | "compact_three_or_more_numeric"
   | "helper_parseable_other"
   | "zero_number_invalid"
-  | "nonnumeric_special"
+  | "arbitrary_suffix_invalid"
   | "invalid_helper_parse_unavailable"
   | "empty_or_missing";
 
@@ -66,14 +68,16 @@ type TransactionsAudit = {
 };
 
 const CATEGORY_ORDER: TankIdCategory[] = [
-  "canonical_hyphen_numeric",
+  "canonical_numeric",
   "compact_numeric",
-  "raw_no_zero",
-  "canonical_three_or_more",
-  "compact_three_or_more",
+  "raw_numeric",
+  "canonical_ok_exception",
+  "compact_ok_exception",
+  "canonical_three_or_more_numeric",
+  "compact_three_or_more_numeric",
   "helper_parseable_other",
   "zero_number_invalid",
-  "nonnumeric_special",
+  "arbitrary_suffix_invalid",
   "invalid_helper_parse_unavailable",
   "empty_or_missing",
 ];
@@ -271,7 +275,7 @@ function classifyTankId(value: string | null): ClassifiedTankId {
 
   const parsed = tryParseLikeTankIdHelper(normalizedInput);
   if (parsed) {
-    const canonicalTankId = formatTankId(parsed.prefix, parsed.number);
+    const canonicalTankId = formatTankId(parsed);
     return {
       raw,
       normalizedInput,
@@ -287,7 +291,7 @@ function classifyTankId(value: string | null): ClassifiedTankId {
   }
 
   if (/^[A-Z]+-?[A-Z]+$/.test(normalizedInput) || /^[A-Z]+-[A-Z0-9]+$/.test(normalizedInput)) {
-    return invalidClassification(raw, normalizedInput, "nonnumeric_special");
+    return invalidClassification(raw, normalizedInput, "arbitrary_suffix_invalid");
   }
 
   return invalidClassification(raw, normalizedInput, "invalid_helper_parse_unavailable");
@@ -297,31 +301,40 @@ function normalizeInputForParse(input: string): string {
   return input
     .trim()
     .replace(HYPHEN_VARIANTS_RE, "-")
-    .replace(/\s+/g, "")
     .toUpperCase();
 }
 
-function tryParseLikeTankIdHelper(input: string): { prefix: string; number: number } | null {
-  const match = input.match(/^([A-Z]+)-?([0-9]+)$/);
+function tryParseLikeTankIdHelper(input: string): { prefix: string; kind: "numeric"; number: number } | { prefix: string; kind: "ok" } | null {
+  const match = input.match(/^([A-Z]+)-?([0-9]+|OK)$/);
   if (!match) return null;
+  if (match[2] === "OK") {
+    return {
+      prefix: match[1],
+      kind: "ok",
+    };
+  }
   const number = Number.parseInt(match[2], 10);
   if (!Number.isSafeInteger(number) || number < 1) return null;
   return {
     prefix: match[1],
+    kind: "numeric",
     number,
   };
 }
 
-function formatTankId(prefix: string, number: number): string {
-  return `${prefix}-${String(number).padStart(2, "0")}`;
+function formatTankId(parts: { prefix: string; kind: "numeric"; number: number } | { prefix: string; kind: "ok" }): string {
+  if (parts.kind === "ok") return `${parts.prefix}-OK`;
+  return `${parts.prefix}-${String(parts.number).padStart(2, "0")}`;
 }
 
 function parseableCategory(input: string): TankIdCategory {
-  if (/^[A-Z]+-\d{3,}$/.test(input)) return "canonical_three_or_more";
-  if (/^[A-Z]+\d{3,}$/.test(input)) return "compact_three_or_more";
-  if (/^[A-Z]+-\d{2}$/.test(input)) return "canonical_hyphen_numeric";
+  if (/^[A-Z]+-OK$/.test(input)) return "canonical_ok_exception";
+  if (/^[A-Z]+OK$/.test(input)) return "compact_ok_exception";
+  if (/^[A-Z]+-\d{3,}$/.test(input)) return "canonical_three_or_more_numeric";
+  if (/^[A-Z]+\d{3,}$/.test(input)) return "compact_three_or_more_numeric";
+  if (/^[A-Z]+-\d{2}$/.test(input)) return "canonical_numeric";
   if (/^[A-Z]+\d{2}$/.test(input)) return "compact_numeric";
-  if (/^[A-Z]+-?\d$/.test(input)) return "raw_no_zero";
+  if (/^[A-Z]+-?\d$/.test(input)) return "raw_numeric";
   return "helper_parseable_other";
 }
 

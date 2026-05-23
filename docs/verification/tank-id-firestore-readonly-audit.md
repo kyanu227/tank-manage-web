@@ -4,7 +4,11 @@
 
 This document records the read-only Firestore data audit plan for existing tank ID formats before connecting operation-side code to `src/lib/tank-id.ts`.
 
-The audit is required because PR #89 made procurement registration write canonical IDs such as `A-01`, while PR #90 identified compatibility risks if existing production data still contains IDs such as `A01`, `A-100`, or `A-OK`.
+The audit is required because PR #89 made procurement registration write canonical IDs such as `A-01`, while PR #90 identified compatibility risks if existing production data still contains IDs such as `A01`, `A-100`, or non-standard suffixes.
+
+After PR #92, `A-OK` is not an anomaly. It is the only reserved nonnumeric exception and must be classified as a valid OK exception. Arbitrary suffixes such as `A-NG`, `A-TEST`, and `A-SPARE` remain invalid.
+
+After PR #93, this audit is explicitly a compatibility input before operation-side changes. `tanks` remains the source of truth for current tank state, `logs` remains the source of truth for past operation events and audit trails, and `transactions` remains the source of truth for workflow requests.
 
 ## Scope
 
@@ -88,14 +92,16 @@ The script classifies each tankId-like value into these buckets:
 
 | Bucket | Example | Meaning |
 |---|---|---|
-| `canonical_hyphen_numeric` | `A-01` | Current canonical 2-digit display form. |
+| `canonical_numeric` | `A-01` | Current canonical 2-digit display form. |
 | `compact_numeric` | `A01` | No-hyphen 2-digit form. Helper would normalize to `A-01`. |
-| `raw_no_zero` | `A1` | One-digit no-zero form. Helper would normalize to `A-01`. |
-| `canonical_three_or_more` | `A-100` | Canonical 3+ digit form. Domain helper accepts it, but some operation UI does not yet. |
-| `compact_three_or_more` | `A100` | No-hyphen 3+ digit form. Helper would normalize to `A-100`. |
+| `raw_numeric` | `A1` | One-digit no-zero form. Helper would normalize to `A-01`. |
+| `canonical_ok_exception` | `A-OK` | Valid reserved OK exception. |
+| `compact_ok_exception` | `AOK` | Compact OK exception. Helper would normalize to `A-OK`. |
+| `canonical_three_or_more_numeric` | `A-100` | Canonical 3+ digit form. Domain helper accepts it, but some operation UI does not yet. |
+| `compact_three_or_more_numeric` | `A100` | No-hyphen 3+ digit form. Helper would normalize to `A-100`. |
 | `helper_parseable_other` | `A-1` | Helper can parse it, but it is outside the primary display categories. |
 | `zero_number_invalid` | `A-00` | Numeric model rejects zero. |
-| `nonnumeric_special` | `A-OK` | Outside the prefix + positive number model. |
+| `arbitrary_suffix_invalid` | `A-NG` | Non-OK arbitrary suffix. Helper rejects it. |
 | `invalid_helper_parse_unavailable` | `A-01 他1本` | Not parseable as a single structured tank ID. |
 | `empty_or_missing` | missing | Empty or absent tankId field. |
 
@@ -117,6 +123,13 @@ Execution attempts:
 | Admin SDK, sandbox network | Failed before data read: DNS / Firestore API name resolution unavailable in sandbox. |
 | Admin SDK, network allowed, local `firebase-service-account.json` | Failed before data read: `PERMISSION_DENIED: Missing or insufficient permissions`. |
 | Web SDK using `.env.local` config, network allowed, `limit(1)` read | Failed before data read: `permission-denied`. |
+
+Branch update on 2026-05-23:
+
+- PR #91 branch was updated against latest `main` after PR #92 and PR #93.
+- The audit script and this document now classify `A-OK` / `AOK` as the valid OK exception.
+- Arbitrary suffixes such as `A-NG`, `A-TEST`, and `A-SPARE` remain invalid.
+- No new Firestore read was executed during this branch update because `GOOGLE_APPLICATION_CREDENTIALS` was unset and the available local fallback credential had already failed with `PERMISSION_DENIED`.
 
 No Firestore data was created, updated, deleted, migrated, or deployed. No aggregate production counts were obtained in this run because both available credential paths lacked read permission.
 
@@ -141,8 +154,10 @@ The next successful run should report:
 - count of canonical hyphen numeric ids such as `A-01`;
 - count of compact ids such as `A01`;
 - count of raw no-zero ids such as `A1`;
+- count of canonical OK exception ids such as `A-OK`;
+- count of compact OK exception ids such as `AOK`;
 - count of 3+ digit ids such as `A-100` and `A100`;
-- count of nonnumeric / special ids such as `A-OK`;
+- count of arbitrary suffix invalid ids such as `A-NG`;
 - count of helper-parseable ids that would normalize to a different document id.
 
 ## Logs tankId results
@@ -165,15 +180,15 @@ The next successful run should report:
 - `transactions.tankId` format counts;
 - `transactions.tankIds[]` format counts if present;
 - counts by `transactions.type`;
-- nonnumeric or helper-unparseable examples.
+- OK exception, arbitrary suffix, or helper-unparseable examples.
 
 ## Noncanonical examples
 
 Not available from this execution. The script is prepared to show minimal tankId examples only, capped per category.
 
-## Nonnumeric / special examples
+## OK exception / arbitrary suffix examples
 
-Not available from this execution. This remains important because `A-OK` is outside the prefix + number helper model.
+Not available from this execution. This remains important because `A-OK` is valid after PR #92, while arbitrary suffixes such as `A-NG`, `A-TEST`, and `A-SPARE` remain invalid.
 
 ## Operation normalize risk
 
@@ -184,7 +199,8 @@ The critical risk remains:
 - if `tanks/A01` exists and operation input is normalized to `A-01`, exact reads of `tanks/A-01` will not find the existing `tanks/A01` document;
 - if `logs.tankId` contains `A01` while `tanks` contains `A-01`, trace and history queries can split;
 - if `A-100` exists, current manual/order input and `PrefixNumberPicker` may not be able to operate it;
-- if `A-OK` or another nonnumeric ID exists, it needs a legacy/special ID policy before numeric helper connection.
+- if `A-OK` exists, operation boundaries should treat it as the reserved OK exception;
+- if arbitrary suffix ids such as `A-NG` exist, they need a legacy/special cleanup policy before helper connection.
 
 ## Recommendation before operation connection
 
