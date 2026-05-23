@@ -2,6 +2,7 @@ import { doc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { tanksRepository } from "@/lib/firebase/repositories";
 import type { OperationActor } from "@/lib/operation-context";
+import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import {
   ACTION,
@@ -50,6 +51,11 @@ export async function processReturnTags(input: {
   };
 
   const selectedData = await Promise.all(selectedItems.map(async (item) => {
+    const tankIdResult = tryParseTankId(item.tankId);
+    if (!tankIdResult.ok) {
+      throw new Error(`[${item.tankId}] ${tankIdResult.reason}`);
+    }
+    const tankId = tankIdResult.canonicalTankId;
     const appData = selections[item.id];
     const condition = appData?.condition ?? item.condition;
     const tag: ReturnTag =
@@ -57,9 +63,9 @@ export async function processReturnTags(input: {
         : condition === "uncharged" ? RETURN_TAG.UNCHARGED
           : RETURN_TAG.NORMAL;
     const note = `[返却タグ処理] 顧客: ${group.customerName} (タグ:${condition})`;
-    const tank = await tanksRepository.getTank(item.tankId);
+    const tank = await tanksRepository.getTank(tankId);
     if (!tank) {
-      throw new Error(`[${item.tankId}] タンクが存在しません`);
+      throw new Error(`[${tankId}] タンクが存在しません`);
     }
     const currentStatus = tank.status ?? "";
     const transitionAction: TankAction = condition === "keep"
@@ -68,12 +74,12 @@ export async function processReturnTags(input: {
     const location = condition === "keep"
       ? tank.location || group.customerName
       : "倉庫";
-    return { item, condition, note, currentStatus, transitionAction, location };
+    return { item, tankId, condition, note, currentStatus, transitionAction, location };
   }));
 
   await applyBulkTankOperations(
-    selectedData.map(({ item, note, currentStatus, transitionAction, location }) => ({
-      tankId: item.tankId,
+    selectedData.map(({ tankId, note, currentStatus, transitionAction, location }) => ({
+      tankId,
       transitionAction,
       currentStatus,
       context,

@@ -13,6 +13,7 @@ import {
   totalOrderQuantity,
   type PendingOrder,
 } from "@/lib/order-types";
+import { tryParseTankId } from "@/lib/tank-id";
 import { ACTION, validateTransition } from "@/lib/tank-rules";
 import type { ScannedTank, TankMap } from "../types";
 
@@ -122,7 +123,11 @@ export function useOrderFulfillment({
     if (orderInputRef.current) orderInputRef.current.focus();
   }, []);
 
-  const addScannedTank = useCallback((tankId: string) => {
+  const addScannedTank = useCallback((rawTankId: string) => {
+    const tankIdResult = tryParseTankId(rawTankId);
+    const tankId = tankIdResult.ok
+      ? tankIdResult.canonicalTankId
+      : tankIdResult.normalizedInput || rawTankId.trim().toUpperCase();
     if (scannedTanks.some((t) => t.id === tankId)) return;
     if (!selectedOrder) return;
 
@@ -133,10 +138,12 @@ export function useOrderFulfillment({
       return;
     }
 
-    const tank = allTanks[tankId];
-    let valid = true;
-    let error = "";
-    if (!tank) {
+    const tank = tankIdResult.ok ? allTanks[tankId] : undefined;
+    let valid = tankIdResult.ok;
+    let error = tankIdResult.ok ? "" : tankIdResult.reason;
+    if (!tankIdResult.ok) {
+      valid = false;
+    } else if (!tank) {
       valid = false;
       error = "未登録タンク";
     } else {

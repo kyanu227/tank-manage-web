@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { Send, CheckCircle2, Loader2, X } from "lucide-react";
 import { ACTION } from "@/lib/tank-rules";
+import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import TankIdInput from "@/components/TankIdInput";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
@@ -35,8 +36,15 @@ export default function DamageReportPage() {
     };
   }, []);
 
-  const handleCommit = (tankId: string) => {
+  const handleCommit = (rawTankId: string) => {
+    const tankIdResult = tryParseTankId(rawTankId);
+    if (!tankIdResult.ok) {
+      setResult({ success: false, message: tankIdResult.reason });
+      return;
+    }
+    const tankId = tankIdResult.canonicalTankId;
     if (queue.some((q) => q.tankId === tankId)) return;
+    setResult(null);
     setQueue((prev) => [{ uid: `${Date.now()}_${Math.random()}`, tankId }, ...prev]);
     setLastAdded(tankId);
     if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);

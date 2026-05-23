@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { tryParseTankId } from "@/lib/tank-id";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
 import { updateLogNote } from "@/lib/firebase/tank-tag-service";
 import TankIdInput from "@/components/TankIdInput";
@@ -79,12 +80,14 @@ export default function InHousePage() {
   };
 
   // TankIdInput からの commit: その場で事後報告実行
-  const handleCommit = async (tankId: string) => {
+  const handleCommit = async (rawTankId: string) => {
     if (reporting) return;
-    if (!/^[A-Z]+-(\d{2}|OK)$/.test(tankId)) {
-      setReportResult({ success: false, message: "ID形式が正しくありません (例: A-01 / A-OK)" });
+    const tankIdResult = tryParseTankId(rawTankId);
+    if (!tankIdResult.ok) {
+      setReportResult({ success: false, message: tankIdResult.reason });
       return;
     }
+    const tankId = tankIdResult.canonicalTankId;
     setReporting(true);
     setReportResult(null);
     try {
