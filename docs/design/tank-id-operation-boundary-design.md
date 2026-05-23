@@ -121,6 +121,8 @@ Repositories should generally expect canonical IDs.
 
 Do not silently normalize every `tanksRepository.getTank` or `logsRepository.getActiveLogsByTank` call. Silent normalization hides migration problems, makes exact historical lookups harder to reason about, and can blur the difference between raw input handling and canonical data access.
 
+The caller that crosses from UI / workflow code into repository or operation service code is responsible for providing a canonical ID. For composed operation inputs, that caller is normally the hook / workflow layer. For list-driven flows, the canonical guarantee comes from selecting an existing `TankDoc.id` loaded from Firestore.
+
 If a compatibility read is ever needed, it should be explicit, for example:
 
 - canonical lookup first;
@@ -140,6 +142,21 @@ The recommended boundary model is:
 5. List-driven flows preserve `TankDoc.id` selected from Firestore.
 
 This means the canonical ID is introduced before business validation, not after writes. A queued operation item should hold `tankId: "A-00"`, `tankId: "A-01"`, or `tankId: "A-OK"`, not raw input such as `A0`, `A01`, or `a-ok`.
+
+## Canonical guarantee before repository and operation calls
+
+Because repositories should not silently normalize, each operation workflow must make the canonical guarantee explicit before it calls repositories or operation services.
+
+| Flow type | Canonical guarantee owner | Expected handoff |
+|---|---|---|
+| Manual operation | `useManualTankOperation` at add-to-queue / submit boundary | Queue item and `applyBulkTankOperations` input use canonical `tankId`. |
+| Order fulfillment | `useOrderFulfillment` at scanned-tank add boundary | Scanned item, duplicate check, quantity check, and operation input use canonical `tankId`. |
+| Damage / in-house `TankIdInput` flows | Page or hook that accepts the confirmed `TankIdInput` value | Local queue / single operation uses canonical `tankId`; local regex is not the long-term authority. |
+| Return tag processing | Transaction creation / approval workflow that writes or consumes `transactions.tankId` | Processing service receives canonical tank IDs from transaction data. |
+| Bulk return / repair / inspection / portal return | Firestore list selection | Existing `TankDoc.id` is already the canonical handoff value. |
+| Dashboard correction | Correction workflow before creating a new revision | New target tank ID is canonical; historical old log ID remains exact. |
+
+After this boundary, downstream code should be allowed to assume canonical ID shape. `tank-operation.ts` can still add defensive normalization later, but that is a final guard, not a replacement for workflow-level ownership.
 
 ## Invalid input policy
 
