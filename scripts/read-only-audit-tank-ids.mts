@@ -25,7 +25,6 @@ type TankIdCategory =
   | "canonical_three_or_more_numeric"
   | "compact_three_or_more_numeric"
   | "helper_parseable_other"
-  | "zero_number_invalid"
   | "arbitrary_suffix_invalid"
   | "invalid_helper_parse_unavailable"
   | "empty_or_missing";
@@ -76,7 +75,6 @@ const CATEGORY_ORDER: TankIdCategory[] = [
   "canonical_three_or_more_numeric",
   "compact_three_or_more_numeric",
   "helper_parseable_other",
-  "zero_number_invalid",
   "arbitrary_suffix_invalid",
   "invalid_helper_parse_unavailable",
   "empty_or_missing",
@@ -286,10 +284,6 @@ function classifyTankId(value: string | null): ClassifiedTankId {
     };
   }
 
-  if (/^[A-Z]+-?0+$/.test(normalizedInput)) {
-    return invalidClassification(raw, normalizedInput, "zero_number_invalid");
-  }
-
   if (/^[A-Z]+-?[A-Z]+$/.test(normalizedInput) || /^[A-Z]+-[A-Z0-9]+$/.test(normalizedInput)) {
     return invalidClassification(raw, normalizedInput, "arbitrary_suffix_invalid");
   }
@@ -314,7 +308,7 @@ function tryParseLikeTankIdHelper(input: string): { prefix: string; kind: "numer
     };
   }
   const number = Number.parseInt(match[2], 10);
-  if (!Number.isSafeInteger(number) || number < 1) return null;
+  if (!Number.isSafeInteger(number) || number < 0) return null;
   return {
     prefix: match[1],
     kind: "numeric",

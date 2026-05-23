@@ -10,6 +10,8 @@ After PR #92, `A-OK` is not an anomaly. It is the only reserved nonnumeric excep
 
 After PR #93, this audit is explicitly a compatibility input before operation-side changes. `tanks` remains the source of truth for current tank state, `logs` remains the source of truth for past operation events and audit trails, and `transactions` remains the source of truth for workflow requests.
 
+After PR #94, `A-00` is not an anomaly or blocker. It is a normal numeric tank ID with `number: 0`, and `A0` / `A00` / `A-00` normalize to `A-00`.
+
 ## Scope
 
 The audit checks ID-like values only. It intentionally avoids business fields such as customer names, staff names, locations, notes, prices, or other unrelated data.
@@ -73,7 +75,7 @@ If the script returns `PERMISSION_DENIED`, check the credential and IAM setup be
    - Web SDK reads can fail because of Security Rules or missing Firebase Auth state even when Admin SDK read access would be valid.
    - A Web SDK permission error does not prove the production data is unreadable by an authorized Admin SDK credential.
 
-PR #91 should remain draft until this credential issue is resolved and aggregate production counts are recorded.
+The credential issue is resolved as of the successful 2026-05-23 audit run. PR #91 should remain draft only until the team reviews the updated result and decides whether to accept it as the verification record.
 
 ## Safety constraints
 
@@ -92,15 +94,14 @@ The script classifies each tankId-like value into these buckets:
 
 | Bucket | Example | Meaning |
 |---|---|---|
-| `canonical_numeric` | `A-01` | Current canonical 2-digit display form. |
-| `compact_numeric` | `A01` | No-hyphen 2-digit form. Helper would normalize to `A-01`. |
-| `raw_numeric` | `A1` | One-digit no-zero form. Helper would normalize to `A-01`. |
+| `canonical_numeric` | `A-00`, `A-01` | Current canonical numeric display form. |
+| `compact_numeric` | `A00`, `A01` | No-hyphen 2-digit form. Helper would normalize to `A-00` / `A-01`. |
+| `raw_numeric` | `A0`, `A1` | One-digit compact form. Helper would normalize to `A-00` / `A-01`. |
 | `canonical_ok_exception` | `A-OK` | Valid reserved OK exception. |
 | `compact_ok_exception` | `AOK` | Compact OK exception. Helper would normalize to `A-OK`. |
 | `canonical_three_or_more_numeric` | `A-100` | Canonical 3+ digit form. Domain helper accepts it, but some operation UI does not yet. |
 | `compact_three_or_more_numeric` | `A100` | No-hyphen 3+ digit form. Helper would normalize to `A-100`. |
 | `helper_parseable_other` | `A-1` | Helper can parse it, but it is outside the primary display categories. |
-| `zero_number_invalid` | `A-00` | Numeric model rejects zero. |
 | `arbitrary_suffix_invalid` | `A-NG` | Non-OK arbitrary suffix. Helper rejects it. |
 | `invalid_helper_parse_unavailable` | `A-01 他1本` | Not parseable as a single structured tank ID. |
 | `empty_or_missing` | missing | Empty or absent tankId field. |
@@ -131,6 +132,7 @@ Branch update on 2026-05-23:
 - The audit script and this document now classify `A-OK` / `AOK` as the valid OK exception.
 - Arbitrary suffixes such as `A-NG`, `A-TEST`, and `A-SPARE` remain invalid.
 - No new Firestore read was executed during this branch update because `GOOGLE_APPLICATION_CREDENTIALS` was unset and the available local fallback credential had already failed with `PERMISSION_DENIED`.
+- After PR #94, this branch was updated again so `A-00` is treated as valid canonical numeric data rather than an unresolved blocker.
 
 Successful data audit on 2026-05-23:
 
@@ -156,7 +158,7 @@ Total `tanks` documents: 144.
 
 | Category | Count | Examples / notes |
 |---|---:|---|
-| `canonical_numeric` | 142 | Examples include `A-02`, `A-04`, `A-05`, `A-06`, `A-07`, `A-09`, `A-10`, `A-11`, `A-12`, `A-13`, `A-32`, `A-36`. |
+| `canonical_numeric` | 143 | Includes the 142 existing positive numeric examples plus `A-00`. Other examples include `A-02`, `A-04`, `A-05`, `A-06`, `A-07`, `A-09`, `A-10`, `A-11`, `A-12`, `A-13`, `A-32`, `A-36`. |
 | `compact_numeric` | 0 | No `A01` style ids found. |
 | `raw_numeric` | 0 | No `A1` style ids found. |
 | `canonical_ok_exception` | 1 | `A-OK`. |
@@ -164,7 +166,6 @@ Total `tanks` documents: 144.
 | `canonical_three_or_more_numeric` | 0 | No `A-100` style ids found. |
 | `compact_three_or_more_numeric` | 0 | No `A100` style ids found. |
 | `helper_parseable_other` | 0 | None found. |
-| `zero_number_invalid` | 1 | `A-00`. |
 | `arbitrary_suffix_invalid` | 0 | No `A-NG` / `A-TEST` style ids found. |
 | `invalid_helper_parse_unavailable` | 0 | None found. |
 | `empty_or_missing` | 0 | Not applicable for document ids. |
@@ -175,7 +176,7 @@ Main finding:
 
 - There is no evidence of existing `A01` / `A1` / `A100` / `AOK` document ids in `tanks`.
 - `A-OK` exists and is compatible with the PR #92 helper model.
-- `A-00` exists even though the helper rejects zero. This needs an explicit legacy/special-data decision before strict helper validation is applied to all operation paths.
+- `A-00` exists and is compatible with the PR #94 helper model as canonical numeric `number: 0`.
 
 ## Logs tankId results
 
@@ -209,7 +210,7 @@ Additional transaction checks:
 
 ## Noncanonical examples
 
-The only noncanonical / helper-invalid value found in the audited fields is `tanks/A-00`.
+No noncanonical / helper-invalid values were found in the audited fields after applying the PR #94 rule that treats `A-00` as valid numeric data.
 
 No `A01`, `A1`, `A100`, `AOK`, arbitrary suffix, or helper-unparseable values were found in the audited fields.
 
@@ -223,9 +224,9 @@ No arbitrary suffix values such as `A-NG`, `A-TEST`, or `A-SPARE` were found.
 
 ## Operation normalize risk
 
-Do not connect `tank-operation.ts` to `src/lib/tank-id.ts` until the read-only audit has successfully run.
+Do not connect `tank-operation.ts` to `src/lib/tank-id.ts` in this PR. The read-only audit has now run, but operation-side connection is still a separate implementation change.
 
-The critical risk remains:
+Known connection risks to carry forward:
 
 - if `tanks/A01` exists and operation input is normalized to `A-01`, exact reads of `tanks/A-01` will not find the existing `tanks/A01` document;
 - if `logs.tankId` contains `A01` while `tanks` contains `A-01`, trace and history queries can split;
@@ -233,36 +234,35 @@ The critical risk remains:
 - if `A-OK` exists, operation boundaries should treat it as the reserved OK exception;
 - if arbitrary suffix ids such as `A-NG` exist, they need a legacy/special cleanup policy before helper connection.
 
-The successful audit reduces the legacy compact-id risk:
+The successful audit reduces the existing-ID compatibility risk:
 
 - No `tanks/A01` document ids were found.
 - No parseable-but-different `tanks` document ids were found.
 - No active tank logs had `tankId` values missing from the current `tanks` document ids.
+- `A-00` is now valid canonical numeric data after PR #94.
 
-The remaining concrete blocker is `tanks/A-00`:
+The remaining risks are implementation-scope risks, not current data-shape blockers:
 
-- `A-00` is invalid under the current helper because `number >= 1`.
-- Strict operation-side helper validation would reject `A-00`.
-- Before connecting the helper at operation boundaries, decide whether `A-00` is a legitimate reserved/legacy id, a data cleanup candidate, or a one-off value requiring compatibility handling.
+- operation / UI / repository boundaries are not connected to `src/lib/tank-id.ts` yet;
+- operation UI and picker controls still need an explicit 100+ handling decision before broad deployment of 100+ creation;
+- future audits should be rerun if new import paths or manual data edits can introduce compact or arbitrary-suffix IDs.
 
 ## Recommendation before operation connection
 
 Before any operation-side helper connection:
 
-1. Decide the `A-00` policy:
-   - treat it as a legitimate reserved/legacy id and support it explicitly;
-   - clean it up through a separate data migration plan;
-   - or add a temporary compatibility path for operation reads without making zero generally valid.
-2. Decide whether procurement should temporarily block 100+ numeric ids until operation UI supports them, even though no existing `A-100` / `A100` ids were found.
-3. If strict operation-side helper validation is introduced, keep `A-OK` as valid and keep arbitrary suffixes invalid.
-4. Existing `A01` / `A1` / `A100` fallback reads are not supported by current evidence because no such `tanks` document ids were found. Add fallback only if a future audit finds those values.
+1. Treat `A-00` as normal canonical numeric data.
+2. Keep `A-OK` as the only valid nonnumeric reserved exception.
+3. Keep arbitrary suffixes invalid.
+4. Decide whether procurement should temporarily block 100+ numeric ids until operation UI supports them, even though no existing `A-100` / `A100` ids were found.
+5. Existing `A01` / `A1` / `A100` fallback reads are not supported by current evidence because no such `tanks` document ids were found. Add fallback only if a future audit finds those values.
 
-Until the `A-00` policy is decided, operation-side normalization should remain blocked.
+The main existing-data blocker for operation-side normalization is now cleared. The operation connection still belongs in a separate implementation PR because it changes runtime behavior and touches operation / UI / repository boundaries.
 
 PR #91 should move from draft to ready only after one of these happens:
 
 - the team reviews the successful audit result and accepts PR #91 as the verification record;
-- or the team decides to keep PR #91 draft while a follow-up PR defines the `A-00` compatibility policy.
+- or the team decides to keep PR #91 draft until the operation connection plan is documented separately.
 
 ## Explicit non-goals
 
