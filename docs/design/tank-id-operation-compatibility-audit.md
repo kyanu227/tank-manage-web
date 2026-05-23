@@ -8,15 +8,17 @@ PR #89 connected only procurement / tank registration to the pure tank ID helper
 
 This is a docs-only audit. It does not change implementation code, Firestore data, security rules, package files, or deploy configuration.
 
-## Current status after PR #89
+## Current status after PR #89 and zero-number update
 
 - PR #87 added the tank ID audit / model document.
 - PR #88 added `src/lib/tank-id.ts` with pure helpers such as `parseTankId`, `tryParseTankId`, `normalizeTankId`, `formatTankId`, `buildTankSortKey`, and `compareTankIdNatural`.
 - PR #89 connected procurement / tank registration to that helper.
+- The zero-number helper update treats `00` as a normal numeric tank ID rather than a reserved exception.
 - Procurement now canonicalizes accepted inputs before save:
+  - `A0`, `A00`, `A-00`, `a-00` -> `A-00`
   - `A1`, `A01`, `A-01`, `A001`, `a-01` -> `A-01`
   - `A100` -> `A-100`
-  - `A0`, `A-00` -> invalid
+- Numeric IDs now allow `number >= 0`; `00` is not an OK-style exception.
 - Procurement writes `tanks/{canonicalTankId}` and the procurement log from the normalized `tankIds` array.
 - Manual operation, bulk return, order fulfillment, return tag processing, portal, `tanksRepository`, `logsRepository`, and `tank-operation.ts` are not connected to the new helper yet.
 - Hosting deploy has not been run after PR #89.
@@ -58,7 +60,7 @@ The safest read paths are those that start from existing `TankDoc.id` and pass i
 
 | Write path | Current write target | Normalization | Compatibility notes |
 |---|---|---|---|
-| `applyTankOperation` | `doc(db, "tanks", normalizeTankId(input.tankId))` | local `trim().toUpperCase()` only | Does not insert hyphen, remove internal spaces, collapse leading zeros, reject 0, or support helper validation. |
+| `applyTankOperation` | `doc(db, "tanks", normalizeTankId(input.tankId))` | local `trim().toUpperCase()` only | Does not insert hyphen, collapse leading zeros, or support helper validation for numeric / OK parsing. |
 | `applyBulkTankOperations` | same as above for each input | same local normalize | Bulk duplicate check also uses local `trim().toUpperCase()`. |
 | `commitPlannedOperations` | writes `logs.tankId = op.input.tankId`; updates `tanks/{op.input.tankId}` | receives normalized value from operation planning | `logs.tankId` follows the local operation normalize, not `tank-id.ts`. |
 | `applyLogCorrection` | can change active log tank id and update old/new tank snapshots | patch tankId uses local `normalizeTankId`; old log tankId is used as-is | If existing logs/tanks use `A01`, changing only new patch input to helper later could create old/new lookup mismatches without fallback planning. |
@@ -116,7 +118,13 @@ Several staff flows allow `${prefix}-OK` as a special input. The helper model sh
 
 That means `A-OK` / `AOK` / `a-ok` are valid and normalize to `A-OK`, while `A-NG`, `A-TEST`, and `A-SPARE` remain invalid. Before PR #91 records production audit counts, its classification should treat `A-OK` as a valid OK exception rather than a nonnumeric anomaly.
 
-### 5. Logs and trace require exact key consistency
+### 5. `A-00` is a normal numeric ID
+
+PR #91 found an existing `tanks/A-00` document. The helper model now treats `A0` / `A00` / `A-00` as `number: 0`, canonicalized to `A-00`.
+
+This means `A-00` is not a reserved exception and not a blocker for helper adoption by itself. It should sort before `A-01` and remain distinct from the nonnumeric `A-OK` exception.
+
+### 6. Logs and trace require exact key consistency
 
 `logsRepository.getActiveLogsByTank` and `tank-trace.ts` query exact `logs.tankId` equality. If a future implementation writes new logs as `A-01` while older logs remain `A01`, trace and history queries will be split unless a migration or dual-query strategy exists.
 
@@ -132,6 +140,7 @@ The code-level compatibility model is:
 | Existing docs are `A01` | Main manual/order input already emits `A-01`, so those docs are hard to operate manually. Bulk list flows can still process them because they use existing `tank.id`. | High if operation entry normalizes to `A-01` without fallback or migration. |
 | Mixed `A01` and `A-01` | Prefix list hides the distinction; manual input targets only `A-01`. Bulk/list flows preserve raw ids. | High. Duplicate physical IDs may exist under different document ids. |
 | Existing docs include `A-100` | Bulk/list flows can read raw ids. Manual/order/picker flows cannot select or enter them. | High until UI/picker supports variable digit length. |
+| Existing docs include `A-00` | `A-00` is now valid numeric `number: 0`. Main two-digit operation inputs can already emit `A-00` if `00` is entered. | Low once all operation boundaries use the helper consistently. |
 | Existing docs include `A-OK` | Some staff flows already have special handling for OK input. | Medium until all operation boundaries use the helper's reserved OK exception consistently. |
 
 Before deployment or broad helper connection, one of these must be chosen explicitly:
@@ -165,6 +174,7 @@ The audit should inspect, without creating, updating, or deleting Firestore data
 
 - `tanks` document ids that match `A01` or similar no-hyphen forms;
 - `tanks` document ids that match canonical `A-01` style forms;
+- `tanks` document ids that match canonical zero numeric forms such as `A-00`;
 - `tanks` document ids with 100+ numbers such as `A-100`;
 - `tanks` document ids that use the reserved OK exception, such as `A-OK`;
 - `tanks` document ids outside the numeric + OK model, such as `A-NG` or other arbitrary suffixes;

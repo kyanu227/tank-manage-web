@@ -300,6 +300,7 @@ Do not use customer name strings as the only key for billing, customer history, 
 Current helper policy:
 
 - numeric first: `Prefix-number`
+- zero is valid numeric: `A0`, `A00`, `A-00` -> `A-00`
 - minimum display padding: `A1`, `A01`, `A-01`, `A001` -> `A-01`
 - 100+ allowed at domain level: `A100` -> `A-100`
 - reserved OK exception: `AOK`, `A-OK`, `a-ok` -> `A-OK`
