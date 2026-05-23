@@ -3,6 +3,7 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import {
@@ -75,15 +76,21 @@ export function useManualTankOperation({
     }
   }, []);
 
-  const addToQueue = useCallback((tankId: string) => {
+  const addToQueue = useCallback((rawTankId: string) => {
+    const tankIdResult = tryParseTankId(rawTankId);
+    const tankId = tankIdResult.ok
+      ? tankIdResult.canonicalTankId
+      : tankIdResult.normalizedInput || rawTankId.trim().toUpperCase();
     if (opQueue.some((q) => q.tankId === tankId)) return;
 
-    const tank = allTanks[tankId];
+    const tank = tankIdResult.ok ? allTanks[tankId] : undefined;
     const currentStatus = tank?.status || "";
-    let valid = true;
-    let error = "";
+    let valid = tankIdResult.ok;
+    let error = tankIdResult.ok ? "" : tankIdResult.reason;
 
-    if (!tank) {
+    if (!tankIdResult.ok) {
+      valid = false;
+    } else if (!tank) {
       valid = false;
       error = "未登録タンク";
     } else {
