@@ -1,81 +1,98 @@
-# identity / operation logging 設計
+# identity / operation logging typed field design
 
-StaffID / CustomerID を正本にした operation logging の設計方針。
-実装前に、`logs` / `transactions` / operation service の責務と schema を固定する。
+StaffID / CustomerID を正本にした operation logging と、`logs` typed field の設計方針。
+
+この文書は実装前の docs-only 設計であり、Firestore data、migration、rules、deploy、実装コードは変更しない。
 
 ## 1. 目的
 
-- 操作ログのスタッフ識別を名前文字列ではなく `staffId` に寄せる。
-- 顧客・貸出先の識別を顧客名文字列ではなく `customerId` に寄せる。
-- 表示名は履歴表示用 snapshot として保存し、正本 ID と表示名の役割を分ける。
-- 画面・hook から `logs` を直接書かず、業務操作の書き込みを operation service に寄せる。
-- repository は Firestore I/O に徹し、session 解決や操作者推定を持たせない。
+- `logs` に検索・集計・監査で使う情報を top-level typed field として残す。
+- `staffId` / `customerId` を identity の正本にし、`staffName` / `customerName` / `location` は当時表示 snapshot として扱う。
+- `logs` を過去操作 event / audit trail の source of truth として整理し、現在状態の source of truth にはしない。
+- `tanks` / `logs` / `transactions` の責務を分け、`logExtra` / `note` / `logNote` に正本情報を詰め込まない。
+- dashboard edit / void / correction、portal transaction、procurement、tag-only 更新を通常の tank operation と混ぜすぎない。
+- 後続実装を、小さい PR に分けられる形で整理する。
 
-## 2. 背景
+## 2. 背景と現状の問題
 
-現行のタンク操作ログは `src/lib/tank-operation.ts` を中心に追記型 revision chain で管理している。
-一方で、操作者は `logs.staff` の名前文字列として保存されており、同姓同名・改名・メール変更・スタッフ無効化後の追跡に弱い。
+タンクID正規化フェーズでは、`tankId` helper、Firestore read-only audit、主要 staff operation 接続、Hosting deploy、smoke test まで完了した。
+既存 data は `A-00` / `A-01` / `A-OK` を含む canonical 方針におおむね収まっている。
 
-`/staff/mypage` は現在 `logsRepository.getActiveLogs({ limit: 100 })` に依存している。
-これは「自分のログ」ではなく「全体ログの直近100件」であり、スタッフ別の実績・履歴表示には `staffId` による絞り込みが必要になる。
+次の課題は、`tanks` / `logs` / `transactions` の責務分離と operation logging の typed field 設計である。
 
-顧客側も `logs.location` / `tanks.location` の顧客名文字列で表示・集計している箇所が残っている。
-`customers` を貸出先・請求単位の正本にする方針に合わせ、新規 operation logging では `customerId` を top-level field として保存する。
+現行構造には次のリスクがある。
 
-まだ実運用前のため、旧ログ互換のための `logs.staff` / `logs.customer` のような曖昧な文字列 field は新設しない。
+| Risk | Why it matters |
+|---|---|
+| `location == customerName` 依存 | 顧客名変更、請求、portal 履歴、顧客別検索で identity が崩れる |
+| `logs.staff` / `tanks.staff` 文字列依存 | 同姓同名、改名、退職、スタッフ実績集計に弱い |
+| `logExtra` / `note` / `logNote` に業務情報を詰める | 検索・集計・監査・Rules hardening の基盤にしづらい |
+| `transactions` と `logs` の紐付けが弱い | どの申請・受注がどの tank operation log を生んだか追跡しづらい |
+| return condition が tag / note / transaction condition に分散 | 未使用返却、未充填返却、持ち越し、通常返却の集計が不安定になる |
 
-## 3. 基本方針
+このアプリは既に PR #87 以降の実装、既存 Firestore data、Hosting deploy、smoke test があるため、greenfield として扱わない。
+既存 `logs` / `transactions`、dashboard edit / void / correction の revision 機構、既存 UI の読み取り互換を考慮する。
 
-- `logs.staffId` をスタッフ識別の正本にする。
-- `logs.staffName` を表示用 snapshot として保存する。
-- `logs.staffEmail` は監査・確認補助として任意保存する。
-- `logs.customerId` を顧客識別の正本にする。
-- `logs.customerName` を表示用 snapshot として保存する。
-- Firestore の検索・index 用に `staffId` / `customerId` は `logs` の top-level field に置く。
-- コード上では `OperationActor` / `CustomerSnapshot` / `OperationContext` のような型でまとめて扱ってよい。
-- `logs.staff` / `logs.customer` のような互換用・曖昧名 field は新規書き込みしない。
-- `logs.location` は操作後の場所・貸出先表示用の当時名として残す。
-- `tanks.location` は現在場所表示用の文字列として残す。
-- `tanks.customerId` の追加はこの設計では決めない。別途 customer data model の判断事項として扱う。
+## 3. `tanks` / `logs` / `transactions` の責務分離
 
-## 4. 責務分担
+| Collection | Source of truth | Snapshot / audit role | Should not be |
+|---|---|---|---|
+| `tanks` | タンクの現在状態 | 現在 status / location / staff 表示 / latestLogId | 過去履歴、申請 workflow、顧客 identity master |
+| `logs` | 過去操作 event / audit trail | 当時の staff / customer / location / tank snapshot | 現在状態の source of truth |
+| `transactions` | portal / staff workflow の申請・受注・返却申請 | customer snapshot、staff 処理 snapshot、workflow status | tank lifecycle 状態の source of truth |
+| `customers` | 貸出先・請求単位 identity master | 現在の顧客名、単価、有効状態 | 過去ログの表示名そのもの |
+| `staff` / `staffByEmail` | staff identity / auth mapping | 現在の staff 名、email、role、rank | 過去操作 actor snapshot |
 
-### page
+通常の画面や業務処理は、現在状態を毎回 `logs` から再構成せず、`tanks` の current projection を読む。
+`logs` は状態遷移の根拠・復元材料にはなるが、日常の current state read model ではない。
 
-- 表示とイベント発火のみを担当する。
-- Firestore SDK を直接 import しない。
-- `logs` / `tanks` / `transactions` の整合更新を直接組み立てない。
+## 4. `staffId` / `customerId` を正本にする理由
 
-### hook
+`staffId` は操作 actor の identity 正本にする。
+スタッフ名・email・role は変更され得るため、実績・報酬・監査・void/correction actor の判定を名前文字列に寄せない。
 
-- `staffSession` / `customerSession` から identity を取得する。
-- workflow / use-case に `OperationContext` や `CustomerSnapshot` を渡す。
-- UI 状態、入力検証、確認ダイアログ、画面固有の派生値を担当する。
-- `addDoc` / `updateDoc` / `writeBatch` / `runTransaction` を画面都合で乱発しない。
+`customerId` は貸出先・請求単位の identity 正本にする。
+顧客名は変更され得るため、請求、売上、portal 履歴、顧客別検索を `location` や `customerName` だけに依存させない。
 
-### workflow / use-case
+新規 operation logging では、次を top-level field 候補にする。
 
-- 手動貸出、受注貸出、返却タグ処理、破損、修理、耐圧検査、自社移動、タンク登録などの業務手順を組み立てる。
-- どの transaction を完了させるか、どの customer snapshot を渡すかなどの業務意味を保持する。
-- Firestore の低レベル I/O は domain operation service または repository に委譲する。
+- `logs.staffId`
+- `logs.staffName`
+- `logs.staffEmail`
+- `logs.customerId`
+- `logs.customerName`
+- `logs.transactionId`
+- `logs.source`
+- `logs.workflow`
+- `logs.returnCondition`
 
-### domain operation service
+## 5. `staffName` / `customerName` / `location` を snapshot として残す理由
 
-- tank 状態変更、log 作成、transaction 更新を一貫して実行する。
-- `OperationContext` を正規化し、`staffId` / `staffName` / `staffEmail` / `customerId` / `customerName` を保存する。
-- `runTransaction` / batch による整合性管理を担当する。
-- revision chain、void、correction window などの業務不変条件を維持する。
+名前文字列は正本にはしないが、履歴表示と監査には必要である。
 
-### repository
+- 顧客名が後から変わっても、過去ログでは当時の表示名を確認したい。
+- スタッフ名が変わっても、過去操作の画面表示は当時名で読みたい。
+- `location` は「操作後の場所・貸出先表示名」として既存 UI と互換性がある。
 
-- Firestore の query / add / update / batch helper に徹する。
-- session、localStorage、画面都合、スタッフ推定、顧客推定を知らない。
-- 書き込み helper を持つ場合も、画面から直接呼ばせず operation service から使う。
+そのため、`staffName` / `customerName` / `location` は snapshot として残す。
+ただし、検索・集計・請求・報酬の主軸は `staffId` / `customerId` に寄せる。
 
-## 5. identity 型
+## 6. 曖昧な文字列 field を新設しない理由
 
-Firestore では検索しやすい top-level field として保存する。
-コード上では以下の型を境界に使う。
+`logs.staff` / `logs.customer` のような曖昧な文字列 field は新設しない。
+
+理由:
+
+- 正本 ID なのか表示 snapshot なのか区別できない。
+- 改名・同姓同名・統合・無効化に弱い。
+- index 設計や Security Rules hardening の前提にしづらい。
+- `staffId` / `staffName`、`customerId` / `customerName` の役割分担と衝突する。
+
+既存互換の読み取りで `logs.staff` 相当を参照する必要がある場合でも、新規 write schema は typed field に寄せる。
+
+## 7. Operation identity types
+
+コード上では identity をひとかたまりで渡し、Firestore には検索しやすい top-level field として展開する。
 
 ```ts
 export type OperationActor = {
@@ -94,61 +111,49 @@ export type CustomerSnapshot = {
 export type OperationContext = {
   actor: OperationActor;
   customer?: CustomerSnapshot;
+  transactionId?: string;
+  source?: OperationSource;
+  workflow?: OperationWorkflow;
+  returnCondition?: ReturnCondition;
 };
 ```
 
-`OperationActor.staffId` と `OperationActor.staffName` は必須。
-`staffEmail` は任意だが、保存できる場合は保存する。
-`role` / `rank` は operation 判断や表示補助には使えるが、Firestore index の主軸にはしない。
+`actor.staffId` と `actor.staffName` は staff operation では必須。
+顧客が関係しない充填、修理、耐圧、自社利用などでは `customer` を省略できる。
 
-`CustomerSnapshot` は顧客が関係する operation のみ必須。
-顧客が関係しない修理・耐圧検査・充填・自社利用などでは省略できる。
-
-## 6. staff identity の取得
-
-`staffSession` には現時点で `id` / `name` / `email` / `role` / `rank` が保存されている。
-このため、operation 境界へ渡す actor は session から組み立てられる。
-
-推奨 helper:
+候補 enum:
 
 ```ts
-export function getStaffIdentity(): OperationActor | null;
-export function requireStaffIdentity(): OperationActor;
-export function useStaffIdentity(): OperationActor | null;
+export type OperationSource =
+  | "manual"
+  | "order_fulfillment"
+  | "return_tag_processing"
+  | "bulk_return"
+  | "portal"
+  | "procurement"
+  | "dashboard_correction"
+  | "system";
+
+export type OperationWorkflow =
+  | "tank_operation"
+  | "order"
+  | "return"
+  | "uncharged_report"
+  | "procurement"
+  | "supply_order"
+  | "dashboard_edit"
+  | "dashboard_void";
+
+export type ReturnCondition =
+  | "normal"
+  | "unused"
+  | "uncharged"
+  | "keep";
 ```
 
-設置場所は `src/hooks/useStaffSession.ts` または identity 専用 helper が妥当。
-既存の `getStaffName()` は段階的に置き換える。
+enum 名と値は実装時に既存 `ACTION` / `RETURN_TAG` / transaction `condition` と照合して固定する。
 
-`requireStaffIdentity()` は `staffId` がない場合に fallback 名で書き込まず、操作を止める。
-`"スタッフ"` のような fallback は表示用途に限定し、監査ログの正本には使わない。
-
-## 7. customer identity の取得
-
-portal 側は `customerSession` から `customerId` / `customerName` / `customerUserUid` を取得できる。
-staff 操作側は `customers` の選択肢から `CustomerSnapshot` を作る。
-
-推奨 helper:
-
-```ts
-export function getCustomerPortalIdentity(): CustomerSnapshot | null;
-export function requireCustomerPortalIdentity(): CustomerSnapshot;
-```
-
-staff 操作の貸出先選択 hook は、名前文字列だけでなく以下を返す形にする。
-
-```ts
-type SelectedCustomer = {
-  customerId: string;
-  customerName: string;
-};
-```
-
-`selectedDest` から `customerOptions.find(...).id` を毎回逆引きするより、選択値自体を `customerId` に寄せ、表示名を snapshot として保持する方が安全。
-
-## 8. LogDoc schema 方針
-
-推奨 schema:
+## 8. `LogDoc` 推奨 schema
 
 ```ts
 export type LogDoc = {
@@ -167,17 +172,22 @@ export type LogDoc = {
   originalAt?: Timestamp;
   revisionCreatedAt?: Timestamp;
 
-  staffId: string;
-  staffName: string;
+  staffId?: string;
+  staffName?: string;
   staffEmail?: string;
 
   customerId?: string;
   customerName?: string;
 
+  transactionId?: string;
+  source?: OperationSource;
+  workflow?: OperationWorkflow;
+  returnCondition?: ReturnCondition;
+  billable?: boolean;
+
   location?: string;
   note?: string;
   logNote?: string;
-  transactionId?: string;
 
   prevStatus?: string;
   newStatus?: string;
@@ -195,28 +205,26 @@ export type LogDoc = {
   voidedByStaffEmail?: string;
   voidReason?: string;
   voidedAt?: Timestamp;
+
+  logExtra?: Record<string, unknown>;
 };
 ```
 
-注意点:
+Notes:
 
-- `logStatus` は既存 revision 機構に合わせて `"active" | "superseded" | "voided"` を維持する。
-- `staffId` / `customerId` は top-level field にする。
-- `staffName` / `customerName` は当時表示名の snapshot として保存する。
-- `location` は操作後の場所・貸出先表示名として残す。
-- `logs.staff` は新規書き込みしない。
-- `logs.customer` は新設しない。
-- correction / void の操作者は、元 operation の actor と区別して `editedByStaff*` / `voidedByStaff*` に保存する。
+- `staffId` / `customerId` は将来の新規 operation log では基本的に保存する。
+- 既存 log や非 staff 起点 log があるため、読み取り型では optional として扱う余地を残す。
+- `transactionId` は portal order / return / uncharged report から生じた tank operation log の紐付けに使う。
+- `source` は発生元、`workflow` は業務フロー分類、`returnCondition` は返却の扱いを typed field にする。
+- `billable` は請求・売上設計で必要性を再評価する。今すぐ必須 field にはしない。
+- `logs` に `prefix` / `number` / `sortKey` は重複保存しない。`tankId` は canonical ID を保存する。
 
-## 9. TransactionDoc schema 方針
+## 9. `TransactionDoc` 推奨 schema
 
-`transactions` は顧客申請・受注・返却・未充填報告の正本として、既存の `customerId` / `customerName` / `createdByUid` を維持する。
-スタッフ操作による承認・完了は、名前文字列だけでなく staff identity を保存する。
-
-推奨追加 field:
+`transactions` は workflow の source of truth であり、tank state の正本ではない。
 
 ```ts
-type TransactionDoc = {
+export type TransactionDoc = {
   id: string;
   type: "order" | "return" | "uncharged_report";
   status: string;
@@ -224,6 +232,14 @@ type TransactionDoc = {
   customerId?: string;
   customerName?: string;
   createdByUid?: string;
+  source?: "customer_portal" | "staff" | "system";
+
+  tankId?: string;
+  tankIds?: string[];
+  items?: unknown[];
+
+  condition?: ReturnCondition;
+  finalCondition?: ReturnCondition;
 
   approvedAt?: Timestamp;
   approvedByStaffId?: string;
@@ -245,15 +261,12 @@ type TransactionDoc = {
 };
 ```
 
-新規書き込みでは `approvedBy` / `fulfilledBy` のような曖昧な名前文字列 field を増やさない。
-既存 field の読み取り互換を残すかどうかは、実運用前データの扱いを確認してから決める。
+`approvedBy` / `fulfilledBy` のような名前だけの field は、新規 schema の主軸にしない。
+既存読み取り互換が必要なら、typed field を優先し、旧 field は fallback として扱う。
 
-## 10. TankOperationInput 方針
+## 10. `TankOperationInput` 方針
 
-`TankOperationInput.logExtra` に `staffId` / `staffName` / `staffEmail` / `customerId` / `customerName` を詰める方針は避ける。
-identity は operation の必須文脈であり、任意 extra にすると呼び出し漏れを型で防げない。
-
-推奨形:
+`TankOperationInput` は `staff` 文字列ではなく `context: OperationContext` を持つ方針に寄せる。
 
 ```ts
 export interface TankOperationInput {
@@ -274,231 +287,222 @@ export interface TankOperationInput {
 }
 ```
 
-`logExtra` は `transactionId`、業務固有フラグ、procurement 関連 ID などに限定する。
-`staffId` / `customerId` のような横断的な正本 field は `OperationContext` から operation service が展開する。
+`staffId` / `customerId` のような横断的な正本 field を `logExtra` に入れると、呼び出し漏れを型で防ぎにくい。
+operation service が `OperationContext` を受け取り、`LogDoc` top-level field に展開する。
 
-## 11. 現行コードでの主な移行対象
+## 11. `logExtra` に残してよい情報・残すべきでない情報
 
-`getStaffName()` 依存:
+| Category | Policy |
+|---|---|
+| `transactionId` | top-level typed field に昇格する |
+| `source` / `workflow` | top-level typed field に昇格する |
+| `returnCondition` | top-level typed field に昇格する |
+| `staffId` / `staffName` / `staffEmail` | `OperationContext.actor` から top-level field に展開する |
+| `customerId` / `customerName` | `OperationContext.customer` から top-level field に展開する |
+| 一時 UI 状態 | 原則保存しない |
+| 画面表示だけの補助ラベル | `note` / snapshot に限定し、機械判定に使わない |
+| workflow 固有の低頻度 metadata | `logExtra` に残してよいが、集計・検索の主軸になった時点で top-level 化する |
 
-- `src/features/staff-operations/hooks/useManualTankOperation.ts`
-- `src/features/staff-operations/hooks/useOrderFulfillment.ts`
-- `src/features/staff-operations/hooks/useReturnTagProcessing.ts`
-- `src/features/staff-operations/hooks/useBulkReturnByLocation.ts`
-- `src/app/staff/damage/page.tsx`
-- `src/app/staff/repair/page.tsx`
-- `src/app/staff/inspection/page.tsx`
-- `src/app/staff/inhouse/page.tsx`
-- `src/features/procurement/components/TankEntryScreen.tsx`
-- `src/app/staff/dashboard/page.tsx`
+`logExtra` は移行期や低頻度 metadata の受け皿としては有効だが、正本情報を置く場所にはしない。
 
-直接 `logs` 書き込み:
+## 12. `transactionId` / `source` / `workflow` / `returnCondition` 方針
 
-- `src/lib/tank-operation.ts`
-- `src/features/procurement/lib/submitTankEntryBatch.ts`
-- `src/lib/firebase/supply-order.ts`
+### `transactionId`
 
-直接 `transactions` 書き込み:
+portal order、portal return、portal unfilled report、staff processing が tank operation を生む場合、`logs.transactionId` を保存する。
+これにより、transaction と logs を timestamp / note / tankId から推定せずに追跡できる。
 
-- `src/features/staff-operations/hooks/useOrderFulfillment.ts`
-- `src/features/staff-operations/hooks/useReturnTagProcessing.ts`
-- `src/app/portal/order/page.tsx`
-- `src/app/portal/return/page.tsx`
-- `src/app/portal/unfilled/page.tsx`
-- `src/app/admin/settings/page.tsx`
+### `source`
 
-customer 名文字列依存:
+どの入口から発生した操作かを示す。
 
-- `src/features/staff-operations/hooks/useDestinations.ts`
-- `src/features/staff-operations/hooks/useManualTankOperation.ts`
-- `src/features/staff-operations/hooks/useOrderFulfillment.ts`
-- `src/app/portal/page.tsx`
-- `src/app/portal/return/page.tsx`
-- `src/app/portal/unfilled/page.tsx`
-- `src/app/admin/billing/page.tsx`
+Examples:
 
-## 12. repository 変更案
+- `manual`
+- `order_fulfillment`
+- `return_tag_processing`
+- `bulk_return`
+- `portal`
+- `procurement`
+- `dashboard_correction`
+- `system`
 
-`logsRepository` に追加する読み取り関数:
+### `workflow`
 
-```ts
-getActiveLogsByStaffId(staffId: string, options?: {
-  from?: Date;
-  to?: Date;
-  limit?: number;
-}): Promise<LogDoc[]>;
+業務フロー単位の分類を示す。
+`source` が入口、`workflow` が業務文脈という分担にする。
 
-getActiveLogsByCustomerId(customerId: string, options?: {
-  from?: Date;
-  to?: Date;
-  limit?: number;
-}): Promise<LogDoc[]>;
+Examples:
 
-getActiveLogsByTank(tankId: string, limit?: number): Promise<LogDoc[]>;
-```
+- `tank_operation`
+- `order`
+- `return`
+- `uncharged_report`
+- `procurement`
+- `supply_order`
+- `dashboard_edit`
+- `dashboard_void`
 
-用途:
+### `returnCondition`
 
-- `/staff/mypage`: `getActiveLogsByStaffId(session.id, { limit: 100 })`
-- portal 履歴: `getActiveLogsByCustomerId(customerId, { limit: 30 })`
-- 顧客別請求・売上: `customerId` を軸に集計
-- tank trace: `tankId` / `action` / `timestamp` を軸に追跡
+返却系の扱いを typed field にする。
 
-`transactionsRepository` は既存の `getOrders({ customerId })` / `getReturns({ customerId })` を維持し、必要に応じて type 横断の customer query を追加する。
+- `normal`
+- `unused`
+- `uncharged`
+- `keep`
 
-## 13. 必要 index
+`returnCondition` は `RETURN_TAG` / transaction `condition` / `finalCondition` と対応させる。
+長期的には manual return、bulk return、return tag processing の保存形をこの field で揃える。
 
-Firestore composite index は Firebase Console で手動管理する。
-`firestore.rules` deploy とは別作業として扱う。
+## 13. dashboard edit / void / correction との関係
 
-想定 index:
+dashboard edit / void / correction は revision chain に関わるため、通常 operation と同じ単純更新 helper に落とさない。
 
-| collection | fields | 用途 |
+方針:
+
+- 元 operation actor と correction actor を分ける。
+- 元 operation は `staffId` / `staffName` / `staffEmail` を保持する。
+- edit actor は `editedByStaffId` / `editedByStaffName` / `editedByStaffEmail` に保存する。
+- void actor は `voidedByStaffId` / `voidedByStaffName` / `voidedByStaffEmail` に保存する。
+- `logStatus` active / superseded / voided と `rootLogId` / `revision` の既存不変条件を壊さない。
+- `latestLogId` と revision / void / correction の整合は別 PR で確認する。
+
+dashboard correction は最後に回す。
+先に operation logging schema と読み取り互換を固め、revision 影響を分けて扱う。
+
+## 14. 通常 tank operation と混ぜすぎない領域
+
+### procurement
+
+タンク登録・購入は `tankProcurements` や procurement log を持つ。
+複数タンクをまとめて扱う procurement event は、単一 tank lifecycle log と同じ revision chain に押し込まない。
+ただし actor snapshot と canonical `tankId` は typed field 方針に合わせる。
+
+### supply-order
+
+資材発注は tank lifecycle ではない。
+`logs` に記録する場合でも `logKind: "order"` などで区別し、tank status transition と混同しない。
+
+### portal transactions
+
+portal transaction は workflow request の source of truth である。
+portal が transaction を作成した時点で tank status を動かさない。
+staff processing が tank operation を生む場合に、`logs.transactionId` で紐付ける。
+
+### tag-only `tanks.logNote` updates
+
+返却タグや一時状態を `tanks.logNote` に載せる更新は、状態遷移 operation とは意味が違う。
+tag-only 更新を通常 operation log と同一視しない。
+永続的に検索・集計したい返却扱いは `logs.returnCondition` など typed field に寄せる。
+
+## 15. 必要になり得る composite index
+
+Firestore composite index は Firebase Console 手動管理とし、Security Rules deploy とは分ける。
+
+| Collection | Fields | Use |
 |---|---|---|
-| `logs` | `logStatus` Asc, `staffId` Asc, `timestamp` Desc, `__name__` Desc | `/staff/mypage`、スタッフ別実績 |
-| `logs` | `logStatus` Asc, `customerId` Asc, `timestamp` Desc, `__name__` Desc | portal 履歴、顧客別履歴 |
-| `logs` | `logStatus` Asc, `tankId` Asc, `timestamp` Desc, `__name__` Desc | タンク履歴 |
-| `logs` | `logStatus` Asc, `tankId` Asc, `action` Asc, `timestamp` Desc, `__name__` Desc | tank trace の直前充填者・貸出元特定 |
-| `transactions` | `type` Asc, `status` Asc, `customerId` Asc | 受注・返却の顧客別絞り込み |
-| `transactions` | `type` Asc, `status` Asc, `customerId` Asc, `createdAt` Desc, `__name__` Desc | 顧客別 transaction の時系列表示 |
+| `logs` | `logStatus` Asc, `staffId` Asc, `timestamp` Desc, `__name__` Desc | staff mypage / staff analytics |
+| `logs` | `logStatus` Asc, `customerId` Asc, `timestamp` Desc, `__name__` Desc | portal history / customer history |
+| `logs` | `logStatus` Asc, `tankId` Asc, `timestamp` Desc, `__name__` Desc | tank trace |
+| `logs` | `logStatus` Asc, `transactionId` Asc, `timestamp` Desc, `__name__` Desc | transaction to logs trace |
+| `logs` | `logStatus` Asc, `returnCondition` Asc, `timestamp` Desc, `__name__` Desc | return condition analysis |
+| `logs` | `logStatus` Asc, `source` Asc, `workflow` Asc, `timestamp` Desc, `__name__` Desc | workflow audit |
+| `transactions` | `type` Asc, `status` Asc, `customerId` Asc, `createdAt` Desc, `__name__` Desc | customer workflow history |
+| `transactions` | `type` Asc, `status` Asc, `fulfilledByStaffId` Asc, `fulfilledAt` Desc | staff fulfillment history |
 
 既存の `logs` `logStatus` Asc / `location` Asc / `timestamp` Desc / `__name__` Desc index は、`location` 文字列履歴が残る間は維持する。
 新規の顧客履歴・集計は `customerId` index に寄せる。
 
-## 14. migration 方針
+## 16. migration / backfill 方針
 
-- 実運用前のため、旧データ互換・backfill は原則重視しない。
-- 新規書き込みから `staffId` / `staffName` / `staffEmail` を保存する。
-- 顧客が関係する新規書き込みから `customerId` / `customerName` を保存する。
-- 既存 `logs.staff` を前提にした新規処理は追加しない。
-- 既存 `logs.location` は履歴表示用の当時名として残す。
-- 既存 `tanks.location` は現在場所表示用として残す。
-- `tanks.customerId` 追加は別設計で決定するまで実装しない。
-- 過去ログの顧客名・スタッフ名は一括書き換えしない。
+この文書では migration を実行しない。
 
-## 15. 禁止事項
+方針:
 
-- 画面・feature hooks から `logs` を直接作成しない。
-- `logs.staff` / `logs.customer` のような曖昧な互換 field を新設しない。
-- repository に session 解決や staff 推定ロジックを持たせない。
-- `firestore.rules` を本タスクで deploy しない。
-- `firebase.json` に `firestore.rules` を接続しない。
-- `firebase deploy` 単体を実行しない。
-- Hosting deploy は明示指示がある場合のみ `firebase deploy --only hosting:okmarine-tankrental --project okmarine-tankrental` を使う。
-- `.codex-logs/` を commit しない。
-- `tank-operation.ts` の revision / void / correction 不変条件を崩さない。
+- 新規 write から typed field を保存する。
+- 既存 `logs` / `transactions` は破壊的に書き換えない。
+- 既存 `location` / `staff` 文字列を一括変更しない。
+- 既存 log の顧客名・スタッフ名 snapshot は過去表示として残す。
+- 読み取りは typed field 優先、旧 field fallback の順にする。
+- backfill が必要になった場合は read-only audit、migration design、dry-run、実行 PR を分ける。
+- `tanks.customerId` 追加はこの文書では決めない。current loan projection / customers 正本化の別設計で扱う。
 
-## 16. operation service 共通化案
+互換性不要とは扱わない。
+既存 Firestore data、dashboard revision / void / correction、portal workflow、staff operations を前提に、段階移行する。
 
-共通化すべきもの:
+## 17. 実装順序と commit 分割案
 
-- `OperationContext` の必須チェック。
-- `OperationContext` から `LogDoc` top-level field への展開。
-- `applyTankOperation` / `applyBulkTankOperations` の log 作成処理。
-- 受注貸出・返却タグ処理での tank/log/transaction 一貫更新。
-- dashboard の edit / void actor 記録。
-- procurement / supply-order の非タンクログ actor schema。
+推奨順:
 
-共通化しすぎると危険なもの:
+1. identity helper / types only
+   - `OperationActor`
+   - `CustomerSnapshot`
+   - `OperationContext`
+   - `getStaffIdentity`
+   - `requireStaffIdentity`
+   - `useStaffIdentity`
+   - Firestore write schema はまだ変えない。
+2. logsRepository read-only helper
+   - `getActiveLogsByStaffId`
+   - `getActiveLogsByCustomerId`
+   - `getActiveLogsByTank`
+   - typed field がない既存 data への fallback 方針を確認する。
+3. operation logging schema migration
+   - `TankOperationInput` を `context` 受け取りへ段階移行する。
+   - `applyTankOperation` / `applyBulkTankOperations` が `OperationContext` から typed field を保存する。
+   - manual / order / return tag / damage / in-house の呼び出し元を小さく分ける。
+4. transactions actor fields
+   - `approvedByStaffId` / `approvedByStaffName` / `approvedByStaffEmail`
+   - `fulfilledByStaffId` / `fulfilledByStaffName` / `fulfilledByStaffEmail`
+   - `linkedByStaffId` / `linkedByStaffName` / `linkedByStaffEmail`
+5. UI / read migration
+   - staff mypage を `staffId` で絞る。
+   - portal 履歴を `customerId` で絞る。
+   - staff analytics / billing / sales は typed field を優先する。
+6. dashboard edit / void / correction
+   - revision 不変条件を再確認してから、edit / void actor typed field を追加する。
+7. indexes / rules
+   - composite index は Firebase Console 手動作成。
+   - Security Rules hardening は別レビュー。
 
-- タンク状態遷移ログとタンク購入・登録ログを同一 API に押し込むこと。
-- 資材発注ログを tank operation と同じ revision chain に入れること。
-- portal の transaction 作成を staff actor 前提の operation に混ぜること。
-- `tanks.logNote` のタグだけ更新する処理を状態遷移 operation と同一視すること。
-- dashboard の edit / void を単純 update helper に落とすこと。
+推奨 commit / PR 分割:
 
-## 17. 実装順序
-
-### 1. docs-only
-
-この設計書を追加し、実装範囲・禁止事項・commit 分割を固定する。
-
-### 2. identity helper / 型追加
-
-- `OperationActor` / `CustomerSnapshot` / `OperationContext` を追加する。
-- `getStaffIdentity()` / `requireStaffIdentity()` / `useStaffIdentity()` を追加する。
-- Firestore 書き込み schema はまだ変えない。
-
-### 3. repository read 関数追加
-
-- `logsRepository.getActiveLogsByStaffId()`
-- `logsRepository.getActiveLogsByCustomerId()`
-- 必要なら `getActiveLogsByTank()`
-
-### 4. tank operation schema 移行
-
-- `TankOperationInput.staff` を `context.actor` へ移行する。
-- `customerId` / `customerName` は `context.customer` から保存する。
-- `logs.staff` 新規書き込みを止める。
-- `logs.staffId` / `logs.staffName` / `logs.staffEmail` を保存する。
-
-### 5. transaction actor field 移行
-
-- 受注承認: `approvedByStaffId` / `approvedByStaffName` / `approvedByStaffEmail`
-- 受注貸出完了: `fulfilledByStaffId` / `fulfilledByStaffName` / `fulfilledByStaffEmail`
-- 返却タグ処理完了: 同上
-- customer user 紐付け: `linkedByStaff*`
-
-### 6. 非タンクログ移行
-
-- `submitTankEntryBatch`
-- `submitSupplyOrder`
-
-非タンクログでも `staffId` / `staffName` / `staffEmail` を保存する。
-`logKind` は `procurement` / `order` を維持する。
-
-### 7. UI read 移行
-
-- `/staff/mypage` を `staffId` で絞る。
-- admin dashboard の稼働スタッフ数を `staffId` で count する。
-- staff analytics を `staffId` group + `staffName` 表示にする。
-- portal 履歴を `customerId` で絞る。
-- billing / sales は customerId 正本へ段階移行する。
-
-## 18. commit 分割方針
-
-推奨 commit:
-
-1. `docs: add identity and operation logging design`
+1. `docs: update identity and operation logging design`
 2. `types: add operation identity helpers`
-3. `repositories: add staff/customer log queries`
+3. `repositories: add staff and customer log read helpers`
 4. `operations: write staff identity to tank logs`
 5. `operations: write customer identity snapshots to tank logs`
-6. `transactions: record staff identity for approvals`
+6. `transactions: record staff identity for workflow actions`
 7. `procurement: align non-tank log actor fields`
-8. `staff: filter mypage logs by staff id`
-9. `admin: aggregate staff stats by staff id`
-10. `portal: query logs by customer id`
+8. `staff: read mypage logs by staff id`
+9. `portal: read logs by customer id`
+10. `admin: aggregate staff stats by staff id`
 
-UI-only commit と Firestore 書き込み schema 変更 commit は分ける。
-docs-only commit は実装 commit と分ける。
-icon / PWA 画像更新は混ぜない。
+docs-only、UI-only、Firestore write schema、index / rules、migration は混ぜない。
 
-## 19. 実装前に確認すべき事項
+## 18. 禁止事項
 
-- `staffSession.id` が全ログイン経路で必ず `staff/{id}` になっているか。
-- dev auth bypass の `id` を本番データと衝突しない値として扱えるか。
-- passcode login を再有効化した場合も `id` / `email` / `role` / `rank` が保存されるか。
-- `customerSession.uid` と `customerSession.customerId` のどちらを portal transaction の `customerId` として使うか。
-- 未紐付け customer user の transaction を `pending_link` にする条件。
-- `customerName` snapshot の元にする表示名を `customers.name` / `companyName` のどちらに統一するか。
-- `tanks.customerId` を追加するかどうか。これは本設計では未決。
-- dashboard edit / void の actor field 名を `editedByStaff*` / `voidedByStaff*` で固定するか。
-- 既存 `approvedBy` / `fulfilledBy` を読み取り互換として残す必要があるか。
-- composite index をどの順番で Firebase Console に作成するか。
+- この docs-only 段階で実装コードを変更しない。
+- Firestore data create/update/delete を行わない。
+- migration / backfill を実行しない。
+- `firestore.rules` を変更しない。
+- `firebase.json` を変更しない。
+- Security Rules deploy / Firestore deploy / Hosting deploy / 無指定 firebase deploy を行わない。
+- 既存 `logs` を一括で書き換えない。
+- dashboard edit / void / correction の revision 機構を破壊的に変える前提にしない。
+- `logs.staff` / `logs.customer` のような曖昧な文字列 field を新規 schema として増やさない。
+- `logExtra` / `note` / `logNote` に、永続的な検索・集計・監査の正本情報を詰め込まない。
 
-## 20. 最初の実装範囲
+## 19. 次フェーズで決めること
 
-最初の実装は docs-only の次に、identity helper と型追加だけに絞る。
+- `OperationSource` / `OperationWorkflow` / `ReturnCondition` の enum 値。
+- `logs.billable` を今入れるか、billing design 後に入れるか。
+- `transactions.condition` / `transactions.finalCondition` と `logs.returnCondition` の正確な対応。
+- `tanks.customerId` または current loan projection を持つかどうか。
+- `latestLogId` と revision / void / correction の整合ルール。
+- typed field が欠ける既存 logs の読み取り fallback。
+- 必要 index の作成順序。
 
-推奨プロンプト:
-
-```text
-OperationActor / CustomerSnapshot / OperationContext の型と、
-getStaffIdentity / requireStaffIdentity / useStaffIdentity を追加してください。
-Firestore 書き込み schema はまだ変更しないでください。
-既存 getStaffName は互換のため残してください。
-firestore.rules / firebase.json は触らないでください。
-```
-
-この段階では runtime の書き込み挙動を変えず、後続 commit で `tank-operation.ts` と呼び出し元を移行する。
+最初の実装は identity helper / types only に限定する。
+Firestore write schema の変更、operation service 移行、UI/read migration は後続 PR に分ける。
