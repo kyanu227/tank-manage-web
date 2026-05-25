@@ -65,7 +65,7 @@ export interface TankOperationInput {
   /** ログドキュメントに記録する note（自由メモ）。省略時は空。 */
   logNote?: string;
 
-  /** ログに追加したい任意フィールド（transactionId などの業務メタ情報） */
+  /** ログに追加したい補助フィールド。正本 typed field は context に置く。 */
   logExtra?: Record<string, unknown>;
 
   /** タンクドキュメントに追加したい任意フィールド */
@@ -205,6 +205,10 @@ const RESERVED_LOG_EXTRA_FIELDS = new Set([
   "staffEmail",
   "customerId",
   "customerName",
+  "transactionId",
+  "source",
+  "workflow",
+  "returnCondition",
   "note",
   "logNote",
 ]);
@@ -569,6 +573,7 @@ function tankUpdateFromSnapshot(
 
 function operationIdentityFields(context: OperationContext): DocumentData {
   const actor = context.actor;
+  const transactionId = stringOrUndefined(context.transactionId);
   return {
     staffId: actor.staffId,
     staffName: actor.staffName,
@@ -578,6 +583,12 @@ function operationIdentityFields(context: OperationContext): DocumentData {
           customerId: context.customer.customerId,
           customerName: context.customer.customerName,
         }
+      : {}),
+    ...(transactionId ? { transactionId } : {}),
+    ...(context.source ? { source: context.source } : {}),
+    ...(context.workflow ? { workflow: context.workflow } : {}),
+    ...(context.returnCondition
+      ? { returnCondition: context.returnCondition }
       : {}),
   };
 }
