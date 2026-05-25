@@ -5,7 +5,11 @@ import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
-import type { CustomerSnapshot } from "@/lib/operation-context";
+import type {
+  CustomerSnapshot,
+  OperationContext,
+  ReturnCondition,
+} from "@/lib/operation-context";
 import {
   RETURN_TAG,
   resolveReturnAction,
@@ -176,8 +180,10 @@ export function useManualTankOperation({
     setSubmitting(true);
     try {
       const actor = requireStaffIdentity();
-      const context = {
+      const baseContext: OperationContext = {
         actor,
+        source: "manual",
+        workflow: "tank_operation",
         ...(mode === "lend" && effectiveCustomer
           ? { customer: effectiveCustomer }
           : {}),
@@ -214,7 +220,12 @@ export function useManualTankOperation({
             tankId: item.tankId,
             transitionAction: resolvedAction,
             currentStatus: item.status || "",
-            context,
+            context: mode === "return"
+              ? {
+                  ...baseContext,
+                  returnCondition: returnConditionFromTag(tag),
+                }
+              : baseContext,
             location: finalLocation,
             tankNote: finalTankNote,
             logNote: finalLogNote,
@@ -252,4 +263,18 @@ export function useManualTankOperation({
     handleSubmit,
     reset,
   };
+}
+
+function returnConditionFromTag(tag: ReturnTag): ReturnCondition {
+  switch (tag) {
+    case RETURN_TAG.UNUSED:
+      return "unused";
+    case RETURN_TAG.UNCHARGED:
+      return "uncharged";
+    case RETURN_TAG.KEEP:
+      return "keep";
+    case RETURN_TAG.NORMAL:
+    default:
+      return "normal";
+  }
 }
