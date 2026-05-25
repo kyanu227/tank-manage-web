@@ -40,6 +40,9 @@ export async function fulfillOrder(input: {
       customerId: order.customerId,
       customerName: order.customerName,
     },
+    transactionId: order.id,
+    source: "order_fulfillment" as const,
+    workflow: "order" as const,
   };
 
   await applyBulkTankOperations(
