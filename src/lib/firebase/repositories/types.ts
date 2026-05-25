@@ -3,6 +3,11 @@
 // 既存の TankDoc は src/lib/tank-types.ts の定義を再 export する。
 
 import type { WriteBatch, Transaction, Timestamp } from "firebase/firestore";
+import type {
+  OperationSource,
+  OperationWorkflow,
+  ReturnCondition,
+} from "../../operation-context";
 
 // tanks
 export type { TankDoc } from "../../tank-types";
@@ -36,7 +41,18 @@ export interface LogDoc {
   staffEmail?: string;
   customerId?: string;
   customerName?: string;
+  transactionId?: string;
+  source?: OperationSource;
+  workflow?: OperationWorkflow;
+  returnCondition?: ReturnCondition;
+  billable?: boolean;
   note?: string;
+  logNote?: string;
+  prevStatus?: string;
+  newStatus?: string;
+  prevTankSnapshot?: unknown;
+  nextTankSnapshot?: unknown;
+  previousLogIdOnSameTank?: string | null;
   editedByStaffId?: string;
   editedByStaffName?: string;
   editedByStaffEmail?: string;
@@ -45,6 +61,8 @@ export interface LogDoc {
   voidedByStaffName?: string;
   voidedByStaffEmail?: string;
   voidReason?: string;
+  voidedAt?: Timestamp;
+  logExtra?: Record<string, unknown>;
   /** 操作発生時刻。表示・期間集計の主軸。 */
   timestamp?: Timestamp;
   createdAt?: Timestamp;

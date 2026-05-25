@@ -70,7 +70,19 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     staffEmail: data.staffEmail as string | undefined,
     customerId: data.customerId as string | undefined,
     customerName: data.customerName as string | undefined,
+    transactionId: data.transactionId as string | undefined,
+    source: data.source as LogDoc["source"],
+    workflow: data.workflow as LogDoc["workflow"],
+    returnCondition: data.returnCondition as LogDoc["returnCondition"],
+    billable: typeof data.billable === "boolean" ? data.billable : undefined,
     note: data.note as string | undefined,
+    logNote: data.logNote as string | undefined,
+    prevStatus: data.prevStatus as string | undefined,
+    newStatus: data.newStatus as string | undefined,
+    previousLogIdOnSameTank: data.previousLogIdOnSameTank as
+      | string
+      | null
+      | undefined,
     editedByStaffId: data.editedByStaffId as string | undefined,
     editedByStaffName: data.editedByStaffName as string | undefined,
     editedByStaffEmail: data.editedByStaffEmail as string | undefined,
@@ -79,6 +91,8 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     voidedByStaffName: data.voidedByStaffName as string | undefined,
     voidedByStaffEmail: data.voidedByStaffEmail as string | undefined,
     voidReason: data.voidReason as string | undefined,
+    voidedAt: data.voidedAt as Timestamp | undefined,
+    logExtra: data.logExtra as Record<string, unknown> | undefined,
     timestamp: data.timestamp as Timestamp | undefined,
     createdAt: data.createdAt as Timestamp | undefined,
     revisionCreatedAt: data.revisionCreatedAt as Timestamp | undefined,
@@ -89,8 +103,8 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
 export interface GetLogsByTankOptions {
   logStatus?: "active" | "superseded" | "voided";
   limit?: number;
-  before?: unknown;
-  after?: unknown;
+  before?: Date | Timestamp;
+  after?: Date | Timestamp;
 }
 
 /** action 指定の履歴取得オプション */
@@ -165,23 +179,65 @@ export async function getLog(_logId: string): Promise<LogDoc | null> {
   throw new Error("not implemented in Phase 1");
 }
 
-/** タンク単位の履歴取得。 */
+/**
+ * タンク単位の履歴取得。時系列降順。
+ * typed field の exact query のみを行い、旧 field fallback はここで混ぜない。
+ * 旧形式との読み取り互換は UI/read migration PR で扱う。
+ *
+ * 必要 index の例:
+ * - logs(tankId Asc, timestamp Desc, __name__ Desc)
+ * - logs(tankId Asc, logStatus Asc, timestamp Desc, __name__ Desc)
+ */
 export async function getLogsByTank(
-  _tankId: string,
-  _options?: GetLogsByTankOptions,
+  tankId: string,
+  options?: GetLogsByTankOptions,
 ): Promise<LogDoc[]> {
-  throw new Error("not implemented in Phase 1");
+  const normalizedTankId = tankId.trim();
+  if (!normalizedTankId) return [];
+
+  const constraints: QueryConstraint[] = [
+    where("tankId", "==", normalizedTankId),
+  ];
+  if (options?.logStatus) {
+    constraints.push(where("logStatus", "==", options.logStatus));
+  }
+  if (options?.after) {
+    constraints.push(where("timestamp", ">=", toTimestampBoundary(options.after)));
+  }
+  if (options?.before) {
+    constraints.push(where("timestamp", "<=", toTimestampBoundary(options.before)));
+  }
+  constraints.push(orderBy("timestamp", "desc"));
+  if (options?.limit !== undefined) {
+    constraints.push(fsLimit(options.limit));
+  }
+
+  const snap = await getDocs(query(collection(db, "logs"), ...constraints));
+  return snap.docs.map(toLogDoc);
 }
 
 /**
  * tankId で active ログを取得する。時系列降順。
+ * typed field の exact query のみを行い、旧 field fallback はここで混ぜない。
  * 必要 index: logs(logStatus Asc, tankId Asc, timestamp Desc, __name__ Desc)
  */
-export async function getActiveLogsByTank(
+export function getActiveLogsByTank(
   tankId: string,
   limit?: number,
+): Promise<LogDoc[]>;
+export function getActiveLogsByTank(
+  tankId: string,
+  options?: GetActiveLogsByIdentityOptions,
+): Promise<LogDoc[]>;
+export async function getActiveLogsByTank(
+  tankId: string,
+  optionsOrLimit?: number | GetActiveLogsByIdentityOptions,
 ): Promise<LogDoc[]> {
-  return getActiveLogsByField("tankId", tankId, { limit });
+  const options =
+    typeof optionsOrLimit === "number"
+      ? { limit: optionsOrLimit }
+      : optionsOrLimit;
+  return getActiveLogsByField("tankId", tankId, options);
 }
 
 /** 最新 active ログ。tank-trace や編集可否判定で使う。 */
@@ -234,6 +290,11 @@ export function listenRecentLogs(
 
 type ActiveLogIdentityField = "staffId" | "customerId" | "tankId";
 
+/**
+ * typed identity field の exact query。
+ * 既存 log の旧 field fallback は repository で暗黙に混ぜず、
+ * UI/read migration PR で明示的に扱う。
+ */
 async function getActiveLogsByField(
   field: ActiveLogIdentityField,
   value: string,
@@ -259,4 +320,8 @@ async function getActiveLogsByField(
 
   const snap = await getDocs(query(collection(db, "logs"), ...constraints));
   return snap.docs.map(toLogDoc);
+}
+
+function toTimestampBoundary(value: Date | Timestamp): Timestamp {
+  return value instanceof Date ? Timestamp.fromDate(value) : value;
 }
