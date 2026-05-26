@@ -1,7 +1,11 @@
 import { doc, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { tanksRepository } from "@/lib/firebase/repositories";
-import type { OperationActor } from "@/lib/operation-context";
+import type {
+  OperationActor,
+  OperationContext,
+  ReturnCondition,
+} from "@/lib/operation-context";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import {
@@ -11,8 +15,6 @@ import {
   type ReturnTag,
   type TankAction,
 } from "@/lib/tank-rules";
-
-type ReturnCondition = "normal" | "unused" | "uncharged" | "keep";
 
 type ReturnTagProcessingItem = {
   id: string;
@@ -42,12 +44,14 @@ export async function processReturnTags(input: {
     throw new Error("処理するタンクを選択してください");
   }
 
-  const context = {
+  const baseContext: OperationContext = {
     actor,
     customer: {
       customerId: group.customerId,
       customerName: group.customerName,
     },
+    source: "return_tag_processing",
+    workflow: "return",
   };
 
   const selectedData = await Promise.all(selectedItems.map(async (item) => {
@@ -78,11 +82,15 @@ export async function processReturnTags(input: {
   }));
 
   await applyBulkTankOperations(
-    selectedData.map(({ tankId, note, currentStatus, transitionAction, location }) => ({
+    selectedData.map(({ item, tankId, condition, note, currentStatus, transitionAction, location }) => ({
       tankId,
       transitionAction,
       currentStatus,
-      context,
+      context: {
+        ...baseContext,
+        transactionId: item.id,
+        returnCondition: condition,
+      },
       location,
       tankNote: note,
       logNote: note,
