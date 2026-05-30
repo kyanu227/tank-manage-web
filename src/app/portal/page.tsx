@@ -6,6 +6,7 @@ import Link from "next/link";
 import { logsRepository, tanksRepository } from "@/lib/firebase/repositories";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 import { getPortalHistoryActionBadgeTone } from "@/lib/tank-action-status-display";
+import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
 import { STATUS } from "@/lib/tank-rules";
 
 type PortalLogTimestamp = { toDate?: () => Date } | null | undefined;
@@ -175,6 +176,7 @@ export default function PortalPage() {
           ) : (
             logs.map((log, i) => {
               const badgeStyle = getPortalHistoryActionBadgeTone(log.action);
+              const actionLabel = getLegacyTankActionLabel(log.action) ?? log.action;
               return (
                 <div key={i} style={{
                   display: "flex", alignItems: "center", gap: "2.5vw",
@@ -190,7 +192,7 @@ export default function PortalPage() {
                     background: badgeStyle.background,
                     flexShrink: 0,
                   }}>
-                    {log.action}
+                    {actionLabel}
                   </span>
                   <span style={{ flex: 1, fontFamily: "monospace", fontSize: "clamp(11px, 3vw, 13px)", fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{log.tankId}</span>
                   <span style={{ fontSize: "clamp(9px, 2.4vw, 10px)", color: "#cbd5e1", flexShrink: 0, whiteSpace: "nowrap" }}>{log.staffName || "-"}</span>
