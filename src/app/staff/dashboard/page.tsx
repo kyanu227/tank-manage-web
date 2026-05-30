@@ -44,6 +44,13 @@ import {
   STATUS_COLORS,
   type TankAction,
 } from "@/lib/tank-rules";
+import {
+  isFillLegacyAction,
+  isInHouseLegacyAction,
+  isLendLegacyAction,
+  isReturnLegacyAction,
+  tankActionToCode,
+} from "@/lib/tank-action-status-codes";
 
 type LogSortOrder = "desc" | "asc";
 
@@ -98,6 +105,7 @@ type BulkLocationOption = {
   customer: CustomerSnapshot | null;
 };
 type BulkLocationMode = "lend" | "inhouse" | null;
+type ActionTone = "danger" | "return" | "lend" | "fill" | "inhouse" | "maintenance" | "default";
 
 const LIMIT_MS = 72 * 60 * 60 * 1000;
 const ACTION_OPTIONS = Object.values(ACTION) as TankAction[];
@@ -1522,26 +1530,52 @@ function statusColor(status?: LogStatus): string {
   return "#94a3b8";
 }
 
+const ACTION_TONE_BG: Record<ActionTone, string> = {
+  danger: "#fef2f2",
+  return: "#eff6ff",
+  lend: "#eef2ff",
+  fill: "#ecfdf5",
+  inhouse: "#fffbeb",
+  maintenance: "#f5f3ff",
+  default: "#f1f5f9",
+};
+
+const ACTION_TONE_FG: Record<ActionTone, string> = {
+  danger: "#b91c1c",
+  return: "#1d4ed8",
+  lend: "#4338ca",
+  fill: "#047857",
+  inhouse: "#b45309",
+  maintenance: "#6d28d9",
+  default: "#475569",
+};
+
 function actionBg(action?: string): string {
-  if (!action) return "#f1f5f9";
-  if (action.includes("破損") || action.includes("破棄")) return "#fef2f2";
-  if (action.includes("返却")) return "#eff6ff";
-  if (action.includes("貸出")) return "#eef2ff";
-  if (action.includes("充填")) return "#ecfdf5";
-  if (action.includes("自社")) return "#fffbeb";
-  if (action.includes("耐圧") || action.includes("修理")) return "#f5f3ff";
-  return "#f1f5f9";
+  return ACTION_TONE_BG[getActionTone(action)];
 }
 
 function actionFg(action?: string): string {
-  if (!action) return "#475569";
-  if (action.includes("破損") || action.includes("破棄")) return "#b91c1c";
-  if (action.includes("返却")) return "#1d4ed8";
-  if (action.includes("貸出")) return "#4338ca";
-  if (action.includes("充填")) return "#047857";
-  if (action.includes("自社")) return "#b45309";
-  if (action.includes("耐圧") || action.includes("修理")) return "#6d28d9";
-  return "#475569";
+  return ACTION_TONE_FG[getActionTone(action)];
+}
+
+function getActionTone(action?: string): ActionTone {
+  if (!action) return "default";
+
+  const code = tankActionToCode(action);
+  if (code === "damage_report" || code === "dispose") return "danger";
+  if (isReturnLegacyAction(action)) return "return";
+  if (isLendLegacyAction(action)) return "lend";
+  if (isFillLegacyAction(action)) return "fill";
+  if (isInHouseLegacyAction(action)) return "inhouse";
+  if (code === "inspection" || code === "repaired") return "maintenance";
+
+  if (action.includes("破損") || action.includes("破棄")) return "danger";
+  if (action.includes("返却")) return "return";
+  if (action.includes("貸出")) return "lend";
+  if (action.includes("充填")) return "fill";
+  if (action.includes("自社")) return "inhouse";
+  if (action.includes("耐圧") || action.includes("修理")) return "maintenance";
+  return "default";
 }
 
 function errorMessage(error: unknown): string {
