@@ -65,9 +65,9 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     action: data.action as string | undefined,
     status: data.status as string | undefined,
     location: data.location as string | undefined,
-    staffId: data.staffId as string | undefined,
-    staffName: data.staffName as string | undefined,
-    staffEmail: data.staffEmail as string | undefined,
+    staffId: stringOrUndefined(data.staffId),
+    staffName: stringOrUndefined(data.staffName) ?? stringOrUndefined(data.staff),
+    staffEmail: stringOrUndefined(data.staffEmail),
     customerId: data.customerId as string | undefined,
     customerName: data.customerName as string | undefined,
     transactionId: data.transactionId as string | undefined,
@@ -97,6 +97,12 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     createdAt: data.createdAt as Timestamp | undefined,
     revisionCreatedAt: data.revisionCreatedAt as Timestamp | undefined,
   };
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 /** タンク単位の履歴取得オプション */
