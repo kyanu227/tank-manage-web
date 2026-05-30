@@ -20,25 +20,25 @@ import {
   type TankAction,
 } from "@/lib/tank-rules";
 
-type ReturnTagProcessingItem = {
+type PendingReturnRequestItem = {
   id: string;
   tankId: string;
   condition: ReturnCondition;
 };
 
-type ReturnTagProcessingGroup = {
+type PendingReturnRequestGroup = {
   customerId: string;
   customerName: string;
-  items: ReturnTagProcessingItem[];
+  items: PendingReturnRequestItem[];
 };
 
-type ReturnTagProcessingSelections = Record<
+type ReturnConfirmationSelections = Record<
   string,
   { selected: boolean; condition: ReturnCondition } | undefined
 >;
 
 type ReturnConfirmation = {
-  item: ReturnTagProcessingItem;
+  item: PendingReturnRequestItem;
   tankId: string;
   condition: ReturnCondition;
   note: string;
@@ -47,11 +47,29 @@ type ReturnConfirmation = {
   location: string;
 };
 
-export async function processReturnTags(input: {
-  group: ReturnTagProcessingGroup;
-  selections: ReturnTagProcessingSelections;
+type ReturnTransactionCompletionPatch = {
+  status: "completed";
+  finalCondition: ReturnCondition;
+  fulfilledAt: ReturnType<typeof serverTimestamp>;
+  fulfilledBy: string;
+  fulfilledByStaffId: string;
+  fulfilledByStaffName: string;
+  fulfilledByStaffEmail?: string;
+};
+
+export type ConfirmPendingReturnRequestsInput = {
+  group: PendingReturnRequestGroup;
+  selections: ReturnConfirmationSelections;
   actor: OperationActor;
-}): Promise<{ processedCount: number }> {
+};
+
+export type ConfirmPendingReturnRequestsResult = {
+  processedCount: number;
+};
+
+export async function confirmPendingReturnRequests(
+  input: ConfirmPendingReturnRequestsInput,
+): Promise<ConfirmPendingReturnRequestsResult> {
   const { group, selections, actor } = input;
   const selectedItems = selectPendingReturnRequestItems(group.items, selections);
   if (selectedItems.length === 0) {
@@ -71,14 +89,14 @@ export async function processReturnTags(input: {
 }
 
 function selectPendingReturnRequestItems(
-  items: ReturnTagProcessingItem[],
-  selections: ReturnTagProcessingSelections,
-): ReturnTagProcessingItem[] {
+  items: PendingReturnRequestItem[],
+  selections: ReturnConfirmationSelections,
+): PendingReturnRequestItem[] {
   return items.filter((item) => selections[item.id]?.selected);
 }
 
 function buildReturnConfirmationContext(
-  group: ReturnTagProcessingGroup,
+  group: PendingReturnRequestGroup,
   actor: OperationActor,
 ): OperationContext {
   return {
@@ -93,9 +111,9 @@ function buildReturnConfirmationContext(
 }
 
 function resolveReturnConfirmations(
-  group: ReturnTagProcessingGroup,
-  selectedItems: ReturnTagProcessingItem[],
-  selections: ReturnTagProcessingSelections,
+  group: PendingReturnRequestGroup,
+  selectedItems: PendingReturnRequestItem[],
+  selections: ReturnConfirmationSelections,
 ): Promise<ReturnConfirmation[]> {
   return Promise.all(
     selectedItems.map((item) => resolveReturnConfirmation(group, item, selections)),
@@ -103,9 +121,9 @@ function resolveReturnConfirmations(
 }
 
 async function resolveReturnConfirmation(
-  group: ReturnTagProcessingGroup,
-  item: ReturnTagProcessingItem,
-  selections: ReturnTagProcessingSelections,
+  group: PendingReturnRequestGroup,
+  item: PendingReturnRequestItem,
+  selections: ReturnConfirmationSelections,
 ): Promise<ReturnConfirmation> {
   const tankIdResult = tryParseTankId(item.tankId);
   if (!tankIdResult.ok) {
@@ -159,14 +177,24 @@ function completePendingReturnRequests(
   actor: OperationActor,
 ): void {
   confirmations.forEach(({ item, condition }) => {
-    writer.update(doc(db, "transactions", item.id), {
-      status: "completed",
-      finalCondition: condition,
-      fulfilledAt: serverTimestamp(),
-      fulfilledBy: actor.staffName,
-      fulfilledByStaffId: actor.staffId,
-      fulfilledByStaffName: actor.staffName,
-      ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
-    });
+    writer.update(
+      doc(db, "transactions", item.id),
+      buildReturnTransactionCompletionPatch(condition, actor),
+    );
   });
+}
+
+function buildReturnTransactionCompletionPatch(
+  condition: ReturnCondition,
+  actor: OperationActor,
+): ReturnTransactionCompletionPatch {
+  return {
+    status: "completed",
+    finalCondition: condition,
+    fulfilledAt: serverTimestamp(),
+    fulfilledBy: actor.staffName,
+    fulfilledByStaffId: actor.staffId,
+    fulfilledByStaffName: actor.staffName,
+    ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
+  };
 }

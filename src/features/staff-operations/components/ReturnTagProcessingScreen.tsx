@@ -18,8 +18,8 @@ export default function ReturnTagProcessingScreen({
     returnTagSelections,
     setReturnTagSelections,
     setSelectedReturnGroup,
-    returnTagProcessingSubmitting,
-    processReturnTags,
+    returnConfirmationSubmitting,
+    confirmSelectedReturnRequests,
   } = returnTagProcessing;
 
   const selectedCount = Object.values(returnTagSelections).filter((selection) => selection.selected).length;
@@ -77,11 +77,11 @@ export default function ReturnTagProcessingScreen({
 
           {selectedCount > 0 && (
             <button
-              onClick={processReturnTags}
-              disabled={returnTagProcessingSubmitting}
-              style={{ width: "100%", padding: 16, borderRadius: 16, border: "none", background: "#10b981", color: "#fff", fontSize: 16, fontWeight: 800, cursor: returnTagProcessingSubmitting ? "wait" : "pointer", display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 8, boxShadow: "0 8px 16px rgba(16,185,129,0.25)" }}
+              onClick={confirmSelectedReturnRequests}
+              disabled={returnConfirmationSubmitting}
+              style={{ width: "100%", padding: 16, borderRadius: 16, border: "none", background: "#10b981", color: "#fff", fontSize: 16, fontWeight: 800, cursor: returnConfirmationSubmitting ? "wait" : "pointer", display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 8, boxShadow: "0 8px 16px rgba(16,185,129,0.25)" }}
             >
-              {returnTagProcessingSubmitting ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={18} />}
+              {returnConfirmationSubmitting ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={18} />}
               {selectedCount}件の返却タグを処理する
             </button>
           )}
