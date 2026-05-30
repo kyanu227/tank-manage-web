@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { returnTagToStoredLogNote, storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
 import { updateLogNote } from "@/lib/firebase/tank-tag-service";
@@ -44,9 +45,10 @@ export default function InHousePage() {
     const list = allTanks
       .filter((t) => t.status === STATUS.IN_HOUSE)
       .map((t) => {
-        const baseTag: TagType =
-          t.logNote === "[TAG:unused]" ? "unused" :
-          t.logNote === "[TAG:uncharged]" ? "uncharged" : "normal";
+        const baseReturnTag = storedMarkerToReturnTag(t.logNote);
+        const baseTag: TagType = baseReturnTag === RETURN_TAG.KEEP
+          ? RETURN_TAG.NORMAL
+          : baseReturnTag;
         return {
           id: t.id,
           status: t.status,
@@ -63,10 +65,7 @@ export default function InHousePage() {
   const updateTag = async (tankId: string, newTag: TagType) => {
     setTagOverrides((prev) => ({ ...prev, [tankId]: newTag }));
     try {
-      let logNote = "";
-      if (newTag === "unused") logNote = "[TAG:unused]";
-      if (newTag === "uncharged") logNote = "[TAG:uncharged]";
-      await updateLogNote(tankId, logNote);
+      await updateLogNote(tankId, returnTagToStoredLogNote(newTag));
     } catch (e) {
       console.error("Failed to update tag", e);
       // 失敗時はオーバーライドを取り消して最新状態を取り直す

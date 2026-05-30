@@ -4,6 +4,7 @@ import { useCallback, useMemo, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { updateLogNote } from "@/lib/firebase/tank-tag-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
+import { returnTagToStoredLogNote, storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { RETURN_TAG, STATUS, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
 import type { BulkReturnDatePool, BulkReturnGroupMeta, BulkTagType, BulkTankDoc } from "../types";
@@ -163,10 +164,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
         const groupKey = `${pool}::${loc}`;
         const sortMillis = toMillis(tank.updatedAt);
         if (!groups[groupKey]) groups[groupKey] = [];
-        let tag: BulkTagType = "normal";
-        if (tank.logNote === "[TAG:unused]") tag = "unused";
-        if (tank.logNote === "[TAG:uncharged]") tag = "uncharged";
-        if (tank.status === STATUS.LENT && tank.logNote === "[TAG:keep]") tag = "keep";
+        const tag = storedMarkerToReturnTag(tank.logNote, { allowKeep: tank.status === STATUS.LENT });
         groups[groupKey].push({ ...tank, tag } as unknown as BulkTankWithTag);
         const currentSortMillis = metas[groupKey]?.sortMillis ?? null;
         const mergedSortMillis = mergeSortMillis(pool, currentSortMillis, sortMillis);
@@ -204,14 +202,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       return g;
     });
     try {
-      let logNote = "";
-      if (newTag === RETURN_TAG.UNUSED) logNote = "[TAG:unused]";
-      if (newTag === RETURN_TAG.UNCHARGED) logNote = "[TAG:uncharged]";
-      if (newTag === RETURN_TAG.KEEP) {
-        await updateLogNote(tankId, "");
-        return;
-      }
-      await updateLogNote(tankId, logNote);
+      await updateLogNote(tankId, returnTagToStoredLogNote(newTag));
     } catch (e) {
       console.error("Failed to update tag", e);
       fetchBulkTanks();

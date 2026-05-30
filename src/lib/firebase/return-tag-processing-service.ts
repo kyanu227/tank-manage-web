@@ -6,13 +6,13 @@ import type {
   OperationContext,
   ReturnCondition,
 } from "@/lib/operation-context";
+import { conditionToReturnTag, returnTagToReturnCondition } from "@/lib/return-tag-rules";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import {
   ACTION,
   RETURN_TAG,
   resolveReturnAction,
-  type ReturnTag,
   type TankAction,
 } from "@/lib/tank-rules";
 
@@ -61,21 +61,19 @@ export async function processReturnTags(input: {
     }
     const tankId = tankIdResult.canonicalTankId;
     const appData = selections[item.id];
-    const condition = appData?.condition ?? item.condition;
-    const tag: ReturnTag =
-      condition === "unused" ? RETURN_TAG.UNUSED
-        : condition === "uncharged" ? RETURN_TAG.UNCHARGED
-          : RETURN_TAG.NORMAL;
+    const tag = conditionToReturnTag(appData?.condition ?? item.condition);
+    const condition = returnTagToReturnCondition(tag);
     const note = `[返却タグ処理] 顧客: ${group.customerName} (タグ:${condition})`;
     const tank = await tanksRepository.getTank(tankId);
     if (!tank) {
       throw new Error(`[${tankId}] タンクが存在しません`);
     }
     const currentStatus = tank.status ?? "";
-    const transitionAction: TankAction = condition === "keep"
+    const isKeep = tag === RETURN_TAG.KEEP;
+    const transitionAction: TankAction = isKeep
       ? ACTION.CARRY_OVER
       : resolveReturnAction(tag, currentStatus);
-    const location = condition === "keep"
+    const location = isKeep
       ? tank.location || group.customerName
       : "倉庫";
     return { item, tankId, condition, note, currentStatus, transitionAction, location };

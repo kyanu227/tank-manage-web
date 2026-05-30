@@ -5,11 +5,11 @@ import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
-import type {
-  CustomerSnapshot,
-  OperationContext,
-  ReturnCondition,
-} from "@/lib/operation-context";
+import type { CustomerSnapshot, OperationContext } from "@/lib/operation-context";
+import {
+  returnTagToReturnCondition,
+  returnTagToStoredLogNote,
+} from "@/lib/return-tag-rules";
 import {
   RETURN_TAG,
   resolveReturnAction,
@@ -207,12 +207,10 @@ export function useManualTankOperation({
             if (tag === RETURN_TAG.KEEP) {
               finalLocation = currentTank?.location || "不明";
               finalLogNote = "持ち越し";
-            } else if (tag === RETURN_TAG.UNUSED) {
-              finalTankNote = "[TAG:unused]";
-              finalLogNote = finalTankNote;
-            } else if (tag === RETURN_TAG.UNCHARGED) {
-              finalTankNote = "[TAG:uncharged]";
-              finalLogNote = finalTankNote;
+            } else {
+              const storedLogNote = returnTagToStoredLogNote(tag);
+              finalTankNote = storedLogNote;
+              finalLogNote = storedLogNote;
             }
           }
 
@@ -223,7 +221,7 @@ export function useManualTankOperation({
             context: mode === "return"
               ? {
                   ...baseContext,
-                  returnCondition: returnConditionFromTag(tag),
+                  returnCondition: returnTagToReturnCondition(tag),
                 }
               : baseContext,
             location: finalLocation,
@@ -263,18 +261,4 @@ export function useManualTankOperation({
     handleSubmit,
     reset,
   };
-}
-
-function returnConditionFromTag(tag: ReturnTag): ReturnCondition {
-  switch (tag) {
-    case RETURN_TAG.UNUSED:
-      return "unused";
-    case RETURN_TAG.UNCHARGED:
-      return "uncharged";
-    case RETURN_TAG.KEEP:
-      return "keep";
-    case RETURN_TAG.NORMAL:
-    default:
-      return "normal";
-  }
 }
