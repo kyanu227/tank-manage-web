@@ -3,10 +3,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
-import { returnTagToStoredLogNote, storedMarkerToReturnTag } from "@/lib/return-tag-rules";
+import { storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
-import { updateLogNote } from "@/lib/firebase/tank-tag-service";
+import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
 import TankIdInput from "@/components/TankIdInput";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
@@ -65,7 +65,7 @@ export default function InHousePage() {
   const updateTag = async (tankId: string, newTag: TagType) => {
     setTagOverrides((prev) => ({ ...prev, [tankId]: newTag }));
     try {
-      await updateLogNote(tankId, returnTagToStoredLogNote(newTag));
+      await updateTankReturnTagMarker(tankId, newTag);
     } catch (e) {
       console.error("Failed to update tag", e);
       // 失敗時はオーバーライドを取り消して最新状態を取り直す

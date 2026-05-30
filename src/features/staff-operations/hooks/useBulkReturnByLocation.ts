@@ -2,9 +2,9 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
-import { updateLogNote } from "@/lib/firebase/tank-tag-service";
+import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
-import { returnTagToStoredLogNote, storedMarkerToReturnTag } from "@/lib/return-tag-rules";
+import { storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { RETURN_TAG, STATUS, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
 import type { BulkReturnDatePool, BulkReturnGroupMeta, BulkTagType, BulkTankDoc } from "../types";
@@ -202,7 +202,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       return g;
     });
     try {
-      await updateLogNote(tankId, returnTagToStoredLogNote(newTag));
+      await updateTankReturnTagMarker(tankId, newTag);
     } catch (e) {
       console.error("Failed to update tag", e);
       fetchBulkTanks();
@@ -252,8 +252,8 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
         : `${groupLabel} の一括返却が完了しました。`;
       alert(completeMessage);
       fetchBulkTanks();
-    } catch (e: any) {
-      alert("エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("エラー: " + errorMessage(e));
     } finally {
       setReturning(prev => ({ ...prev, [groupKey]: false }));
     }
@@ -276,4 +276,8 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     updateTag,
     handleBulkReturnForGroup,
   };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
