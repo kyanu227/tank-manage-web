@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type { OperationActor } from "@/lib/operation-context";
 
 /**
@@ -13,29 +13,23 @@ export interface StaffSession {
   email?: string;
   role?: string;
   rank?: string;
-  [key: string]: any;
 }
 
 const STORAGE_KEY = "staffSession";
 const FALLBACK_NAME = "スタッフ";
+let cachedRawSession: string | null | undefined;
+let cachedSession: StaffSession | null = null;
 
 /**
  * localStorage からスタッフセッションを読み取るReactフック。
  * SSRおよび初回マウント前は null、マウント後にセッション情報が入る。
  */
 export function useStaffSession(): StaffSession | null {
-  const [session, setSession] = useState<StaffSession | null>(null);
-
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem(STORAGE_KEY);
-      if (raw) setSession(JSON.parse(raw) as StaffSession);
-    } catch {
-      setSession(null);
-    }
-  }, []);
-
-  return session;
+  return useSyncExternalStore(
+    subscribeStaffSession,
+    getStaffSessionSnapshot,
+    getServerStaffSessionSnapshot,
+  );
 }
 
 export function staffSessionToOperationActor(
@@ -64,14 +58,7 @@ export function useStaffIdentity(): OperationActor | null {
 }
 
 export function getStaffIdentity(): OperationActor | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return staffSessionToOperationActor(JSON.parse(raw) as StaffSession);
-  } catch {
-    return null;
-  }
+  return staffSessionToOperationActor(getStaffSessionSnapshot());
 }
 
 export function requireStaffIdentity(): OperationActor {
@@ -88,15 +75,73 @@ export function requireStaffIdentity(): OperationActor {
  * セッション未取得/破損時はフォールバック名 "スタッフ" を返す。
  */
 export function getStaffName(): string {
-  if (typeof window === "undefined") return FALLBACK_NAME;
+  return getStaffSessionSnapshot()?.name ?? FALLBACK_NAME;
+}
+
+function subscribeStaffSession(onStoreChange: () => void): () => void {
+  if (typeof window === "undefined") return () => {};
+
+  const handleChange = () => {
+    cachedRawSession = undefined;
+    onStoreChange();
+  };
+
+  window.addEventListener("staffLogin", handleChange);
+  window.addEventListener("storage", handleChange);
+  return () => {
+    window.removeEventListener("staffLogin", handleChange);
+    window.removeEventListener("storage", handleChange);
+  };
+}
+
+function getServerStaffSessionSnapshot(): StaffSession | null {
+  return null;
+}
+
+function getStaffSessionSnapshot(): StaffSession | null {
+  if (typeof window === "undefined") return null;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw === cachedRawSession) return cachedSession;
+  cachedRawSession = raw;
+  cachedSession = parseStaffSession(raw);
+  return cachedSession;
+}
+
+function parseStaffSession(raw: string | null): StaffSession | null {
+  if (!raw) return null;
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return FALLBACK_NAME;
-    const session = JSON.parse(raw) as StaffSession;
-    return session.name || FALLBACK_NAME;
+    return normalizeStaffSession(JSON.parse(raw) as unknown);
   } catch {
-    return FALLBACK_NAME;
+    return null;
   }
+}
+
+function normalizeStaffSession(value: unknown): StaffSession | null {
+  const record = objectRecord(value);
+  if (!record) return null;
+
+  const name = nonEmptyString(record.name);
+  if (!name) return null;
+
+  const id = nonEmptyString(record.id);
+  const email = nonEmptyString(record.email);
+  const role = nonEmptyString(record.role);
+  const rank = nonEmptyString(record.rank);
+
+  return {
+    name,
+    ...(id ? { id } : {}),
+    ...(email ? { email } : {}),
+    ...(role ? { role } : {}),
+    ...(rank ? { rank } : {}),
+  };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
 }
 
 function nonEmptyString(value: unknown): string | undefined {
