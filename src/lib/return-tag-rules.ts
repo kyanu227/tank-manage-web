@@ -1,14 +1,21 @@
 import type { ReturnCondition } from "./operation-context";
 import { RETURN_TAG, type ReturnTag } from "./tank-rules";
 
+export type { ReturnTag } from "./tank-rules";
+
 export const STORED_RETURN_TAG_MARKER = {
   UNUSED: "[TAG:unused]",
   UNCHARGED: "[TAG:uncharged]",
   KEEP: "[TAG:keep]",
 } as const;
 
-export type StoredReturnTagMarker =
-  (typeof STORED_RETURN_TAG_MARKER)[keyof typeof STORED_RETURN_TAG_MARKER];
+export type WritableReturnTagMarker =
+  | typeof STORED_RETURN_TAG_MARKER.UNUSED
+  | typeof STORED_RETURN_TAG_MARKER.UNCHARGED;
+
+export type ReadableReturnTagMarker =
+  | WritableReturnTagMarker
+  | typeof STORED_RETURN_TAG_MARKER.KEEP;
 
 type StoredMarkerReadOptions = {
   allowKeep?: boolean;
@@ -39,7 +46,7 @@ export function returnTagToReturnCondition(tag: ReturnTag): ReturnCondition {
   return normalizeReturnTag(tag);
 }
 
-export function returnTagToStoredMarker(tag: ReturnTag): StoredReturnTagMarker | null {
+export function returnTagToStoredMarker(tag: ReturnTag): WritableReturnTagMarker | null {
   switch (tag) {
     case RETURN_TAG.UNUSED:
       return STORED_RETURN_TAG_MARKER.UNUSED;
@@ -51,6 +58,7 @@ export function returnTagToStoredMarker(tag: ReturnTag): StoredReturnTagMarker |
 }
 
 export function returnTagToStoredLogNote(tag: ReturnTag): string {
+  // KEEP は処理中の選択状態。現行保存形式では normal と同じく空文字にする。
   return returnTagToStoredMarker(tag) ?? "";
 }
 

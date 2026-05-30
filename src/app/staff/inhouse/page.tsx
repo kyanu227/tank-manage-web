@@ -12,7 +12,7 @@ import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
-type TagType = "normal" | "unused" | "uncharged";
+type TagType = Exclude<ReturnTag, typeof RETURN_TAG.KEEP>;
 
 const ACCENT = "#6366f1";
 

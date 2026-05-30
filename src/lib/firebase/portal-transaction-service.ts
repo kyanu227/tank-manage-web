@@ -4,9 +4,10 @@ import type {
   PortalIdentity,
 } from "@/lib/portal";
 import { transactionsRepository } from "@/lib/firebase/repositories";
+import type { ReturnTag } from "@/lib/return-tag-rules";
 
 export type PortalDeliveryType = "pickup" | "delivery";
-export type PortalReturnCondition = "normal" | "unused" | "uncharged" | "keep";
+export type PortalReturnCondition = ReturnTag;
 export type PortalReturnSource = "customer_portal" | "auto_schedule";
 export type PortalUnfilledSource = "customer_app" | "customer_portal";
 

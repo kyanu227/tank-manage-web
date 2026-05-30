@@ -2,8 +2,9 @@
 
 import { AlertCircle, Clock, Droplets, type LucideIcon } from "lucide-react";
 import { useRef } from "react";
+import type { ReturnTag } from "@/lib/return-tag-rules";
 
-export type ReturnTagValue = "normal" | "unused" | "uncharged" | "keep";
+export type ReturnTagValue = ReturnTag;
 
 export interface ReturnTagOption {
   value: Exclude<ReturnTagValue, "normal">;

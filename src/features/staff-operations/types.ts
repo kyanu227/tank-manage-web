@@ -1,12 +1,13 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
+import type { ReturnTag } from "@/lib/return-tag-rules";
 import type { TankAction } from "@/lib/tank-rules";
 import type { TankDoc } from "@/lib/tank-types";
 
 export type OpMode = "lend" | "return" | "fill";
-export type TagType = "normal" | "unused" | "uncharged" | "keep";
-export type BulkTagType = "normal" | "unused" | "uncharged" | "keep";
+export type TagType = ReturnTag;
+export type BulkTagType = ReturnTag;
 export type BulkReturnDatePool = "today_lent" | "past_lent" | "unknown_lent" | "long_term";
 export type OpStyle = "manual" | "order";
 
@@ -25,7 +26,7 @@ export interface ScannedTank {
   error?: string;
 }
 
-export type Condition = "normal" | "unused" | "uncharged" | "keep";
+export type Condition = ReturnTag;
 
 export interface PendingReturn {
   id: string;
