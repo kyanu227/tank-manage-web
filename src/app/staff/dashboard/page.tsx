@@ -44,13 +44,7 @@ import {
   STATUS_COLORS,
   type TankAction,
 } from "@/lib/tank-rules";
-import {
-  isFillLegacyAction,
-  isInHouseLegacyAction,
-  isLendLegacyAction,
-  isReturnLegacyAction,
-  tankActionToCode,
-} from "@/lib/tank-action-status-codes";
+import { getDashboardActionBadgeTone } from "@/lib/tank-action-status-display";
 
 type LogSortOrder = "desc" | "asc";
 
@@ -105,7 +99,6 @@ type BulkLocationOption = {
   customer: CustomerSnapshot | null;
 };
 type BulkLocationMode = "lend" | "inhouse" | null;
-type ActionTone = "danger" | "return" | "lend" | "fill" | "inhouse" | "maintenance" | "default";
 
 const LIMIT_MS = 72 * 60 * 60 * 1000;
 const ACTION_OPTIONS = Object.values(ACTION) as TankAction[];
@@ -1530,52 +1523,12 @@ function statusColor(status?: LogStatus): string {
   return "#94a3b8";
 }
 
-const ACTION_TONE_BG: Record<ActionTone, string> = {
-  danger: "#fef2f2",
-  return: "#eff6ff",
-  lend: "#eef2ff",
-  fill: "#ecfdf5",
-  inhouse: "#fffbeb",
-  maintenance: "#f5f3ff",
-  default: "#f1f5f9",
-};
-
-const ACTION_TONE_FG: Record<ActionTone, string> = {
-  danger: "#b91c1c",
-  return: "#1d4ed8",
-  lend: "#4338ca",
-  fill: "#047857",
-  inhouse: "#b45309",
-  maintenance: "#6d28d9",
-  default: "#475569",
-};
-
 function actionBg(action?: string): string {
-  return ACTION_TONE_BG[getActionTone(action)];
+  return getDashboardActionBadgeTone(action).background;
 }
 
 function actionFg(action?: string): string {
-  return ACTION_TONE_FG[getActionTone(action)];
-}
-
-function getActionTone(action?: string): ActionTone {
-  if (!action) return "default";
-
-  const code = tankActionToCode(action);
-  if (code === "damage_report" || code === "dispose") return "danger";
-  if (isReturnLegacyAction(action)) return "return";
-  if (isLendLegacyAction(action)) return "lend";
-  if (isFillLegacyAction(action)) return "fill";
-  if (isInHouseLegacyAction(action)) return "inhouse";
-  if (code === "inspection" || code === "repaired") return "maintenance";
-
-  if (action.includes("破損") || action.includes("破棄")) return "danger";
-  if (action.includes("返却")) return "return";
-  if (action.includes("貸出")) return "lend";
-  if (action.includes("充填")) return "fill";
-  if (action.includes("自社")) return "inhouse";
-  if (action.includes("耐圧") || action.includes("修理")) return "maintenance";
-  return "default";
+  return getDashboardActionBadgeTone(action).color;
 }
 
 function errorMessage(error: unknown): string {

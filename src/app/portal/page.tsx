@@ -5,7 +5,7 @@ import { Package, Clock, ShoppingCart, RotateCcw, AlertTriangle } from "lucide-r
 import Link from "next/link";
 import { logsRepository, tanksRepository } from "@/lib/firebase/repositories";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
-import { tankActionToCode } from "@/lib/tank-action-status-codes";
+import { getPortalHistoryActionBadgeTone } from "@/lib/tank-action-status-display";
 import { STATUS } from "@/lib/tank-rules";
 
 type PortalLogTimestamp = { toDate?: () => Date } | null | undefined;
@@ -16,11 +16,6 @@ interface LogEntry {
   tankId: string;
   staffName?: string;
 }
-
-const PORTAL_HISTORY_ACTION_BADGE = {
-  lend: { color: "#6366f1", background: "#eef2ff" },
-  default: { color: "#ef4444", background: "#fee2e2" },
-} as const;
 
 export default function PortalPage() {
   const [rentedTanks, setRentedTanks] = useState<string[]>([]);
@@ -179,7 +174,7 @@ export default function PortalPage() {
             <p style={{ textAlign: "center", padding: "3dvh 0", color: "#cbd5e1", fontSize: 13 }}>履歴がありません</p>
           ) : (
             logs.map((log, i) => {
-              const badgeStyle = getPortalHistoryActionBadgeStyle(log.action);
+              const badgeStyle = getPortalHistoryActionBadgeTone(log.action);
               return (
                 <div key={i} style={{
                   display: "flex", alignItems: "center", gap: "2.5vw",
@@ -208,11 +203,4 @@ export default function PortalPage() {
 
     </div>
   );
-}
-
-function getPortalHistoryActionBadgeStyle(action: string) {
-  const code = tankActionToCode(action);
-  return code === "lend" && action === "貸出"
-    ? PORTAL_HISTORY_ACTION_BADGE.lend
-    : PORTAL_HISTORY_ACTION_BADGE.default;
 }
