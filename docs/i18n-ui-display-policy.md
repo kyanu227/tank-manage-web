@@ -148,25 +148,40 @@ const actionLabels = {
 ### Phase 14: Locale Selection Design
 
 - locale をどこで持つか決める
-  - browser setting
-  - user setting
-  - staff setting
-  - simple localStorage
+- browser setting / localStorage / account setting / React context の候補を比較する
 - 最初は `ja` default にする
-- まだ全画面に広げない
+- この Phase では実装しない
 
-### Phase 15: One Low-Risk UI Label Application
+### Phase 15: Label Helper Application With Default Ja
 
-- staff dashboard または portal history の action label 表示だけを label helper 経由にする
-- default は `ja`
+- 1つの低リスク画面で label helper を使う
+- locale はまだ固定 default `ja`
 - 表示結果は変えない
 - Firestore 保存値、query、集計には触らない
 
-### Phase 16: Minimum English Operation UI
+### Phase 16: Local Locale State Helper
+
+- localStorage ベースの locale helper を追加する
+- `DEFAULT_LOCALE` は `ja`
+- SSR / browser 外で落ちないようにする
+- まだ全画面には広げない
+
+### Phase 17: Locale Selector UI
+
+- 低リスク画面に `ja` / `en` 切り替え UI を追加する
+- まず staff または portal の一部だけで試す
+- 英語表示対象は action / status label に限定する
+
+### Phase 18: Minimum English Operation UI
 
 - 貸出 / 返却 / 充填 / 自社使用 の操作ボタンや選択肢を locale 対応する
 - 業務ロジックは `TankActionCode` / legacy mapping helper を通す
 - Firestore 保存値はまだ変更しない
+
+### Later Phase: Account-Level Locale
+
+- staff / customer user settings に locale を保存するか検討する
+- Firestore schema / rules / settings UI が必要なため後回しにする
 
 ### Later Phase: Firestore 保存値 code 化検討
 
@@ -180,31 +195,140 @@ const actionLabels = {
 
 今すぐ行わない。
 
-## 7. Do Not Touch Yet
+## 7. Locale Selection Policy
+
+locale selection は、UI label を `ja` / `en` のどちらで表示するかを決めるための UI 状態である。Firestore 保存値、Firestore query、状態遷移、集計、請求、売上、スタッフ実績とは分離する。
+
+Phase 13 時点の型と default は以下を前提にする。
+
+```ts
+type Locale = "ja" | "en";
+const DEFAULT_LOCALE = "ja";
+```
+
+default は `ja` とする。現在の既存 UI、業務運用、Firestore legacy 保存値は日本語中心であり、いきなり英語 default にすると既存確認作業が難しくなるため。英語対応は段階導入し、最初は表示結果を変えない。
+
+### Storage Options
+
+#### A案: Browser Setting
+
+`navigator.language` などを見て初期 locale を決める。
+
+メリット:
+
+- 追加保存が不要
+- 顧客向け portal では自然に見える
+
+リスク:
+
+- スタッフ業務画面で意図せず英語になる可能性がある
+- テストや運用確認が不安定になる
+- 日本語 default 方針と衝突しやすい
+
+#### B案: localStorage
+
+最初は localStorage に locale を保存する。
+
+メリット:
+
+- Firestore schema 変更が不要
+- 実装が小さい
+- staff / portal / admin を横断しやすい
+- 実運用前の段階的導入に向く
+
+リスク:
+
+- 端末ごとの設定になる
+- ユーザーアカウント単位の設定ではない
+- SSR / browser 外で localStorage に触らない注意が必要
+
+#### C案: Staff / Customer User Setting
+
+staff や customer user の document に locale を保存する。
+
+メリット:
+
+- アカウントごとに安定する
+- 複数端末で共有できる
+
+リスク:
+
+- Firestore schema 変更が必要
+- rules / settings UI / default 処理が必要
+- 今の段階では早い
+
+#### D案: React Context Only
+
+アプリ起動中だけ React context で locale を持つ。
+
+メリット:
+
+- 実装が小さい
+- Firestore が不要
+
+リスク:
+
+- reload で戻る
+- localStorage なしでは実用性が低い
+- App Router / client 境界の設計が必要
+
+### Recommended Initial Approach
+
+将来の最小実装候補は B案の localStorage とする。ただし Phase 14 では実装しない。
+
+- 初期 default は `ja`
+- 最初は locale selector UI を作らない
+- label helper 適用時も locale 未指定で `ja` を使い、表示結果を変えない
+- locale 切り替え UI は、低リスク画面で label 適用が成功してから入れる
+- Firestore に locale field を追加するのは後回しにする
+
+### Scope By Area
+
+staff では、staff dashboard の action label 表示と、manual operation の基本操作 (`lend` / `return` / `fill` / `inhouse_use`) を最初の候補にする。ただし実装は Phase 15 以降。
+
+portal では、portal history の action label 表示と、portal return / order / unfilled の基本案内文を候補にする。ただし portal の tanks query は触らない。
+
+admin は初期英語対応から外す。billing、sales、staff analytics、state diagram、revision / void、settings は集計・管理・状態遷移に近く、影響範囲が大きい。
+
+## 8. Do Not Touch Yet
 
 - Firestore 保存値
 - Firestore query
 - `OP_RULES`
 - `tank-operation.ts`
+- `tanksRepository.getTanks({ status })`
+- portal の `STATUS.LENT` / `location` query
 - billing / sales / staff analytics
+- staff mypage 集計
 - `tank-trace.ts`
 - `tanks.location`
 - `tanks.customerId`
 - return flow
+- procurement
+- supply-order
 - payout / collaborators
 
-## 8. Risks
+## 9. Risks
 
 - UI label と Firestore 保存値を混ぜると、query や集計が壊れる。
 - `ACTION.LEND` などの日本語保存値を直接英語表示に置換すると、ログ、請求、売上、スタッフ実績が壊れる。
 - status は query / filter / write に近いため、action より慎重に扱う必要がある。
 - portal の `STATUS.LENT + location == customerName` は多言語対応とは別問題。
 - 早すぎる i18n ライブラリ導入は、現状の構造整理を複雑にする可能性がある。
+- browser setting を自動採用すると、業務画面が意図せず英語になる可能性がある。
+- locale を Firestore に保存すると、schema / rules / settings UI が増える。
+- locale selector UI を早く入れすぎると、未対応画面との表示差が目立つ。
+- 多言語 UI 対応と Firestore 保存値 code 化を同時にやると影響範囲が大きすぎる。
 
-## 9. Decision
+## 10. Decision
 
 - Phase 12 は docs-only とする。
 - Phase 13 は label dictionary helper only とする。
+- Phase 14 は locale selection design docs のみとする。
+- 初期 default locale は `ja` とする。
+- 最初の実装では label helper を default `ja` で適用し、表示結果を変えない。
+- locale 保存は localStorage を将来の最小候補とする。ただし実装は後続 Phase に回す。
+- account-level locale は後回しにする。
 - Firestore 保存値 code 化はまだしない。
 - 多言語 UI の最初の対象は、基本操作と表示専用 label に限定する。
 - status query / filter / write 周辺は後回しにする。
