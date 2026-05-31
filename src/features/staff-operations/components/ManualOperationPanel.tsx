@@ -160,7 +160,7 @@ export default function ManualOperationPanel({
                             color: getReturnTagStyle(item.tag).color,
                           }}
                         >
-                          {getReturnTagLabel(item.tag)}
+                          {getReturnTagLabel(item.tag, locale)}
                         </span>
                       )}
                     </div>

@@ -4,6 +4,8 @@ import { useMemo } from "react";
 import { ArrowDownToLine, CheckCircle2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { useStaffLocale } from "@/hooks/useStaffSession";
+import type { Locale } from "@/lib/locale";
+import { getReturnTagLabel } from "@/lib/return-tag-labels";
 import { RETURN_TAG, STATUS } from "@/lib/tank-rules";
 import type { UseBulkReturnByLocationResult } from "../hooks/useBulkReturnByLocation";
 import type { BulkReturnDatePool } from "../types";
@@ -37,6 +39,56 @@ const SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customer
     background: "#fff1f2",
   },
 };
+
+const SEGMENT_LABELS = {
+  normal: {
+    ja: { label: "通常返却", shortLabel: "通常" },
+    en: { label: "Normal returns", shortLabel: "Normal" },
+  },
+  customer_requests: {
+    ja: { label: "返却タグ処理待ち", shortLabel: "タグ待ち" },
+    en: { label: "Pending return tags", shortLabel: "Tags" },
+  },
+  long_term: {
+    ja: { label: "長期貸出", shortLabel: "長期" },
+    en: { label: "Long-term rentals", shortLabel: "Long-term" },
+  },
+} satisfies Record<ReturnSegmentKey, Record<Locale, Pick<ReturnSegmentStat, "label" | "shortLabel">>>;
+
+const BULK_RETURN_TEXT = {
+  allRentedTanks: {
+    ja: "全貸出タンク",
+    en: "All rented tanks",
+  },
+  noRentedTanks: {
+    ja: "貸出中のタンクはありません",
+    en: "No rented tanks",
+  },
+  noLocationsInSection: {
+    ja: "この区分の貸出先はありません",
+    en: "No customers in this section",
+  },
+  customerUnit: {
+    ja: "顧客",
+    en: "customers",
+  },
+  tankUnit: {
+    ja: "本",
+    en: "tanks",
+  },
+  tagUnit: {
+    ja: "タグ",
+    en: "tagged",
+  },
+  longTermStatus: {
+    ja: "長期貸出",
+    en: "long-term",
+  },
+  lentStatus: {
+    ja: "貸出中",
+    en: "rented",
+  },
+} satisfies Record<string, Record<Locale, string>>;
 
 const DATE_POOL_SECTIONS: Array<{
   pool: BulkReturnDatePool;
@@ -85,6 +137,87 @@ const DATE_POOL_SECTIONS: Array<{
   },
 ];
 
+const DATE_POOL_LABELS = {
+  today_lent: {
+    ja: {
+      label: "本日の貸出分",
+      description: "JST 0:00〜23:59 の貸出中",
+    },
+    en: {
+      label: "Today's rentals",
+      description: "Rented from 0:00 to 23:59 JST",
+    },
+  },
+  past_lent: {
+    ja: {
+      label: "前日以前の貸出中",
+      description: "今日の通常返却とは別枠",
+    },
+    en: {
+      label: "Earlier rentals",
+      description: "Separate from today's normal returns",
+    },
+  },
+  unknown_lent: {
+    ja: {
+      label: "日付不明",
+      description: "updatedAt がない貸出中",
+    },
+    en: {
+      label: "Unknown date",
+      description: "Rented tanks without updatedAt",
+    },
+  },
+  long_term: {
+    ja: {
+      label: "長期貸出",
+      description: "未返却タンクのみ",
+    },
+    en: {
+      label: "Long-term rentals",
+      description: "Unreturned tanks only",
+    },
+  },
+} satisfies Record<BulkReturnDatePool, Record<Locale, { label: string; description: string }>>;
+
+function getSegmentConfig(
+  segment: ReturnSegmentKey,
+  locale: Locale,
+): Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount"> {
+  return {
+    ...SEGMENT_CONFIG[segment],
+    ...SEGMENT_LABELS[segment][locale],
+  };
+}
+
+function formatBulkReturnCount(
+  customerCount: number,
+  tankCount: number,
+  locale: Locale,
+): string {
+  const customers = locale === "ja"
+    ? `${customerCount}${BULK_RETURN_TEXT.customerUnit[locale]}`
+    : `${customerCount} ${BULK_RETURN_TEXT.customerUnit[locale]}`;
+  const tanks = locale === "ja"
+    ? `${tankCount}${BULK_RETURN_TEXT.tankUnit[locale]}`
+    : `${tankCount} ${BULK_RETURN_TEXT.tankUnit[locale]}`;
+  return `${customers} / ${tanks}`;
+}
+
+function formatTaggedTankCount(count: number, locale: Locale): string {
+  if (locale === "ja") {
+    return `${BULK_RETURN_TEXT.tagUnit[locale]}${count}${BULK_RETURN_TEXT.tankUnit[locale]}`;
+  }
+  return `${count} ${BULK_RETURN_TEXT.tagUnit[locale]} ${BULK_RETURN_TEXT.tankUnit[locale]}`;
+}
+
+function formatTankCountWithStatus(count: number, statusLabel: string, locale: Locale): string {
+  const tankCount = locale === "ja"
+    ? `${count}${BULK_RETURN_TEXT.tankUnit[locale]}`
+    : `${count} ${BULK_RETURN_TEXT.tankUnit[locale]}`;
+  return `${tankCount} ${statusLabel}`;
+}
+
 function getPoolsForSegment(activeSegment: ReturnSegmentKey | null): BulkReturnDatePool[] {
   if (activeSegment === "long_term") return ["long_term"];
   if (activeSegment === "normal") return ["today_lent", "past_lent", "unknown_lent"];
@@ -114,17 +247,18 @@ export default function BulkReturnByLocationPanel({
       .filter((section) => visiblePoolKeys.includes(section.pool))
       .map((section) => ({
         ...section,
+        ...DATE_POOL_LABELS[section.pool][staffLocale],
         groupKeys: groupKeys.filter((groupKey) => groupMeta[groupKey]?.pool === section.pool),
       }))
       .filter((section) => section.groupKeys.length > 0)
-  ), [groupKeys, groupMeta, visiblePoolKeys]);
+  ), [groupKeys, groupMeta, staffLocale, visiblePoolKeys]);
   const visibleGroupKeys = useMemo(
     () => visibleSections.flatMap((section) => section.groupKeys),
     [visibleSections]
   );
 
   const activeSegmentStat = activeSegment
-    ? SEGMENT_CONFIG[activeSegment]
+    ? getSegmentConfig(activeSegment, staffLocale)
     : null;
   const totalStat = useMemo<ReturnSegmentStat>(() => {
     const locations = new Set<string>();
@@ -139,7 +273,7 @@ export default function BulkReturnByLocationPanel({
     });
     return {
       key: "normal",
-      label: "全貸出タンク",
+      label: BULK_RETURN_TEXT.allRentedTanks[staffLocale],
       shortLabel: "全体",
       color: "#64748b",
       background: "#f8fafc",
@@ -147,7 +281,7 @@ export default function BulkReturnByLocationPanel({
       tankCount,
       taggedCount,
     };
-  }, [groupMeta, groupedTanks, visibleGroupKeys]);
+  }, [groupMeta, groupedTanks, staffLocale, visibleGroupKeys]);
   const sectionStat: Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount"> & Pick<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount"> = activeSegmentStat
     ? {
       ...activeSegmentStat,
@@ -166,8 +300,8 @@ export default function BulkReturnByLocationPanel({
           {sectionStat.label}
         </h3>
         <span style={{ fontSize: 11, color: hasSectionItems ? sectionStat.color : "#94a3b8", fontWeight: 900, border: "1px solid #e2e8f0", borderRadius: 999, padding: "3px 8px", background: "#fff" }}>
-          {sectionStat.customerCount}顧客 / {sectionStat.tankCount}本
-          {sectionStat.taggedCount > 0 ? ` / タグ${sectionStat.taggedCount}本` : ""}
+          {formatBulkReturnCount(sectionStat.customerCount, sectionStat.tankCount, staffLocale)}
+          {sectionStat.taggedCount > 0 ? ` / ${formatTaggedTankCount(sectionStat.taggedCount, staffLocale)}` : ""}
         </span>
       </div>
 
@@ -178,13 +312,13 @@ export default function BulkReturnByLocationPanel({
       ) : groupKeys.length === 0 ? (
         <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: "24px 16px", textAlign: "center" }}>
           <CheckCircle2 size={24} color="#10b981" style={{ marginBottom: 8 }} />
-          <p style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", margin: 0 }}>貸出中のタンクはありません</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", margin: 0 }}>{BULK_RETURN_TEXT.noRentedTanks[staffLocale]}</p>
         </div>
       ) : visibleGroupKeys.length === 0 ? (
         <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: "24px 16px", textAlign: "center" }}>
           <CheckCircle2 size={24} color="#10b981" style={{ marginBottom: 8 }} />
           <p style={{ fontSize: 13, fontWeight: 600, color: "#64748b", margin: 0 }}>
-            この区分の貸出先はありません
+            {BULK_RETURN_TEXT.noLocationsInSection[staffLocale]}
           </p>
         </div>
       ) : (
@@ -208,7 +342,7 @@ export default function BulkReturnByLocationPanel({
                     </div>
                   </div>
                   <span style={{ flexShrink: 0, fontSize: 11, color: section.color, fontWeight: 900, border: `1px solid ${section.border}`, borderRadius: 999, padding: "4px 8px", background: section.background }}>
-                    {sectionLocationCount}顧客 / {sectionTankCount}本
+                    {formatBulkReturnCount(sectionLocationCount, sectionTankCount, staffLocale)}
                   </span>
                 </div>
 
@@ -222,7 +356,7 @@ export default function BulkReturnByLocationPanel({
                     const hasKeepTag = tanks.some((tank) => tank.tag === RETURN_TAG.KEEP);
                     const taggedPreview = tanks.filter((tank) => tank.tag !== "normal").slice(0, 3);
                     const hiddenTaggedCount = Math.max(0, tanks.filter((tank) => tank.tag !== "normal").length - taggedPreview.length);
-                    const statusLabel = meta?.pool === "long_term" ? "長期貸出" : "貸出中";
+                    const statusLabel = meta?.pool === "long_term" ? BULK_RETURN_TEXT.longTermStatus[staffLocale] : BULK_RETURN_TEXT.lentStatus[staffLocale];
 
                     return (
                       <div key={groupKey} style={{ background: "#fff", border: `1.5px solid ${section.pool === "today_lent" ? section.border : "#e8eaed"}`, borderRadius: 16, overflow: "hidden", boxShadow: section.pool === "today_lent" ? `0 8px 22px ${section.color}14` : "none" }}>
@@ -250,7 +384,7 @@ export default function BulkReturnByLocationPanel({
                                 </span>
                               </div>
                               <p style={{ fontSize: 13, color: "#64748b", margin: "4px 0 0 0", fontWeight: 600 }}>
-                                {tanks.length}本 {statusLabel}
+                                {formatTankCountWithStatus(tanks.length, statusLabel, staffLocale)}
                               </p>
                               {taggedPreview.length > 0 && (
                                 <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 6 }}>
@@ -266,7 +400,7 @@ export default function BulkReturnByLocationPanel({
                                         fontWeight: 900,
                                       }}
                                     >
-                                      {tank.id} {tank.tag === "uncharged" ? "未充填" : tank.tag === "keep" ? "持ち越し" : "未使用"}
+                                      {tank.id} {getReturnTagLabel(tank.tag, staffLocale)}
                                     </span>
                                   ))}
                                   {hiddenTaggedCount > 0 && (

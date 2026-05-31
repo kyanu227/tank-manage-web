@@ -3,6 +3,7 @@
 import { ArrowLeft, CheckCircle2, Loader2, ThumbsUp } from "lucide-react";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { useStaffLocale } from "@/hooks/useStaffSession";
+import type { Locale } from "@/lib/locale";
 import type { UseReturnTagProcessingResult } from "../hooks/useReturnTagProcessing";
 import type { Condition, ReturnGroup } from "../types";
 
@@ -10,6 +11,13 @@ interface ReturnTagProcessingScreenProps {
   selectedReturnGroup: ReturnGroup;
   returnTagProcessing: UseReturnTagProcessingResult;
 }
+
+const RETURN_TAG_PROCESSING_TEXT = {
+  title: {
+    ja: "返却タグ処理",
+    en: "Return tag processing",
+  },
+} satisfies Record<string, Record<Locale, string>>;
 
 export default function ReturnTagProcessingScreen({
   selectedReturnGroup,
@@ -39,7 +47,7 @@ export default function ReturnTagProcessingScreen({
         <div style={{ flex: 1 }}>
           <p style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", margin: 0 }}>{selectedReturnGroup.customerName}</p>
           <p style={{ fontSize: 11, color: "#94a3b8", margin: 0 }}>
-            返却タグ処理 — {selectedCount}/{selectedReturnGroup.items.length}
+            {RETURN_TAG_PROCESSING_TEXT.title[staffLocale]} — {selectedCount}/{selectedReturnGroup.items.length}
           </p>
         </div>
       </div>
