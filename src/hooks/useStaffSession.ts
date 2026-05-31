@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useSyncExternalStore } from "react";
+import { normalizeLocale, type Locale } from "@/lib/locale";
 import type { OperationActor } from "@/lib/operation-context";
 
 /**
@@ -13,6 +14,7 @@ export interface StaffSession {
   email?: string;
   role?: string;
   rank?: string;
+  locale: Locale;
 }
 
 const STORAGE_KEY = "staffSession";
@@ -57,8 +59,17 @@ export function useStaffIdentity(): OperationActor | null {
   return useMemo(() => staffSessionToOperationActor(session), [session]);
 }
 
+export function useStaffLocale(): Locale {
+  const session = useStaffSession();
+  return useMemo(() => normalizeLocale(session?.locale), [session?.locale]);
+}
+
 export function getStaffIdentity(): OperationActor | null {
   return staffSessionToOperationActor(getStaffSessionSnapshot());
+}
+
+export function getStaffLocale(): Locale {
+  return normalizeLocale(getStaffSessionSnapshot()?.locale);
 }
 
 export function requireStaffIdentity(): OperationActor {
@@ -134,6 +145,7 @@ function normalizeStaffSession(value: unknown): StaffSession | null {
     ...(email ? { email } : {}),
     ...(role ? { role } : {}),
     ...(rank ? { rank } : {}),
+    locale: normalizeLocale(record.locale),
   };
 }
 

@@ -10,6 +10,7 @@ import {
   type Transaction,
   type WriteBatch,
 } from "firebase/firestore";
+import { normalizeLocale, type Locale } from "@/lib/locale";
 import { db } from "./config";
 
 export const STAFF_BY_EMAIL_COLLECTION = "staffByEmail";
@@ -22,6 +23,7 @@ export interface StaffAuthProfile {
   role: string;
   rank: string;
   isActive: boolean;
+  locale: Locale;
 }
 
 export interface StaffByUidMirror extends StaffAuthProfile {
@@ -40,6 +42,7 @@ export function buildStaffAuthProfile(staffId: string, data: DocumentData): Staf
     role: String(data.role || "一般"),
     rank: String(data.rank || "レギュラー"),
     isActive: data.isActive === true,
+    locale: normalizeLocale(data.locale),
   };
 }
 

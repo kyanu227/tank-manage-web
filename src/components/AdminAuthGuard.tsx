@@ -19,6 +19,7 @@ import {
 import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
 import { DEV_ADMIN_ALLOWED_PATHS, DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
+import type { Locale } from "@/lib/locale";
 
 interface StaffUser {
   id: string;
@@ -26,6 +27,7 @@ interface StaffUser {
   role: string;
   rank: string;
   email: string;
+  locale: Locale;
 }
 
 interface AdminAuthGuardProps {
@@ -151,6 +153,7 @@ export default function AdminAuthGuard({
           role: profile.role,
           rank: profile.rank,
           email: profile.email,
+          locale: profile.locale,
         };
         localStorage.setItem("staffSession", JSON.stringify(staff));
         window.dispatchEvent(new Event("staffLogin"));

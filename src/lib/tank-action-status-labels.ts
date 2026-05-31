@@ -6,10 +6,7 @@ import {
   tankStatusCodeToLegacyStatus,
   tankStatusToCode,
 } from "./tank-action-status-codes";
-
-export type Locale = "ja" | "en";
-
-export const DEFAULT_LOCALE: Locale = "ja";
+import { DEFAULT_LOCALE, type Locale } from "./locale";
 
 export const TANK_ACTION_LABELS = {
   lend: {

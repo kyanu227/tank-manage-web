@@ -11,6 +11,7 @@ export const DEV_STAFF_SESSION = {
   role: "管理者",
   rank: "dev",
   email: "dev@example.local",
+  locale: "ja",
 } as const;
 
 export const DEV_ADMIN_ALLOWED_PATHS = ADMIN_PAGES

@@ -15,6 +15,7 @@ import { collection, getDocs, query, where } from "firebase/firestore";
 import StaffJoinRequestPanel from "@/components/StaffJoinRequestPanel";
 import { DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
+import { normalizeLocale, type Locale } from "@/lib/locale";
 import {
   createOrUpdateOwnStaffJoinRequest,
   getStaffJoinRequestByUidReadOnly,
@@ -35,6 +36,7 @@ interface StaffUser {
   role: string;
   rank: string;
   email?: string;
+  locale: Locale;
 }
 
 export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuardProps) {
@@ -163,6 +165,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         role: profile.role,
         rank: profile.rank,
         email: profile.email,
+        locale: profile.locale,
       };
 
       clearJoinRequestState();
@@ -270,6 +273,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         role: data.role,
         rank: data.rank || "レギュラー",
         email: data.email,
+        locale: normalizeLocale(data.locale),
       };
 
       localStorage.setItem("staffSession", JSON.stringify(userSession));
