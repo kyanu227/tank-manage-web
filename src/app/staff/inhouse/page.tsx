@@ -9,7 +9,7 @@ import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operatio
 import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
 import TankIdInput from "@/components/TankIdInput";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
-import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
 type TagType = Exclude<ReturnTag, typeof RETURN_TAG.KEEP>;
@@ -17,6 +17,7 @@ type TagType = Exclude<ReturnTag, typeof RETURN_TAG.KEEP>;
 const ACCENT = "#6366f1";
 
 export default function InHousePage() {
+  const staffLocale = useStaffLocale();
   const { tanks: allTanks, tankMap, prefixes, loading, refetch } = useTanks();
   const [activePrefix, setActivePrefix] = useState<string | null>(null);
   const [numberValue, setNumberValue] = useState("");
@@ -219,6 +220,7 @@ export default function InHousePage() {
                           { value: "uncharged", label: "未充填" },
                           { value: "unused", label: "未使用" },
                         ]}
+                        locale={staffLocale}
                         compact
                       />
                     </div>

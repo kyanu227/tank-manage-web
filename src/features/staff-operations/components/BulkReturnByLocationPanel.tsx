@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import { ArrowDownToLine, CheckCircle2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
+import { useStaffLocale } from "@/hooks/useStaffSession";
 import { RETURN_TAG, STATUS } from "@/lib/tank-rules";
 import type { UseBulkReturnByLocationResult } from "../hooks/useBulkReturnByLocation";
 import type { BulkReturnDatePool } from "../types";
@@ -94,6 +95,7 @@ export default function BulkReturnByLocationPanel({
   bulk,
   activeSegment = null,
 }: BulkReturnByLocationPanelProps) {
+  const staffLocale = useStaffLocale();
   const {
     bulkLoading,
     groupedTanks,
@@ -327,6 +329,7 @@ export default function BulkReturnByLocationPanel({
                                           ? [{ value: RETURN_TAG.KEEP, label: "持ち越し" }]
                                           : []),
                                       ]}
+                                      locale={staffLocale}
                                       compact
                                     />
                                   </div>

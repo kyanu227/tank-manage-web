@@ -2,6 +2,7 @@
 
 import { ArrowLeft, CheckCircle2, Loader2, ThumbsUp } from "lucide-react";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
+import { useStaffLocale } from "@/hooks/useStaffSession";
 import type { UseReturnTagProcessingResult } from "../hooks/useReturnTagProcessing";
 import type { Condition, ReturnGroup } from "../types";
 
@@ -14,6 +15,7 @@ export default function ReturnTagProcessingScreen({
   selectedReturnGroup,
   returnTagProcessing,
 }: ReturnTagProcessingScreenProps) {
+  const staffLocale = useStaffLocale();
   const {
     returnTagSelections,
     setReturnTagSelections,
@@ -69,6 +71,7 @@ export default function ReturnTagProcessingScreen({
                     { value: "keep", label: "持ち越し" },
                     { value: "unused", label: "未使用" },
                   ]}
+                  locale={staffLocale}
                   compact
                 />
               </div>

@@ -215,6 +215,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           mode={mode}
           config={config}
           operationLabel={modeLabel}
+          locale={staffLocale}
           prefixes={prefixes}
           customerOptions={destinations.customerSelectOptions}
           selectedCustomerId={destinations.selectedCustomerId}
@@ -337,6 +338,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           mode={mode}
           config={config}
           operationLabel={modeLabel}
+          locale={staffLocale}
           prefixes={prefixes}
           manual={manual}
           onBack={() => setShowManualReturn(false)}
@@ -349,6 +351,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           mode={mode}
           config={config}
           operationLabel={modeLabel}
+          locale={staffLocale}
           prefixes={prefixes}
           manual={manual}
         />

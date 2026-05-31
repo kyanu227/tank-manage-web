@@ -5,6 +5,7 @@ import DrumRoll from "@/components/DrumRoll";
 import QuickSelect from "@/components/QuickSelect";
 import type { QuickSelectOption } from "@/components/QuickSelect";
 import ReturnTagSelector, { getReturnTagLabel, getReturnTagStyle } from "@/components/ReturnTagSelector";
+import type { Locale } from "@/lib/locale";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
 import type { ModeConfigItem, OpMode, TagType } from "../types";
@@ -13,6 +14,7 @@ interface ManualOperationPanelProps {
   mode: OpMode;
   config: ModeConfigItem;
   operationLabel: string;
+  locale: Locale;
   prefixes: string[];
   customerOptions?: QuickSelectOption[];
   selectedCustomerId?: string;
@@ -25,6 +27,7 @@ export default function ManualOperationPanel({
   mode,
   config,
   operationLabel,
+  locale,
   prefixes,
   customerOptions = [],
   selectedCustomerId = "",
@@ -203,6 +206,7 @@ export default function ManualOperationPanel({
                 { value: "unused", label: "未使用" },
                 { value: "keep", label: "持ち越し" },
               ]}
+              locale={locale}
               compact
             />
           </div>
