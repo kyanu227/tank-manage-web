@@ -68,8 +68,28 @@ export function getStaffIdentity(): OperationActor | null {
   return staffSessionToOperationActor(getStaffSessionSnapshot());
 }
 
+export function getStaffSession(): StaffSession | null {
+  return getStaffSessionSnapshot();
+}
+
 export function getStaffLocale(): Locale {
   return normalizeLocale(getStaffSessionSnapshot()?.locale);
+}
+
+export function updateStoredStaffSessionLocale(locale: Locale): void {
+  if (typeof window === "undefined") return;
+  const session = getStaffSessionSnapshot();
+  if (!session) return;
+
+  const nextSession: StaffSession = {
+    ...session,
+    locale: normalizeLocale(locale),
+  };
+  const raw = JSON.stringify(nextSession);
+  localStorage.setItem(STORAGE_KEY, raw);
+  cachedRawSession = raw;
+  cachedSession = nextSession;
+  window.dispatchEvent(new Event("staffLogin"));
 }
 
 export function requireStaffIdentity(): OperationActor {
