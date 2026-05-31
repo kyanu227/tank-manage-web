@@ -27,7 +27,7 @@ import {
 import { logsRepository, transactionsRepository } from "@/lib/firebase/repositories";
 import type { TransactionDoc } from "@/lib/firebase/repositories/types";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
-import { requireStaffIdentity, useStaffSession } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale, useStaffSession } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import {
   applyLogCorrection,
@@ -45,6 +45,7 @@ import {
   type TankAction,
 } from "@/lib/tank-rules";
 import { getDashboardActionBadgeTone } from "@/lib/tank-action-status-display";
+import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
 
 type LogSortOrder = "desc" | "asc";
 
@@ -106,6 +107,7 @@ const IN_HOUSE_LOCATION_VALUE = "__inhouse__";
 
 export default function StaffDashboard() {
   const session = useStaffSession();
+  const staffLocale = useStaffLocale();
   const correctionRole = useMemo(
     () => normalizeCorrectionRole(session?.role),
     [session?.role]
@@ -874,6 +876,7 @@ export default function StaffDashboard() {
                     const isTankLog = log.logKind === "tank";
                     const history = historyByRoot[rootId] ?? [];
                     const historyLoading = historyLoadingRoot === rootId;
+                    const actionLabel = getLegacyTankActionLabel(log.action, staffLocale) ?? log.action;
 
                     return (
                       <div key={log.id} style={{ border: "1px solid #eef2f7", borderRadius: 10, background: "#f8fafc", overflow: "hidden" }}>
@@ -925,7 +928,7 @@ export default function StaffDashboard() {
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {log.action}
+                            {actionLabel}
                           </span>
                           <div className="dashboard-log-body" style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
                             <span
