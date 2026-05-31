@@ -3,7 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownToLine } from "lucide-react";
 import { useTanks } from "@/hooks/useTanks";
-import { DEFAULT_OP_STYLE, MODE_CONFIG } from "./constants";
+import { useStaffLocale } from "@/hooks/useStaffSession";
+import { DEFAULT_OP_STYLE, getOperationModeLabel, MODE_CONFIG } from "./constants";
 import { useBulkReturnByLocation } from "./hooks/useBulkReturnByLocation";
 import { useDestinations } from "./hooks/useDestinations";
 import { useManualTankOperation } from "./hooks/useManualTankOperation";
@@ -57,6 +58,8 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   // mode は URL 由来で固定。ページ遷移時は OperationsTerminal 自体がリマウントされる。
   const mode: OpMode = initialMode;
   const config = MODE_CONFIG[mode];
+  const staffLocale = useStaffLocale();
+  const modeLabel = getOperationModeLabel(mode, staffLocale);
 
   // 操作スタイル（手動/受注）はヘッダーのチップと同期
   const [opStyle, setOpStyle] = useState<OpStyle>(DEFAULT_OP_STYLE);
@@ -170,7 +173,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   if (mode === "lend" && opStyle === "order" && orders.selectedOrder) {
     return (
       <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden", overscrollBehavior: "contain" }}>
-        <OperationModeTabs mode={mode} />
+        <OperationModeTabs mode={mode} locale={staffLocale} />
         <OrderFulfillmentScreen
           selectedOrder={orders.selectedOrder}
           prefixes={prefixes}
@@ -186,7 +189,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   if (mode === "return" && returnTagProcessing.selectedReturnGroup) {
     return (
       <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden", overscrollBehavior: "contain" }}>
-        <OperationModeTabs mode={mode} />
+        <OperationModeTabs mode={mode} locale={staffLocale} />
         <ReturnTagProcessingScreen
           selectedReturnGroup={returnTagProcessing.selectedReturnGroup}
           returnTagProcessing={returnTagProcessing}
@@ -204,13 +207,14 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         overscrollBehavior: "contain",
       }}
     >
-      <OperationModeTabs mode={mode} />
+      <OperationModeTabs mode={mode} locale={staffLocale} />
 
       {/* 貸出モード: 手動 */}
       {mode === "lend" && opStyle === "manual" && (
         <ManualOperationPanel
           mode={mode}
           config={config}
+          operationLabel={modeLabel}
           prefixes={prefixes}
           customerOptions={destinations.customerSelectOptions}
           selectedCustomerId={destinations.selectedCustomerId}
@@ -332,6 +336,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         <ManualOperationPanel
           mode={mode}
           config={config}
+          operationLabel={modeLabel}
           prefixes={prefixes}
           manual={manual}
           onBack={() => setShowManualReturn(false)}
@@ -343,6 +348,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         <ManualOperationPanel
           mode={mode}
           config={config}
+          operationLabel={modeLabel}
           prefixes={prefixes}
           manual={manual}
         />

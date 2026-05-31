@@ -12,6 +12,7 @@ import type { ModeConfigItem, OpMode, TagType } from "../types";
 interface ManualOperationPanelProps {
   mode: OpMode;
   config: ModeConfigItem;
+  operationLabel: string;
   prefixes: string[];
   customerOptions?: QuickSelectOption[];
   selectedCustomerId?: string;
@@ -23,6 +24,7 @@ interface ManualOperationPanelProps {
 export default function ManualOperationPanel({
   mode,
   config,
+  operationLabel,
   prefixes,
   customerOptions = [],
   selectedCustomerId = "",
@@ -210,6 +212,7 @@ export default function ManualOperationPanel({
           <FloatingSubmitButton
             mode={mode}
             config={config}
+            operationLabel={operationLabel}
             validCount={validCount}
             submitting={submitting}
             onClick={() => handleSubmit(!isReturn)}
@@ -264,12 +267,13 @@ function OkButton({ activePrefix, inputValue, lastAdded, color, onClick, compact
 interface FloatingSubmitButtonProps {
   mode: OpMode;
   config: ModeConfigItem;
+  operationLabel: string;
   validCount: number;
   submitting: boolean;
   onClick: () => void;
 }
 
-function FloatingSubmitButton({ mode, config, validCount, submitting, onClick }: FloatingSubmitButtonProps) {
+function FloatingSubmitButton({ mode, config, operationLabel, validCount, submitting, onClick }: FloatingSubmitButtonProps) {
   const isLend = mode === "lend";
   const isReturn = mode === "return";
   const wrapperStyle = isLend
@@ -305,7 +309,7 @@ function FloatingSubmitButton({ mode, config, validCount, submitting, onClick }:
         }}
       >
         {submitting ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={16} />}
-        <span>{validCount}件の{mode === "return" ? "返却" : config.label}を実行</span>
+        <span>{validCount}件の{operationLabel}を実行</span>
       </button>
     </div>
   );
