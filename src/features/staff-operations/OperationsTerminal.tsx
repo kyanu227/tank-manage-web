@@ -160,6 +160,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   const manual = useManualTankOperation({
     mode,
     config,
+    locale: staffLocale,
     allTanks,
     selectedCustomer: destinations.selectedCustomer,
     fetchData,

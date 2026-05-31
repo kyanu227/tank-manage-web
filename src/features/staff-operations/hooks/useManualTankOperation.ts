@@ -3,6 +3,11 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import type { Locale } from "@/lib/locale";
+import {
+  getManualOperationConfirmMessage,
+  getManualOperationSuccessMessage,
+} from "@/lib/operation-messages";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import type { CustomerSnapshot, OperationContext } from "@/lib/operation-context";
@@ -22,6 +27,7 @@ import type { ModeConfigItem, OpMode, QueueItem, TagType, TankMap } from "../typ
 interface UseManualTankOperationParams {
   mode: OpMode;
   config: ModeConfigItem;
+  locale: Locale;
   allTanks: TankMap;
   selectedCustomer?: CustomerSnapshot | null;
   fetchData: () => Promise<void>;
@@ -49,6 +55,7 @@ export interface UseManualTankOperationResult {
 export function useManualTankOperation({
   mode,
   config,
+  locale,
   allTanks,
   selectedCustomer,
   fetchData,
@@ -171,9 +178,11 @@ export function useManualTankOperation({
         ? validItems.filter((item) => item.tag === RETURN_TAG.KEEP).length
         : 0;
       const returnCount = validItems.length - keepCount;
-      const confirmMessage = keepCount > 0
-        ? `返却: ${returnCount}本 / 持ち越し: ${keepCount}本を処理しますか？`
-        : `${config.label}：${validItems.length}本を処理しますか？`;
+      const confirmMessage = getManualOperationConfirmMessage(mode, locale, {
+        tankCount: validItems.length,
+        returnCount,
+        keepCount,
+      });
       if (!confirm(confirmMessage)) return;
     }
 
@@ -231,15 +240,20 @@ export function useManualTankOperation({
         })
       );
 
-      alert(`${validItems.length}本の処理が完了しました`);
+      alert(getManualOperationSuccessMessage(mode, locale, {
+        tankCount: validItems.length,
+      }));
       setOpQueue([]);
       fetchData();
-    } catch (e: any) {
-      alert("エラー: " + e.message);
+    } catch (e: unknown) {
+      const errorMessage = e && typeof e === "object" && "message" in e
+        ? String((e as { message: unknown }).message)
+        : undefined;
+      alert("エラー: " + errorMessage);
     } finally {
       setSubmitting(false);
     }
-  }, [allTanks, config.action, config.label, fetchData, mode, opQueue, selectedCustomer]);
+  }, [allTanks, config.action, fetchData, locale, mode, opQueue, selectedCustomer]);
 
   const validCount = useMemo(() => opQueue.filter(q => q.valid).length, [opQueue]);
 

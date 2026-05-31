@@ -4,6 +4,7 @@ import { DEFAULT_LOCALE, type Locale } from "./locale";
 
 export type OperationMessageKey =
   | "manualOperation.confirm"
+  | "manualOperation.returnConfirmWithCarryOver"
   | "manualOperation.success"
   | "manualOperation.failure"
   | "staffLocale.saveSuccess"
@@ -14,12 +15,16 @@ export type MessageParams = Record<string, string | number>;
 
 export const OPERATION_MESSAGES = {
   "manualOperation.confirm": {
-    ja: "{actionLabel}を実行しますか？",
-    en: "Run {actionLabel}?",
+    ja: "{actionLabel}：{tankCount}本を処理しますか？",
+    en: "Process {tankCount} tanks for {actionLabel}?",
+  },
+  "manualOperation.returnConfirmWithCarryOver": {
+    ja: "{returnActionLabel}: {returnCount}本 / {carryOverLabel}: {keepCount}本を処理しますか？",
+    en: "Process {returnCount} returns / {keepCount} carry-overs?",
   },
   "manualOperation.success": {
-    ja: "{actionLabel}が完了しました。",
-    en: "{actionLabel} completed.",
+    ja: "{tankCount}本の処理が完了しました",
+    en: "{tankCount} tanks processed.",
   },
   "manualOperation.failure": {
     ja: "{actionLabel}に失敗しました。",
@@ -57,21 +62,41 @@ export function getOperationMessage(
   return formatMessage(OPERATION_MESSAGES[key][locale], params);
 }
 
+export type ManualOperationMessageParams = {
+  tankCount: number;
+  returnCount?: number;
+  keepCount?: number;
+};
+
 export function getManualOperationConfirmMessage(
   actionCode: TankActionCode,
   locale: Locale = DEFAULT_LOCALE,
+  params: ManualOperationMessageParams = { tankCount: 0 },
 ): string {
+  const keepCount = params.keepCount ?? 0;
+
+  if (actionCode === "return" && keepCount > 0) {
+    return getOperationMessage("manualOperation.returnConfirmWithCarryOver", locale, {
+      returnActionLabel: getTankActionLabel("return", locale),
+      returnCount: params.returnCount ?? Math.max(params.tankCount - keepCount, 0),
+      carryOverLabel: locale === "ja" ? "持ち越し" : "Carry-over",
+      keepCount,
+    });
+  }
+
   return getOperationMessage("manualOperation.confirm", locale, {
     actionLabel: getTankActionLabel(actionCode, locale),
+    tankCount: params.tankCount,
   });
 }
 
 export function getManualOperationSuccessMessage(
-  actionCode: TankActionCode,
+  _actionCode: TankActionCode,
   locale: Locale = DEFAULT_LOCALE,
+  params: ManualOperationMessageParams = { tankCount: 0 },
 ): string {
   return getOperationMessage("manualOperation.success", locale, {
-    actionLabel: getTankActionLabel(actionCode, locale),
+    tankCount: params.tankCount,
   });
 }
 
