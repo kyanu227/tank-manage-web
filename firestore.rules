@@ -60,6 +60,31 @@ service cloud.firestore {
       return status in ["pending_setup", "pending", "active", "disabled"];
     }
 
+    function isValidLocale(locale) {
+      return locale in ["ja", "en"];
+    }
+
+    function isLocaleOnlyUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["locale"])
+        && request.resource.data.locale is string
+        && isValidLocale(request.resource.data.locale);
+    }
+
+    function isOwnStaffLocaleUpdate() {
+      return hasEmail()
+        && resource.data.email == request.auth.token.email
+        && resource.data.isActive == true
+        && isLocaleOnlyUpdate();
+    }
+
+    function isOwnStaffByEmailLocaleUpdate(email) {
+      return hasEmail()
+        && request.auth.token.email == email
+        && resource.data.email == request.auth.token.email
+        && resource.data.isActive == true
+        && isLocaleOnlyUpdate();
+    }
+
     function hasCustomerUser(uid) {
       return signedIn()
         && exists(/databases/$(database)/documents/customerUsers/$(uid));
@@ -625,7 +650,8 @@ service cloud.firestore {
     match /staffByEmail/{email} {
       allow get: if hasEmail() && request.auth.token.email == email;
       allow list: if isAdmin();
-      allow create, update, delete: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || isOwnStaffByEmailLocaleUpdate(email);
     }
 
     match /staffByUid/{uid} {
@@ -639,7 +665,8 @@ service cloud.firestore {
         || (hasEmail()
           && resource.data.email == request.auth.token.email
           && resource.data.isActive == true);
-      allow create, update, delete: if isAdmin();
+      allow create, delete: if isAdmin();
+      allow update: if isAdmin() || isOwnStaffLocaleUpdate();
     }
 
     match /customerUsers/{uid} {
