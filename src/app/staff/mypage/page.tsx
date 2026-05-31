@@ -5,6 +5,9 @@ import { User, TrendingUp, Clock, Mail } from "lucide-react";
 import type { Timestamp } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
 import { useStaffProfile } from "@/hooks/useStaffProfile";
+import { useStaffLocale } from "@/hooks/useStaffSession";
+import { updateOwnStaffLocale } from "@/lib/firebase/staff-locale-service";
+import { normalizeLocale, SUPPORTED_LOCALES, type Locale } from "@/lib/locale";
 
 interface LogEntry {
   tankId: string;
@@ -13,6 +16,11 @@ interface LogEntry {
   location: string;
 }
 
+const LOCALE_LABELS: Record<Locale, string> = {
+  ja: "日本語",
+  en: "English",
+};
+
 export default function MyPage() {
   const {
     profile,
@@ -20,9 +28,14 @@ export default function MyPage() {
     loading: profileLoading,
     error: profileError,
   } = useStaffProfile();
+  const currentLocale = useStaffLocale();
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState({ lend: 0, return: 0, fill: 0, other: 0 });
   const [loading, setLoading] = useState(true);
+  const [selectedLocale, setSelectedLocale] = useState<Locale>(currentLocale);
+  const [localeSaving, setLocaleSaving] = useState(false);
+  const [localeMessage, setLocaleMessage] = useState("");
+  const [localeError, setLocaleError] = useState("");
   const staffId = profile?.staffId || session?.id?.trim() || "";
 
   useEffect(() => {
@@ -96,6 +109,24 @@ export default function MyPage() {
         displayRole || "権限未設定",
         displayRank ? `ランク: ${displayRank}` : "ランク未設定",
       ].join(" / ");
+  const localeChanged = selectedLocale !== currentLocale;
+
+  const handleSaveLocale = async () => {
+    setLocaleSaving(true);
+    setLocaleMessage("");
+    setLocaleError("");
+    try {
+      const result = await updateOwnStaffLocale(selectedLocale);
+      setSelectedLocale(result.locale);
+      setLocaleMessage("表示言語を保存しました。");
+    } catch (e) {
+      setLocaleError(e instanceof Error
+        ? e.message
+        : "表示言語を保存できませんでした。再ログインしてからお試しください。");
+    } finally {
+      setLocaleSaving(false);
+    }
+  };
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 24px" }}>
@@ -132,6 +163,47 @@ export default function MyPage() {
             <p style={{ fontSize: 24, fontWeight: 800 }}>—</p>
           </div>
         </div>
+      </div>
+
+      {/* Settings */}
+      <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 18, marginBottom: 20 }}>
+        <div style={{ marginBottom: 12 }}>
+          <p style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>表示設定</p>
+          <p style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>このスタッフアカウントの表示言語を保存します。</p>
+        </div>
+        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+          表示言語
+        </label>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <select
+            value={selectedLocale}
+            onChange={(e) => {
+              setSelectedLocale(normalizeLocale(e.target.value));
+              setLocaleMessage("");
+              setLocaleError("");
+            }}
+            disabled={localeSaving}
+            style={{ flex: 1, minWidth: 0, height: 40, border: "1px solid #cbd5e1", borderRadius: 10, padding: "0 12px", fontSize: 13, fontWeight: 700, color: "#0f172a", background: "#fff" }}
+          >
+            {SUPPORTED_LOCALES.map((locale) => (
+              <option key={locale} value={locale}>{LOCALE_LABELS[locale]}</option>
+            ))}
+          </select>
+          <button
+            type="button"
+            onClick={handleSaveLocale}
+            disabled={localeSaving || !localeChanged}
+            style={{ height: 40, border: "none", borderRadius: 10, padding: "0 14px", fontSize: 12, fontWeight: 800, color: localeSaving || !localeChanged ? "#94a3b8" : "#fff", background: localeSaving || !localeChanged ? "#e2e8f0" : "#2563eb", cursor: localeSaving || !localeChanged ? "not-allowed" : "pointer" }}
+          >
+            {localeSaving ? "保存中…" : "保存"}
+          </button>
+        </div>
+        {localeMessage && (
+          <p style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: "#047857" }}>{localeMessage}</p>
+        )}
+        {localeError && (
+          <p style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: "#dc2626" }}>{localeError}</p>
+        )}
       </div>
 
       {/* Stats */}
