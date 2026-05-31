@@ -35,8 +35,8 @@ export const OPERATION_MESSAGES = {
     en: "Display language saved.",
   },
   "staffLocale.saveFailure": {
-    ja: "表示言語の保存に失敗しました。",
-    en: "Failed to save display language.",
+    ja: "表示言語を保存できませんでした。再ログインしてからお試しください。",
+    en: "Could not save the display language. Please sign in again and try again.",
   },
   "returnProcessing.empty": {
     ja: "処理待ちの返却申請はありません。",

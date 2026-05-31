@@ -8,6 +8,10 @@ import { useStaffProfile } from "@/hooks/useStaffProfile";
 import { useStaffLocale } from "@/hooks/useStaffSession";
 import { updateOwnStaffLocale } from "@/lib/firebase/staff-locale-service";
 import { normalizeLocale, SUPPORTED_LOCALES, type Locale } from "@/lib/locale";
+import {
+  getStaffLocaleSaveFailureMessage,
+  getStaffLocaleSaveSuccessMessage,
+} from "@/lib/operation-messages";
 
 interface LogEntry {
   tankId: string;
@@ -118,11 +122,11 @@ export default function MyPage() {
     try {
       const result = await updateOwnStaffLocale(selectedLocale);
       setSelectedLocale(result.locale);
-      setLocaleMessage("表示言語を保存しました。");
+      setLocaleMessage(getStaffLocaleSaveSuccessMessage(result.locale));
     } catch (e) {
       setLocaleError(e instanceof Error
         ? e.message
-        : "表示言語を保存できませんでした。再ログインしてからお試しください。");
+        : getStaffLocaleSaveFailureMessage(currentLocale));
     } finally {
       setLocaleSaving(false);
     }
