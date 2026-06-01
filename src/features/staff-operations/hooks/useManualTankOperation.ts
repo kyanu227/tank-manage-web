@@ -7,6 +7,8 @@ import type { Locale } from "@/lib/locale";
 import {
   getManualOperationConfirmMessage,
   getManualOperationSuccessMessage,
+  getManualReturnConfirmMessage,
+  getManualReturnSuccessMessage,
 } from "@/lib/operation-messages";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
@@ -173,16 +175,21 @@ export function useManualTankOperation({
       return;
     }
 
+    const keepCount = mode === "return"
+      ? validItems.filter((item) => item.tag === RETURN_TAG.KEEP).length
+      : 0;
+    const returnCount = validItems.length - keepCount;
+
     if (!skipConfirm) {
-      const keepCount = mode === "return"
-        ? validItems.filter((item) => item.tag === RETURN_TAG.KEEP).length
-        : 0;
-      const returnCount = validItems.length - keepCount;
-      const confirmMessage = getManualOperationConfirmMessage(mode, locale, {
-        tankCount: validItems.length,
-        returnCount,
-        keepCount,
-      });
+      const confirmMessage = mode === "return"
+        ? getManualReturnConfirmMessage(locale, {
+            tankCount: validItems.length,
+            returnCount,
+            keepCount,
+          })
+        : getManualOperationConfirmMessage(mode, locale, {
+            tankCount: validItems.length,
+          });
       if (!confirm(confirmMessage)) return;
     }
 
@@ -240,9 +247,16 @@ export function useManualTankOperation({
         })
       );
 
-      alert(getManualOperationSuccessMessage(mode, locale, {
-        tankCount: validItems.length,
-      }));
+      const successMessage = mode === "return"
+        ? getManualReturnSuccessMessage(locale, {
+            tankCount: validItems.length,
+            returnCount,
+            keepCount,
+          })
+        : getManualOperationSuccessMessage(mode, locale, {
+            tankCount: validItems.length,
+          });
+      alert(successMessage);
       setOpQueue([]);
       fetchData();
     } catch (e: unknown) {

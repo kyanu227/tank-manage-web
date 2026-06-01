@@ -7,6 +7,9 @@ export type OperationMessageKey =
   | "manualOperation.returnConfirmWithCarryOver"
   | "manualOperation.success"
   | "manualOperation.failure"
+  | "manualReturn.confirm"
+  | "manualReturn.confirmWithCarryOver"
+  | "manualReturn.success"
   | "staffLocale.saveSuccess"
   | "staffLocale.saveFailure"
   | "returnProcessing.empty"
@@ -31,6 +34,18 @@ export const OPERATION_MESSAGES = {
   "manualOperation.failure": {
     ja: "{actionLabel}に失敗しました。",
     en: "Failed to run {actionLabel}.",
+  },
+  "manualReturn.confirm": {
+    ja: "返却：{returnCount}本を処理しますか？",
+    en: "Process {returnCount} returns?",
+  },
+  "manualReturn.confirmWithCarryOver": {
+    ja: "返却: {returnCount}本 / 持ち越し: {keepCount}本を処理しますか？",
+    en: "Process {returnCount} returns / {keepCount} carry-overs?",
+  },
+  "manualReturn.success": {
+    ja: "{tankCount}本の処理が完了しました",
+    en: "{tankCount} return items processed.",
   },
   "staffLocale.saveSuccess": {
     ja: "表示言語を保存しました。",
@@ -78,6 +93,12 @@ export type ManualOperationMessageParams = {
   keepCount?: number;
 };
 
+export type ManualReturnMessageParams = {
+  tankCount: number;
+  returnCount: number;
+  keepCount?: number;
+};
+
 export function getManualOperationConfirmMessage(
   actionCode: TankActionCode,
   locale: Locale = DEFAULT_LOCALE,
@@ -116,6 +137,33 @@ export function getManualOperationFailureMessage(
 ): string {
   return getOperationMessage("manualOperation.failure", locale, {
     actionLabel: getTankActionLabel(actionCode, locale),
+  });
+}
+
+export function getManualReturnConfirmMessage(
+  locale: Locale = DEFAULT_LOCALE,
+  params: ManualReturnMessageParams,
+): string {
+  const keepCount = params.keepCount ?? 0;
+
+  if (keepCount > 0) {
+    return getOperationMessage("manualReturn.confirmWithCarryOver", locale, {
+      returnCount: params.returnCount,
+      keepCount,
+    });
+  }
+
+  return getOperationMessage("manualReturn.confirm", locale, {
+    returnCount: params.returnCount,
+  });
+}
+
+export function getManualReturnSuccessMessage(
+  locale: Locale = DEFAULT_LOCALE,
+  params: ManualReturnMessageParams,
+): string {
+  return getOperationMessage("manualReturn.success", locale, {
+    tankCount: params.tankCount,
   });
 }
 
