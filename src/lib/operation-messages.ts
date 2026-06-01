@@ -9,7 +9,9 @@ export type OperationMessageKey =
   | "manualOperation.failure"
   | "staffLocale.saveSuccess"
   | "staffLocale.saveFailure"
-  | "returnProcessing.empty";
+  | "returnProcessing.empty"
+  | "returnProcessing.pendingTagHelper"
+  | "returnProcessing.pendingTagWithLatestHelper";
 
 export type MessageParams = Record<string, string | number>;
 
@@ -39,8 +41,16 @@ export const OPERATION_MESSAGES = {
     en: "Could not save the display language. Please sign in again and try again.",
   },
   "returnProcessing.empty": {
-    ja: "処理待ちの返却申請はありません。",
-    en: "There are no return requests waiting for processing.",
+    ja: "処理待ちの返却タグはありません",
+    en: "There are no return tags waiting for processing.",
+  },
+  "returnProcessing.pendingTagHelper": {
+    ja: "タグ処理待ち",
+    en: "Awaiting tag processing",
+  },
+  "returnProcessing.pendingTagWithLatestHelper": {
+    ja: "タグ処理待ち / 最新 {requestedAt}",
+    en: "Awaiting tag processing / Latest {requestedAt}",
   },
 } satisfies Record<OperationMessageKey, Record<Locale, string>>;
 

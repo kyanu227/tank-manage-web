@@ -1,6 +1,8 @@
 "use client";
 
 import { CheckCircle2, ChevronRight, Loader2 } from "lucide-react";
+import { useStaffLocale } from "@/hooks/useStaffSession";
+import { getOperationMessage } from "@/lib/operation-messages";
 import type { Condition, ReturnGroup } from "../types";
 
 interface ReturnRequestListProps {
@@ -41,6 +43,7 @@ export default function ReturnRequestList({
   returnGroups,
   openReturnTagGroup,
 }: ReturnRequestListProps) {
+  const staffLocale = useStaffLocale();
   const totalTankCount = returnGroups.reduce((sum, group) => sum + group.items.length, 0);
 
   return (
@@ -62,7 +65,9 @@ export default function ReturnRequestList({
       ) : returnGroups.length === 0 ? (
         <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: "24px 16px", textAlign: "center" }}>
           <CheckCircle2 size={24} color="#94a3b8" style={{ marginBottom: 8 }} />
-          <p style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", margin: 0 }}>処理待ちの返却タグはありません</p>
+          <p style={{ fontSize: 13, fontWeight: 600, color: "#94a3b8", margin: 0 }}>
+            {getOperationMessage("returnProcessing.empty", staffLocale)}
+          </p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -111,7 +116,13 @@ export default function ReturnRequestList({
                         </span>
                       </div>
                       <p style={{ fontSize: 13, color: "#64748b", margin: "2px 0 0 0", fontWeight: 600 }}>
-                        タグ処理待ち{requestedAtLabel ? ` / 最新 ${requestedAtLabel}` : ""}
+                        {getOperationMessage(
+                          requestedAtLabel
+                            ? "returnProcessing.pendingTagWithLatestHelper"
+                            : "returnProcessing.pendingTagHelper",
+                          staffLocale,
+                          requestedAtLabel ? { requestedAt: requestedAtLabel } : undefined,
+                        )}
                       </p>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
                         {previewItems.map((item) => {
