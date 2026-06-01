@@ -1,35 +1,41 @@
 import { ACTION, STATUS, type TankAction, type TankStatus } from "./tank-rules";
 
-export type TankActionCode =
-  | "lend"
-  | "order_lend"
-  | "return"
-  | "return_unused"
-  | "return_uncharged"
-  | "carry_over"
-  | "fill"
-  | "inhouse_use"
-  | "inhouse_use_retro"
-  | "inhouse_return"
-  | "inhouse_return_unused"
-  | "inhouse_return_uncharged"
-  | "damage_report"
-  | "repaired"
-  | "inspection"
-  | "dispose"
-  | "procurement_purchase"
-  | "procurement_register"
-  | "supply_order";
+export const TANK_ACTION_CODES = [
+  "lend",
+  "order_lend",
+  "return",
+  "return_unused",
+  "return_uncharged",
+  "carry_over",
+  "fill",
+  "inhouse_use",
+  "inhouse_use_retro",
+  "inhouse_return",
+  "inhouse_return_unused",
+  "inhouse_return_uncharged",
+  "damage_report",
+  "repaired",
+  "inspection",
+  "dispose",
+  "procurement_purchase",
+  "procurement_register",
+  "supply_order",
+] as const;
 
-export type TankStatusCode =
-  | "filled"
-  | "empty"
-  | "lent"
-  | "unreturned"
-  | "in_house"
-  | "damaged"
-  | "defective"
-  | "disposed";
+export type TankActionCode = (typeof TANK_ACTION_CODES)[number];
+
+export const TANK_STATUS_CODES = [
+  "filled",
+  "empty",
+  "lent",
+  "unreturned",
+  "in_house",
+  "damaged",
+  "defective",
+  "disposed",
+] as const;
+
+export type TankStatusCode = (typeof TANK_STATUS_CODES)[number];
 
 export type LegacyTankAction =
   | TankAction
@@ -127,6 +133,26 @@ const PROCUREMENT_ACTION_CODES: readonly TankActionCode[] = [
   "procurement_purchase",
   "procurement_register",
 ];
+
+export function isTankActionCode(value: unknown): value is TankActionCode {
+  return typeof value === "string" && TANK_ACTION_CODES.includes(value as TankActionCode);
+}
+
+export function isTankStatusCode(value: unknown): value is TankStatusCode {
+  return typeof value === "string" && TANK_STATUS_CODES.includes(value as TankStatusCode);
+}
+
+export function normalizeTankActionCode(value: unknown): TankActionCode | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return isTankActionCode(normalized) ? normalized : null;
+}
+
+export function normalizeTankStatusCode(value: unknown): TankStatusCode | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return isTankStatusCode(normalized) ? normalized : null;
+}
 
 export function tankActionToCode(action: string | null | undefined): TankActionCode | null {
   const normalized = normalizeLegacyValue(action);
