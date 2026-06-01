@@ -7,7 +7,6 @@ import {
   tanksRepository,
   transactionsRepository,
 } from "@/lib/firebase/repositories";
-import { STATUS } from "@/lib/tank-rules";
 
 // カード定義（アイコン・色のみ。値はstateで管理）
 const CARD_DEFS = [
@@ -42,7 +41,7 @@ export default function AdminDashboardPage() {
           // 本日のログ → 操作件数 + ユニークスタッフ数
           logsRepository.getActiveLogs({ from: todayStart }),
           // 貸出中タンク数
-          tanksRepository.getTanks({ status: STATUS.LENT }),
+          tanksRepository.getTanks({ status: "lent" }),
           // 要対応トランザクション（受注待ち + 返却タグ処理待ち）
           transactionsRepository.getPendingTransactions(),
           // 顧客起点の未充填報告。read-only visibility 用で、要対応 status には混ぜない。

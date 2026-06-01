@@ -7,7 +7,6 @@ import { logsRepository, tanksRepository } from "@/lib/firebase/repositories";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 import { getPortalHistoryActionBadgeTone } from "@/lib/tank-action-status-display";
 import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
-import { STATUS } from "@/lib/tank-rules";
 
 type PortalLogTimestamp = { toDate?: () => Date } | null | undefined;
 
@@ -35,7 +34,7 @@ export default function PortalPage() {
           return;
         }
 
-        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: STATUS.LENT });
+        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: "lent" });
         const tanks: string[] = tankDocs.map((t) => t.id);
         setRentedTanks(tanks.sort());
 

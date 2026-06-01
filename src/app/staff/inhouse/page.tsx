@@ -2,7 +2,8 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { ACTION, resolveReturnActionCode, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
@@ -44,7 +45,7 @@ export default function InHousePage() {
   // 自社利用中タンク（tagOverrides を反映）
   const inHouseTanks = useMemo(() => {
     const list = allTanks
-      .filter((t) => t.status === STATUS.IN_HOUSE)
+      .filter((t) => coerceTankStatusCode(t.status) === "in_house")
       .map((t) => {
         const baseReturnTag = storedMarkerToReturnTag(t.logNote);
         const baseTag: TagType = baseReturnTag === RETURN_TAG.KEEP
@@ -97,7 +98,7 @@ export default function InHousePage() {
         setReportResult({ success: false, message: `${tankId} は登録されていません` });
         return;
       }
-      if (tank.status === STATUS.IN_HOUSE) {
+      if (coerceTankStatusCode(tank.status) === "in_house") {
         setReportResult({ success: true, message: `${tankId} は既に自社利用中です` });
         return;
       }
@@ -133,8 +134,8 @@ export default function InHousePage() {
           const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
           return {
             tankId: tank.id,
-            transitionAction: resolveReturnAction(tag, STATUS.IN_HOUSE),
-            currentStatus: STATUS.IN_HOUSE,
+            transitionAction: resolveReturnActionCode(tag, "in_house"),
+            currentStatus: "in_house",
             context,
             location: "倉庫",
           };

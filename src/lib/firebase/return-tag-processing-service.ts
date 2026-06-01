@@ -13,11 +13,10 @@ import {
   type TankOperationInput,
   type TankOperationWriter,
 } from "@/lib/tank-operation";
+import { coerceTankStatusCode, type TankActionCode, type TankStatusCode } from "@/lib/tank-action-status-codes";
 import {
-  ACTION,
   RETURN_TAG,
-  resolveReturnAction,
-  type TankAction,
+  resolveReturnActionCode,
 } from "@/lib/tank-rules";
 
 type PendingReturnRequestItem = {
@@ -43,7 +42,7 @@ type ReturnConfirmation = {
   condition: ReturnCondition;
   note: string;
   currentStatus: string;
-  transitionAction: TankAction;
+  transitionAction: TankActionCode;
   location: string;
 };
 
@@ -141,15 +140,24 @@ async function resolveReturnConfirmation(
   }
 
   const currentStatus = tank.status ?? "";
+  const currentStatusCode = requireReturnTankStatusCode(currentStatus, tankId);
   const isKeep = tag === RETURN_TAG.KEEP;
-  const transitionAction: TankAction = isKeep
-    ? ACTION.CARRY_OVER
-    : resolveReturnAction(tag, currentStatus);
+  const transitionAction: TankActionCode = isKeep
+    ? "carry_over"
+    : resolveReturnActionCode(tag, currentStatusCode);
   const location = isKeep
     ? tank.location || group.customerName
     : "倉庫";
 
   return { item, tankId, condition, note, currentStatus, transitionAction, location };
+}
+
+function requireReturnTankStatusCode(status: string, tankId: string): TankStatusCode {
+  const code = coerceTankStatusCode(status);
+  if (!code) {
+    throw new Error(`[${tankId}] status が不正です`);
+  }
+  return code;
 }
 
 function buildReturnConfirmationOperations(

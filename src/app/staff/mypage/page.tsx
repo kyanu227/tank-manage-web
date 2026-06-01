@@ -9,6 +9,13 @@ import { useStaffLocale } from "@/hooks/useStaffSession";
 import { updateOwnStaffLocale } from "@/lib/firebase/staff-locale-service";
 import { normalizeLocale, SUPPORTED_LOCALES, type Locale } from "@/lib/locale";
 import {
+  coerceTankActionCode,
+  isFillActionCode,
+  isLendActionCode,
+  isReturnActionCode,
+} from "@/lib/tank-action-status-codes";
+import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
+import {
   getStaffLocaleSaveFailureMessage,
   getStaffLocaleSaveSuccessMessage,
 } from "@/lib/operation-messages";
@@ -64,15 +71,16 @@ export default function MyPage() {
         const counts = { lend: 0, return: 0, fill: 0, other: 0 };
         fetched.forEach((log) => {
           const action = log.action ?? "";
+          const actionCode = coerceTankActionCode(action);
           entries.push({
             tankId: log.tankId ?? "",
             action,
             timestamp: log.timestamp,
             location: log.location ?? "",
           });
-          if (action === "貸出") counts.lend++;
-          else if (action === "返却" || action.includes("返却")) counts.return++;
-          else if (action === "充填") counts.fill++;
+          if (isLendActionCode(actionCode)) counts.lend++;
+          else if (isReturnActionCode(actionCode)) counts.return++;
+          else if (isFillActionCode(actionCode)) counts.fill++;
           else counts.other++;
         });
         if (cancelled) return;
@@ -240,7 +248,7 @@ export default function MyPage() {
             {logs.slice(0, 30).map((log, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: "#f8fafc" }}>
                 <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 13, color: "#0f172a", minWidth: 44 }}>{log.tankId}</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: "#6366f1", background: "#eef2ff", padding: "2px 8px", borderRadius: 6 }}>{log.action}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "#6366f1", background: "#eef2ff", padding: "2px 8px", borderRadius: 6 }}>{getLegacyTankActionLabel(log.action, currentLocale) ?? log.action}</span>
                 <span style={{ flex: 1, fontSize: 11, color: "#94a3b8" }}>{log.location}</span>
                 <span style={{ fontSize: 10, color: "#cbd5e1" }}>{formatTime(log.timestamp)}</span>
               </div>

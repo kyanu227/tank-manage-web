@@ -67,7 +67,7 @@ export async function traceUnderfilledSource(
     logsRef,
     where("logStatus", "==", "active"),
     where("tankId", "==", triggerLog.tankId),
-    where("action", "==", "充填"),
+    where("action", "==", "fill"),
     where("timestamp", "<", triggerLog.timestamp),
     orderBy("timestamp", "desc"),
     limit(1)
@@ -111,7 +111,7 @@ export async function traceUnreturnedSource(
     logsRef,
     where("logStatus", "==", "active"),
     where("tankId", "==", tankId),
-    where("action", "==", "貸出"),
+    where("action", "==", "lend"),
     orderBy("timestamp", "desc"),
     limit(1)
   );

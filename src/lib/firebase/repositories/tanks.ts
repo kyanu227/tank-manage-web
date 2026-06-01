@@ -13,6 +13,7 @@ import {
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
+import type { TankStatusCode } from "@/lib/tank-action-status-codes";
 import type { TankDoc, RepositoryWriter } from "./types";
 
 /**
@@ -22,7 +23,7 @@ import type { TankDoc, RepositoryWriter } from "./types";
  * updatedAt / latestLogId / nextMaintenanceDate はそのまま透過する。
  */
 function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
-  const raw = snap.data() as any;
+  const raw = snap.data() as Record<string, unknown>;
   return {
     id: snap.id,
     status: String(raw.status ?? ""),
@@ -32,17 +33,17 @@ function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
     note: raw.note != null ? String(raw.note) : undefined,
     logNote: raw.logNote != null ? String(raw.logNote) : undefined,
     updatedAt: raw.updatedAt,
-    latestLogId: raw.latestLogId ?? undefined,
+    latestLogId: raw.latestLogId != null ? String(raw.latestLogId) : undefined,
     nextMaintenanceDate: raw.nextMaintenanceDate,
   };
 }
 
 /** タンクのフィルタ条件（Phase 2 以降で拡張） */
 export interface GetTanksOptions {
-  status?: string;
+  status?: TankStatusCode;
   /** 複数ステータスのいずれかに合致するタンクを取得（例: 一括返却対象 [LENT, UNRETURNED]）。
    *  Firestore の `in` 句は最大10件。10件超は呼び出し側責任とし、ここでは分割しない。 */
-  statusIn?: string[];
+  statusIn?: TankStatusCode[];
   location?: string;
   /** タンクIDの先頭アルファベット。Firestore でクエリしづらいため取得後にメモリでフィルタする。 */
   prefix?: string;

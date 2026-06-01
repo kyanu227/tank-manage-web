@@ -1,9 +1,9 @@
 import {
-  isFillLegacyAction,
-  isInHouseLegacyAction,
-  isLendLegacyAction,
-  isReturnLegacyAction,
-  tankActionToCode,
+  coerceTankActionCode,
+  isFillActionCode,
+  isInHouseActionCode,
+  isLendActionCode,
+  isReturnActionCode,
 } from "./tank-action-status-codes";
 
 export type BadgeTone = {
@@ -33,8 +33,8 @@ export function getDashboardActionBadgeTone(action: string | null | undefined): 
 }
 
 export function getPortalHistoryActionBadgeTone(action: string | null | undefined): BadgeTone {
-  const code = tankActionToCode(action);
-  return code === "lend" && action === "貸出"
+  const code = coerceTankActionCode(action);
+  return isLendActionCode(code)
     ? PORTAL_HISTORY_ACTION_BADGE_TONES.lend
     : PORTAL_HISTORY_ACTION_BADGE_TONES.default;
 }
@@ -42,12 +42,12 @@ export function getPortalHistoryActionBadgeTone(action: string | null | undefine
 function getDashboardActionBadgeKind(action: string | null | undefined): ActionBadgeKind {
   if (!action) return "default";
 
-  const code = tankActionToCode(action);
+  const code = coerceTankActionCode(action);
   if (code === "damage_report" || code === "dispose") return "danger";
-  if (isReturnLegacyAction(action)) return "return";
-  if (isLendLegacyAction(action)) return "lend";
-  if (isFillLegacyAction(action)) return "fill";
-  if (isInHouseLegacyAction(action)) return "inhouse";
+  if (isReturnActionCode(code)) return "return";
+  if (isLendActionCode(code)) return "lend";
+  if (isFillActionCode(code)) return "fill";
+  if (isInHouseActionCode(code)) return "inhouse";
   if (code === "inspection" || code === "repaired") return "maintenance";
 
   if (action.includes("破損") || action.includes("破棄")) return "danger";

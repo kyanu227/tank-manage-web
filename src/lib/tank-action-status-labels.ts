@@ -1,10 +1,10 @@
 import {
   type TankActionCode,
   type TankStatusCode,
+  coerceTankActionCode,
+  coerceTankStatusCode,
   tankActionCodeToLegacyAction,
-  tankActionToCode,
   tankStatusCodeToLegacyStatus,
-  tankStatusToCode,
 } from "./tank-action-status-codes";
 import { DEFAULT_LOCALE, type Locale } from "./locale";
 
@@ -140,7 +140,7 @@ export function getLegacyTankActionLabel(
   action: string | null | undefined,
   locale: Locale = DEFAULT_LOCALE,
 ): string | null {
-  const code = tankActionToCode(action);
+  const code = coerceTankActionCode(action);
   return code ? getTankActionLabel(code, locale) : null;
 }
 
@@ -148,6 +148,6 @@ export function getLegacyTankStatusLabel(
   status: string | null | undefined,
   locale: Locale = DEFAULT_LOCALE,
 ): string | null {
-  const code = tankStatusToCode(status);
+  const code = coerceTankStatusCode(status);
   return code ? getTankStatusLabel(code, locale) : null;
 }

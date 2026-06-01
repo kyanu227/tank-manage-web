@@ -7,7 +7,6 @@ import PrefixNumberPicker from "@/components/PrefixNumberPicker";
 import { createPortalUnfilledReports } from "@/lib/firebase/portal-transaction-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
-import { STATUS } from "@/lib/tank-rules";
 
 interface TankItem {
   id: string;
@@ -35,7 +34,7 @@ export default function UnfilledReportPage() {
           return;
         }
 
-        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: STATUS.LENT });
+        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: "lent" });
         const tankIds: string[] = tankDocs.map((t) => t.id);
         setLentTanks(tankIds);
       } catch (e) {

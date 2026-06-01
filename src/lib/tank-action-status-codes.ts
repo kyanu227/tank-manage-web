@@ -154,6 +154,14 @@ export function normalizeTankStatusCode(value: unknown): TankStatusCode | null {
   return isTankStatusCode(normalized) ? normalized : null;
 }
 
+export function coerceTankActionCode(value: string | null | undefined): TankActionCode | null {
+  return normalizeTankActionCode(value) ?? tankActionToCode(value);
+}
+
+export function coerceTankStatusCode(value: string | null | undefined): TankStatusCode | null {
+  return normalizeTankStatusCode(value) ?? tankStatusToCode(value);
+}
+
 export function tankActionToCode(action: string | null | undefined): TankActionCode | null {
   const normalized = normalizeLegacyValue(action);
   if (!normalized) return null;

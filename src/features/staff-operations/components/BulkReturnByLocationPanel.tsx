@@ -6,7 +6,8 @@ import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { useStaffLocale } from "@/hooks/useStaffSession";
 import type { Locale } from "@/lib/locale";
 import { getReturnTagLabel } from "@/lib/return-tag-labels";
-import { RETURN_TAG, STATUS } from "@/lib/tank-rules";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
+import { RETURN_TAG } from "@/lib/tank-rules";
 import type { UseBulkReturnByLocationResult } from "../hooks/useBulkReturnByLocation";
 import type { BulkReturnDatePool } from "../types";
 import type { ReturnSegmentKey, ReturnSegmentStat } from "./ReturnSegmentGestureLauncher";
@@ -459,7 +460,7 @@ export default function BulkReturnByLocationPanel({
                                       options={[
                                         { value: RETURN_TAG.UNCHARGED, label: "未充填" },
                                         { value: RETURN_TAG.UNUSED, label: "未使用" },
-                                        ...(tank.status === STATUS.LENT
+                                        ...(coerceTankStatusCode(tank.status) === "lent"
                                           ? [{ value: RETURN_TAG.KEEP, label: "持ち越し" }]
                                           : []),
                                       ]}

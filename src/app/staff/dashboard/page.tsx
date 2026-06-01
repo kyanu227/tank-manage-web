@@ -38,14 +38,15 @@ import {
 } from "@/lib/tank-operation";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import { db } from "@/lib/firebase/config";
+import { STATUS_COLORS } from "@/lib/tank-rules";
 import {
-  ACTION,
-  STATUS,
-  STATUS_COLORS,
-  type TankAction,
-} from "@/lib/tank-rules";
+  coerceTankActionCode,
+  coerceTankStatusCode,
+  tankStatusCodeToLegacyStatus,
+  type TankActionCode,
+} from "@/lib/tank-action-status-codes";
 import { getDashboardActionBadgeTone } from "@/lib/tank-action-status-display";
-import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
+import { getLegacyTankActionLabel, getLegacyTankStatusLabel } from "@/lib/tank-action-status-labels";
 
 type LogSortOrder = "desc" | "asc";
 
@@ -102,7 +103,6 @@ type BulkLocationOption = {
 type BulkLocationMode = "lend" | "inhouse" | null;
 
 const LIMIT_MS = 72 * 60 * 60 * 1000;
-const ACTION_OPTIONS = Object.values(ACTION) as TankAction[];
 const IN_HOUSE_LOCATION_VALUE = "__inhouse__";
 
 export default function StaffDashboard() {
@@ -213,10 +213,11 @@ export default function StaffDashboard() {
   const byLocation = useMemo(() => {
     const map: Record<string, { lent: number; unreturned: number }> = {};
     tanks.forEach((tank) => {
-      if (tank.status !== STATUS.LENT && tank.status !== STATUS.UNRETURNED) return;
+      const statusCode = coerceTankStatusCode(tank.status);
+      if (statusCode !== "lent" && statusCode !== "unreturned") return;
       const location = (tank.location || "未設定").trim() || "未設定";
       if (!map[location]) map[location] = { lent: 0, unreturned: 0 };
-      if (tank.status === STATUS.LENT) map[location].lent += 1;
+      if (statusCode === "lent") map[location].lent += 1;
       else map[location].unreturned += 1;
     });
 
@@ -272,10 +273,10 @@ export default function StaffDashboard() {
 
   const bulkLocationMode = useMemo(() => {
     if (selectedLogs.length === 0) return null;
-    const actions = selectedLogs.map((log) => toTankAction(log.transitionAction ?? log.action));
+    const actions = selectedLogs.map((log) => toTankActionCode(log.transitionAction ?? log.action));
     if (actions.some((action) => action == null)) return null;
-    if (actions.every((action) => action === ACTION.LEND)) return "lend";
-    if (actions.every((action) => action === ACTION.IN_HOUSE_USE || action === ACTION.IN_HOUSE_USE_RETRO)) {
+    if (actions.every((action) => action === "lend")) return "lend";
+    if (actions.every((action) => action === "inhouse_use" || action === "inhouse_use_retro")) {
       return "inhouse";
     }
     return null;
@@ -581,8 +582,8 @@ export default function StaffDashboard() {
                         border: "1px solid #eef2f7",
                       }}
                     >
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: STATUS_COLORS[status] || "#cbd5e1" }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{status}</span>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: tankStatusColor(status) }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{getLegacyTankStatusLabel(status) ?? status}</span>
                       <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
                         {count}
                       </span>
@@ -1415,9 +1416,14 @@ function normalizeCorrectionRole(role?: string): StaffCorrectionRole {
   return "一般";
 }
 
-function toTankAction(value: unknown): TankAction | null {
-  if (typeof value !== "string") return null;
-  return ACTION_OPTIONS.includes(value as TankAction) ? (value as TankAction) : null;
+function toTankActionCode(value: unknown): TankActionCode | null {
+  return typeof value === "string" ? coerceTankActionCode(value) : null;
+}
+
+function tankStatusColor(status: string): string {
+  const code = coerceTankStatusCode(status);
+  const legacyStatus = code ? tankStatusCodeToLegacyStatus(code) : status;
+  return STATUS_COLORS[legacyStatus] || "#cbd5e1";
 }
 
 function canModifyLog(log: LogEntry, role: StaffCorrectionRole): boolean {
