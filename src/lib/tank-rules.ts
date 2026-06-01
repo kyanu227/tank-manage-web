@@ -10,6 +10,8 @@
  *   - billing-rules.ts   → 顧客に何が起きるか（請求）
  */
 
+import type { TankActionCode, TankStatusCode } from "./tank-action-status-codes";
+
 /* ════════════════════════════════════════════
    1. ステータス定数
    ════════════════════════════════════════════ */
@@ -152,6 +154,88 @@ export const OP_RULES: Record<TankAction, TransitionRule> = {
   },
 };
 
+export type TankOperationActionCode = Exclude<
+  TankActionCode,
+  "order_lend" | "procurement_purchase" | "procurement_register" | "supply_order"
+>;
+
+export type CodeOperationRule = {
+  /** 許容する元ステータス。空配列 = 制限なし */
+  allowedPrev: readonly TankStatusCode[];
+  /** 遷移先ステータス */
+  nextStatus: TankStatusCode;
+};
+
+export const CODE_OP_RULES = {
+  // ── メインサイクル ──
+  lend: {
+    allowedPrev: ["filled"],
+    nextStatus: "lent",
+  },
+  return: {
+    allowedPrev: ["lent", "unreturned", "in_house"],
+    nextStatus: "empty",
+  },
+  return_unused: {
+    allowedPrev: ["lent", "unreturned", "in_house"],
+    nextStatus: "filled",
+  },
+  return_uncharged: {
+    allowedPrev: ["lent", "unreturned", "in_house"],
+    nextStatus: "empty",
+  },
+  carry_over: {
+    allowedPrev: ["lent"],
+    nextStatus: "unreturned",
+  },
+  fill: {
+    allowedPrev: ["empty"],
+    nextStatus: "filled",
+  },
+
+  // ── 自社利用 ──
+  inhouse_use: {
+    allowedPrev: ["filled"],
+    nextStatus: "in_house",
+  },
+  inhouse_use_retro: {
+    allowedPrev: ["filled"],
+    nextStatus: "in_house",
+  },
+  inhouse_return: {
+    allowedPrev: ["in_house"],
+    nextStatus: "empty",
+  },
+  inhouse_return_unused: {
+    allowedPrev: ["in_house"],
+    nextStatus: "filled",
+  },
+  inhouse_return_uncharged: {
+    allowedPrev: ["in_house"],
+    nextStatus: "empty",
+  },
+
+  // ── 異常系・メンテナンス ──
+  damage_report: {
+    allowedPrev: ["empty", "filled", "in_house"],
+    nextStatus: "damaged",
+  },
+  repaired: {
+    allowedPrev: ["damaged", "defective"],
+    nextStatus: "empty",
+  },
+  inspection: {
+    allowedPrev: [],
+    nextStatus: "empty",
+  },
+
+  // ── 破棄 ──
+  dispose: {
+    allowedPrev: ["empty", "filled", "damaged"],
+    nextStatus: "disposed",
+  },
+} as const satisfies Record<TankOperationActionCode, CodeOperationRule>;
+
 /* ════════════════════════════════════════════
    5. バリデーション
    ════════════════════════════════════════════ */
@@ -196,6 +280,25 @@ export function getNextStatus(action: TankAction): TankStatus {
   return OP_RULES[action].nextStatus;
 }
 
+export function validateTransitionCode(
+  currentStatus: TankStatusCode,
+  action: TankActionCode
+): boolean {
+  const rule = getCodeOperationRule(action);
+  if (!rule) return false;
+  if (rule.allowedPrev.length === 0) return true;
+  return rule.allowedPrev.includes(currentStatus);
+}
+
+export function getNextStatusCode(action: TankActionCode): TankStatusCode | null {
+  return getCodeOperationRule(action)?.nextStatus ?? null;
+}
+
+function getCodeOperationRule(action: TankActionCode): CodeOperationRule | null {
+  if (!Object.prototype.hasOwnProperty.call(CODE_OP_RULES, action)) return null;
+  return CODE_OP_RULES[action as TankOperationActionCode];
+}
+
 /* ════════════════════════════════════════════
    6. 返却タグ → 操作名の解決
    ════════════════════════════════════════════ */
@@ -229,6 +332,30 @@ export function resolveReturnAction(
 export function resolveReturnStatus(tag: ReturnTag): TankStatus {
   if (tag === RETURN_TAG.KEEP) return STATUS.UNRETURNED;
   return tag === RETURN_TAG.UNUSED ? STATUS.FILLED : STATUS.EMPTY;
+}
+
+export function resolveReturnActionCode(
+  tag: ReturnTag,
+  fromStatus: TankStatusCode
+): TankActionCode {
+  const isInHouse = fromStatus === "in_house";
+
+  switch (tag) {
+    case RETURN_TAG.KEEP:
+      return "carry_over";
+    case RETURN_TAG.UNUSED:
+      return isInHouse ? "inhouse_return_unused" : "return_unused";
+    case RETURN_TAG.UNCHARGED:
+      return isInHouse ? "inhouse_return_uncharged" : "return_uncharged";
+    case RETURN_TAG.NORMAL:
+    default:
+      return isInHouse ? "inhouse_return" : "return";
+  }
+}
+
+export function resolveReturnStatusCode(tag: ReturnTag): TankStatusCode {
+  if (tag === RETURN_TAG.KEEP) return "unreturned";
+  return tag === RETURN_TAG.UNUSED ? "filled" : "empty";
 }
 
 /* ════════════════════════════════════════════
