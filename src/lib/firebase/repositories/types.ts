@@ -34,6 +34,7 @@ export interface LogDoc {
   revision: number;
   tankId?: string;
   action?: string;
+  transitionAction?: string;
   status?: string;
   location?: string;
   staffId?: string;

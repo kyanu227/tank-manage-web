@@ -5,6 +5,7 @@ import { FileText, Printer, Calendar } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { collection, getDocs } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
+import { isLendTankLogAction } from "@/lib/tank-action-status-codes";
 
 interface BillItem { customer: string; count: number; total10: number; total12: number; totalPrice: number; }
 
@@ -32,7 +33,7 @@ export default function BillingPage() {
         const [y, m] = period.split("-").map(Number);
         const custMap: Record<string, { count: number }> = {};
         logs.forEach((log) => {
-          if (log.action !== "貸出" || !log.timestamp?.toDate) return;
+          if (!isLendTankLogAction(log.action, log.transitionAction) || !log.timestamp?.toDate) return;
           const dt = log.timestamp.toDate();
           if (dt.getFullYear() !== y || dt.getMonth() + 1 !== m) return;
           const loc = log.location || "不明";

@@ -158,6 +158,13 @@ export function coerceTankActionCode(value: string | null | undefined): TankActi
   return normalizeTankActionCode(value) ?? tankActionToCode(value);
 }
 
+export function coerceTankLogActionCode(
+  action: string | null | undefined,
+  transitionAction?: string | null,
+): TankActionCode | null {
+  return coerceTankActionCode(transitionAction) ?? coerceTankActionCode(action);
+}
+
 export function coerceTankStatusCode(value: string | null | undefined): TankStatusCode | null {
   return normalizeTankStatusCode(value) ?? tankStatusToCode(value);
 }
@@ -216,6 +223,34 @@ export function isProcurementActionCode(code: TankActionCode | null | undefined)
 
 export function isSupplyOrderActionCode(code: TankActionCode | null | undefined): boolean {
   return code === "supply_order";
+}
+
+export function isLendTankLogAction(
+  action: string | null | undefined,
+  transitionAction?: string | null,
+): boolean {
+  return isLendActionCode(coerceTankLogActionCode(action, transitionAction));
+}
+
+export function isReturnTankLogAction(
+  action: string | null | undefined,
+  transitionAction?: string | null,
+): boolean {
+  return isReturnActionCode(coerceTankLogActionCode(action, transitionAction));
+}
+
+export function isCarryOverTankLogAction(
+  action: string | null | undefined,
+  transitionAction?: string | null,
+): boolean {
+  return isCarryOverActionCode(coerceTankLogActionCode(action, transitionAction));
+}
+
+export function isFillTankLogAction(
+  action: string | null | undefined,
+  transitionAction?: string | null,
+): boolean {
+  return isFillActionCode(coerceTankLogActionCode(action, transitionAction));
 }
 
 export function isLendLegacyAction(action: string | null | undefined): boolean {

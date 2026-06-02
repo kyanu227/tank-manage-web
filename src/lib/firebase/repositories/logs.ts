@@ -63,6 +63,7 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     revision: (data.revision as number) ?? 0,
     tankId: data.tankId as string | undefined,
     action: data.action as string | undefined,
+    transitionAction: data.transitionAction as string | undefined,
     status: data.status as string | undefined,
     location: data.location as string | undefined,
     staffId: stringOrUndefined(data.staffId),

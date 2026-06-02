@@ -12,7 +12,10 @@
  *   回収作業自体には報酬を発生させる（労力に対する対価）
  */
 
-import { ACTION, type TankAction } from "./tank-rules";
+import {
+  coerceTankActionCode,
+  type TankActionCode,
+} from "./tank-action-status-codes";
 
 /* ════════════════════════════════════════════
    1. 報酬対象の判定
@@ -28,16 +31,16 @@ import { ACTION, type TankAction } from "./tank-rules";
  * ※ 未充填返却（回収作業）は報酬あり（労力がかかるため）
  * ※ 未充填を作った充填者の報酬は別途自動取消される
  */
-const NO_REWARD_ACTIONS: Set<TankAction> = new Set([
+const NO_REWARD_ACTION_CODES: ReadonlySet<TankActionCode> = new Set([
   // 自社系（全て報酬なし）
-  ACTION.IN_HOUSE_USE,
-  ACTION.IN_HOUSE_USE_RETRO,
-  ACTION.IN_HOUSE_RETURN,
-  ACTION.IN_HOUSE_RETURN_UNUSED,
-  ACTION.IN_HOUSE_RETURN_UNCHARGED,
+  "inhouse_use",
+  "inhouse_use_retro",
+  "inhouse_return",
+  "inhouse_return_unused",
+  "inhouse_return_uncharged",
 
   // 破棄
-  ACTION.DISPOSE,
+  "dispose",
 ]);
 
 /**
@@ -46,11 +49,13 @@ const NO_REWARD_ACTIONS: Set<TankAction> = new Set([
  * 注意: 未充填返却（回収作業）は報酬対象。
  * 未充填を作った充填者の報酬取消は buildRevocation() で別途処理する。
  *
- * 判定は NO_REWARD_ACTIONS の集合メンバシップのみで行う。
+ * 判定は NO_REWARD_ACTION_CODES の集合メンバシップのみで行う。
  * ACTION 定数に含まれない未知の操作名はデフォルトで報酬対象とする。
  */
 export function isRewardEligible(action: string): boolean {
-  return !NO_REWARD_ACTIONS.has(action as TankAction);
+  const actionCode = coerceTankActionCode(action);
+  if (!actionCode) return true;
+  return !NO_REWARD_ACTION_CODES.has(actionCode);
 }
 
 /**

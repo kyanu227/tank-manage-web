@@ -5,6 +5,11 @@ import { BarChart3, TrendingUp, Calendar, Archive } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
+import {
+  isFillTankLogAction,
+  isLendTankLogAction,
+  isReturnTankLogAction,
+} from "@/lib/tank-action-status-codes";
 
 interface DailyStat { date: string; lend: number; return_: number; fill: number; total: number; }
 interface MonthlyStat { id: string; month: string; location: string; lends: number; returns: number; unused: number; defaults: number; }
@@ -32,9 +37,9 @@ export default function SalesPage() {
           const dt = log.timestamp.toDate();
           const key = `${dt.getFullYear()}/${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}`;
           if (!dateMap[key]) dateMap[key] = { lend: 0, return_: 0, fill: 0 };
-          if (log.action === "貸出") dateMap[key].lend++;
-          else if (log.action?.includes("返却")) dateMap[key].return_++;
-          else if (log.action === "充填") dateMap[key].fill++;
+          if (isLendTankLogAction(log.action, log.transitionAction)) dateMap[key].lend++;
+          else if (isReturnTankLogAction(log.action, log.transitionAction)) dateMap[key].return_++;
+          else if (isFillTankLogAction(log.action, log.transitionAction)) dateMap[key].fill++;
         });
         const sorted = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 30)
           .map(([date, v]) => ({ date, ...v, total: v.lend + v.return_ + v.fill }));

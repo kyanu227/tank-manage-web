@@ -47,6 +47,7 @@ import {
 } from "@/lib/tank-action-status-codes";
 import { getDashboardActionBadgeTone } from "@/lib/tank-action-status-display";
 import { getLegacyTankActionLabel, getLegacyTankStatusLabel } from "@/lib/tank-action-status-labels";
+import type { Locale } from "@/lib/locale";
 
 type LogSortOrder = "desc" | "asc";
 
@@ -240,7 +241,7 @@ export default function StaffDashboard() {
       const ms = timestampToMillis(log.originalAt ?? log.timestamp);
       if (ms == null || ms < startOfDay) return;
       total += 1;
-      const key = log.action || "不明";
+      const key = formatActionLabel(log.action, staffLocale);
       byAction[key] = (byAction[key] || 0) + 1;
     });
 
@@ -248,7 +249,7 @@ export default function StaffDashboard() {
       .map(([action, count]) => ({ action, count }))
       .sort((a, b) => b.count - a.count || a.action.localeCompare(b.action));
     return { total, breakdown };
-  }, [logs]);
+  }, [logs, staffLocale]);
 
   const recentUnfilledReports = useMemo(() => unfilledReports.slice(0, 5), [unfilledReports]);
 
@@ -877,7 +878,7 @@ export default function StaffDashboard() {
                     const isTankLog = log.logKind === "tank";
                     const history = historyByRoot[rootId] ?? [];
                     const historyLoading = historyLoadingRoot === rootId;
-                    const actionLabel = getLegacyTankActionLabel(log.action, staffLocale) ?? log.action;
+                    const actionLabel = formatActionLabel(log.action, staffLocale);
 
                     return (
                       <div key={log.id} style={{ border: "1px solid #eef2f7", borderRadius: 10, background: "#f8fafc", overflow: "hidden" }}>
@@ -1025,7 +1026,7 @@ export default function StaffDashboard() {
                                       <div style={{ minWidth: 0 }}>
                                         <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
                                           <span style={{ fontSize: 12, fontWeight: 800, color: statusColor(rev.logStatus) }}>{statusLabel(rev.logStatus)}</span>
-                                          <span style={{ fontSize: 12, color: "#64748b" }}>{rev.action}</span>
+                                          <span style={{ fontSize: 12, color: "#64748b" }}>{formatActionLabel(rev.action, staffLocale)}</span>
                                           <span style={{ fontSize: 12, color: "#94a3b8" }}>{formatTime(rev.revisionCreatedAt)}</span>
                                         </div>
                                         {(rev.editedByStaffName || rev.editReason) && (
@@ -1112,7 +1113,7 @@ export default function StaffDashboard() {
           <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
             <div style={{ padding: 12, borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: 12 }}>
               <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace", fontWeight: 900, color: "#0f172a" }}>{voidingLog.tankId}</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: "#334155" }}>{voidingLog.action}</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#334155" }}>{formatActionLabel(voidingLog.action, staffLocale)}</span>
             </div>
             <label style={labelStyle}>
               取消理由
@@ -1418,6 +1419,10 @@ function normalizeCorrectionRole(role?: string): StaffCorrectionRole {
 
 function toTankActionCode(value: unknown): TankActionCode | null {
   return typeof value === "string" ? coerceTankActionCode(value) : null;
+}
+
+function formatActionLabel(action: string | null | undefined, locale: Locale): string {
+  return getLegacyTankActionLabel(action, locale) ?? action ?? "不明";
 }
 
 function tankStatusColor(status: string): string {

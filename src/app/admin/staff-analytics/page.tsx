@@ -3,6 +3,11 @@
 import { useState, useEffect } from "react";
 import { Users, Award, TrendingUp } from "lucide-react";
 import { logsRepository } from "@/lib/firebase/repositories";
+import {
+  isFillTankLogAction,
+  isLendTankLogAction,
+  isReturnTankLogAction,
+} from "@/lib/tank-action-status-codes";
 
 interface StaffStat { key: string; name: string; lend: number; return_: number; fill: number; total: number; }
 
@@ -18,9 +23,9 @@ export default function StaffAnalyticsPage() {
         logs.forEach((log) => {
           const key = log.staffId || "不明";
           if (!staffMap[key]) staffMap[key] = { name: log.staffName || "不明", lend: 0, return_: 0, fill: 0 };
-          if (log.action === "貸出") staffMap[key].lend++;
-          else if (log.action?.includes("返却")) staffMap[key].return_++;
-          else if (log.action === "充填") staffMap[key].fill++;
+          if (isLendTankLogAction(log.action, log.transitionAction)) staffMap[key].lend++;
+          else if (isReturnTankLogAction(log.action, log.transitionAction)) staffMap[key].return_++;
+          else if (isFillTankLogAction(log.action, log.transitionAction)) staffMap[key].fill++;
         });
         const sorted = Object.entries(staffMap)
           .map(([key, v]) => ({ name: v.name, key, lend: v.lend, return_: v.return_, fill: v.fill, total: v.lend + v.return_ + v.fill }))
