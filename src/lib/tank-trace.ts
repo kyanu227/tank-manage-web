@@ -17,6 +17,7 @@ import {
   orderBy,
   limit,
   getDocs,
+  type DocumentData,
   type Firestore,
 } from "firebase/firestore";
 
@@ -66,7 +67,7 @@ export async function traceUnderfilledSource(
     logsRef,
     where("logStatus", "==", "active"),
     where("tankId", "==", triggerLog.tankId),
-    where("action", "==", "充填"),
+    where("action", "==", "fill"),
     where("timestamp", "<", triggerLog.timestamp),
     orderBy("timestamp", "desc"),
     limit(1)
@@ -76,17 +77,7 @@ export async function traceUnderfilledSource(
   if (snap.empty) return null;
 
   const doc = snap.docs[0];
-  const data = doc.data();
-  const sourceLog: TankLog = {
-    id: doc.id,
-    tankId: data.tankId,
-    action: data.action,
-    staffName: data.staffName,
-    staffId: data.staffId,
-    location: data.location,
-    timestamp: data.timestamp?.toDate?.() ?? new Date(data.timestamp),
-    note: data.note,
-  };
+  const sourceLog = tankLogFromData(doc.id, doc.data());
 
   return {
     responsibleStaff: sourceLog.staffName,
@@ -120,7 +111,7 @@ export async function traceUnreturnedSource(
     logsRef,
     where("logStatus", "==", "active"),
     where("tankId", "==", tankId),
-    where("action", "==", "貸出"),
+    where("action", "==", "lend"),
     orderBy("timestamp", "desc"),
     limit(1)
   );
@@ -130,18 +121,8 @@ export async function traceUnreturnedSource(
 
   const doc = snap.docs[0];
   const data = doc.data();
-  const timestamp = data.timestamp?.toDate?.() ?? new Date(data.timestamp);
-
-  const lendLog: TankLog = {
-    id: doc.id,
-    tankId: data.tankId,
-    action: data.action,
-    staffName: data.staffName,
-    staffId: data.staffId,
-    location: data.location,
-    timestamp,
-    note: data.note,
-  };
+  const lendLog = tankLogFromData(doc.id, data);
+  const timestamp = lendLog.timestamp;
 
   const daysSinceLend = Math.floor(
     (Date.now() - timestamp.getTime()) / (1000 * 60 * 60 * 24)
@@ -149,8 +130,8 @@ export async function traceUnreturnedSource(
 
   return {
     lendLog,
-    destination: data.location,
-    staffName: data.staffName,
+    destination: lendLog.location,
+    staffName: lendLog.staffName,
     daysSinceLend,
   };
 }
@@ -187,19 +168,7 @@ export async function getLastOperation(
   if (snap.empty) return null;
 
   const doc = snap.docs[0];
-  const data = doc.data();
-
-  return {
-    id: doc.id,
-    tankId: data.tankId,
-    action: data.action,
-    staffName: data.staffName,
-    staffId: data.staffId,
-    location: data.location,
-    prevLocation: data.prevLocation,
-    timestamp: data.timestamp?.toDate?.() ?? new Date(data.timestamp),
-    note: data.note,
-  };
+  return tankLogFromData(doc.id, doc.data());
 }
 
 /* ════════════════════════════════════════════
@@ -228,18 +197,45 @@ export async function getTankHistory(
 
   const snap = await getDocs(q);
 
-  return snap.docs.map((doc) => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      tankId: data.tankId,
-      action: data.action,
-      staffName: data.staffName,
-      staffId: data.staffId,
-      location: data.location,
-      prevLocation: data.prevLocation,
-      timestamp: data.timestamp?.toDate?.() ?? new Date(data.timestamp),
-      note: data.note,
-    };
-  });
+  return snap.docs.map((doc) => tankLogFromData(doc.id, doc.data()));
+}
+
+function tankLogFromData(id: string, data: DocumentData): TankLog {
+  const staffId = stringOrUndefined(data.staffId);
+  const prevLocation = stringOrUndefined(data.prevLocation);
+  const note = stringOrUndefined(data.note);
+  return {
+    id,
+    tankId: stringOrUndefined(data.tankId) ?? "",
+    action: stringOrUndefined(data.action) ?? "",
+    staffName: staffNameFromLogData(data),
+    ...(staffId ? { staffId } : {}),
+    location: stringOrUndefined(data.location) ?? "",
+    ...(prevLocation ? { prevLocation } : {}),
+    timestamp: timestampToDate(data.timestamp),
+    ...(note ? { note } : {}),
+  };
+}
+
+function staffNameFromLogData(data: DocumentData): string {
+  return stringOrUndefined(data.staffName)
+    ?? stringOrUndefined(data.staff)
+    ?? "不明なスタッフ";
+}
+
+function stringOrUndefined(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function timestampToDate(value: unknown): Date {
+  if (value instanceof Date) return value;
+  if (typeof value === "object" && value !== null && "toDate" in value && typeof value.toDate === "function") {
+    return value.toDate();
+  }
+  if (typeof value === "number" || typeof value === "string") {
+    return new Date(value);
+  }
+  return new Date(Number.NaN);
 }

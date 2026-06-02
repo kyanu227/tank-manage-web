@@ -2,7 +2,9 @@
 
 import { useState, useMemo } from "react";
 import { Wrench, CheckCircle2, Send, Loader2, Sparkles, AlertTriangle } from "lucide-react";
-import { STATUS, ACTION } from "@/lib/tank-rules";
+import { ACTION } from "@/lib/tank-rules";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
+import { getLegacyTankStatusLabel } from "@/lib/tank-action-status-labels";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
@@ -28,7 +30,10 @@ export default function RepairPage() {
   const tanks = useMemo(
     () =>
       allTanks
-        .filter((t) => t.status === STATUS.DAMAGED || t.status === STATUS.DEFECTIVE)
+        .filter((t) => {
+          const status = coerceTankStatusCode(t.status);
+          return status === "damaged" || status === "defective";
+        })
         .map((t) => ({
           id: t.id,
           status: t.status,
@@ -77,8 +82,8 @@ export default function RepairPage() {
       setResult({ success: true, message: `${selected.length}本の修理完了を処理しました` });
       setSelectedIds(new Set());
       refetch();
-    } catch (e: any) {
-      setResult({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setResult({ success: false, message: errorMessage(e) });
     } finally {
       setSubmitting(false);
     }
@@ -201,7 +206,7 @@ export default function RepairPage() {
               display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 10,
             }}>
               {tanks.map((t) => {
-                const isDamaged = t.status === STATUS.DAMAGED;
+                const isDamaged = coerceTankStatusCode(t.status) === "damaged";
                 const statusColor = isDamaged ? "#ef4444" : "#f59e0b";
                 const statusBg = isDamaged ? "#fef2f2" : "#fffbeb";
                 return (
@@ -244,7 +249,7 @@ export default function RepairPage() {
                       fontSize: 10, fontWeight: 800, letterSpacing: "0.02em",
                     }}>
                       <AlertTriangle size={10} strokeWidth={3} />
-                      {t.status}
+                      {getLegacyTankStatusLabel(t.status) ?? t.status}
                     </div>
 
                     {/* tank id */}
@@ -326,4 +331,8 @@ export default function RepairPage() {
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

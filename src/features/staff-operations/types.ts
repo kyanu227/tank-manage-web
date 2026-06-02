@@ -1,14 +1,16 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
+import type { ReturnTag } from "@/lib/return-tag-rules";
 import type { TankAction } from "@/lib/tank-rules";
 import type { TankDoc } from "@/lib/tank-types";
 
 export type OpMode = "lend" | "return" | "fill";
-export type TagType = "normal" | "unused" | "uncharged" | "keep";
-export type BulkTagType = "normal" | "unused" | "uncharged" | "keep";
+export type TagType = ReturnTag;
+export type BulkTagType = ReturnTag;
 export type BulkReturnDatePool = "today_lent" | "past_lent" | "unknown_lent" | "long_term";
 export type OpStyle = "manual" | "order";
+export type TimestampLike = { toMillis: () => number };
 
 export interface QueueItem {
   uid: string;
@@ -25,7 +27,7 @@ export interface ScannedTank {
   error?: string;
 }
 
-export type Condition = "normal" | "unused" | "uncharged" | "keep";
+export type Condition = ReturnTag;
 
 export interface PendingReturn {
   id: string;
@@ -33,7 +35,7 @@ export interface PendingReturn {
   customerName: string;
   tankId: string;
   condition: Condition;
-  createdAt: any;
+  createdAt?: TimestampLike;
 }
 
 export interface ReturnGroup {
@@ -47,7 +49,7 @@ export interface BulkTankDoc {
   status: string;
   location: string;
   staff: string;
-  updatedAt: any;
+  updatedAt: unknown;
   logNote?: string;
 }
 
@@ -70,4 +72,4 @@ export interface ModeConfigItem {
 
 export type ModeConfig = Record<OpMode, ModeConfigItem>;
 export type TankMap = Record<string, TankDoc>;
-export type ReturnTagSelectionMap = Record<string, { selected: boolean; condition: Condition }>;
+export type ReturnConfirmationSelectionMap = Record<string, { selected: boolean; condition: Condition }>;

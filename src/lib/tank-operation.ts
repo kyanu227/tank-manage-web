@@ -18,11 +18,20 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase/config";
 import {
-  ACTION,
-  getNextStatus,
-  validateTransition,
+  getNextStatusCode,
+  validateTransitionCode,
   type TankAction,
 } from "./tank-rules";
+import {
+  normalizeTankActionCode,
+  normalizeTankStatusCode,
+  tankActionCodeToLegacyAction,
+  tankActionToCode,
+  tankStatusCodeToLegacyStatus,
+  tankStatusToCode,
+  type TankActionCode,
+  type TankStatusCode,
+} from "./tank-action-status-codes";
 import type {
   CustomerSnapshot,
   OperationActor,
@@ -34,7 +43,7 @@ import type {
    ════════════════════════════════════════════ */
 
 export type TankSnapshot = {
-  status: string;
+  status: TankStatusCode;
   location?: string;
   staff?: string;
   logNote?: string;
@@ -45,7 +54,7 @@ export interface TankOperationInput {
   tankId: string;
 
   /** 遷移ルールを決める action（OP_RULES のキー） */
-  transitionAction: TankAction;
+  transitionAction: TankAction | TankActionCode;
 
   /** ログに記録する操作名。省略時は transitionAction と同じ。 */
   logAction?: string;
@@ -92,7 +101,7 @@ export type StaffCorrectionRole = "管理者" | "準管理者" | "一般";
 
 export type LogCorrectionPatch = {
   tankId?: string;
-  transitionAction?: TankAction;
+  transitionAction?: TankAction | TankActionCode;
   logAction?: string;
   location?: string;
   customer?: CustomerSnapshot | null;
@@ -144,8 +153,8 @@ type TankLogData = DocumentData & {
 
 type TankLogContent = {
   tankId: string;
-  action: string;
-  transitionAction: TankAction;
+  action: TankActionCode;
+  transitionAction: TankActionCode;
   location: string;
   staffId: string;
   staffName: string;
@@ -297,19 +306,27 @@ async function commitPlannedOperations(
 
     const tankData = tankSnap.data();
     const prevSnapshot = snapshotFromTankData(tankData);
+    const transitionAction = requireTankActionCode(
+      op.input.transitionAction,
+      `[${op.input.tankId}] transitionAction`
+    );
 
     if (!op.input.skipValidation) {
-      const v = validateTransition(prevSnapshot.status, op.input.transitionAction);
-      if (!v.ok) {
-        throw new Error(`[${op.input.tankId}] ${v.reason}`);
+      if (!validateTransitionCode(prevSnapshot.status, transitionAction)) {
+        throw new Error(
+          `[${op.input.tankId}] ${transitionFailureReason(prevSnapshot.status, transitionAction)}`
+        );
       }
     }
 
-    const nextStatus = getNextStatus(op.input.transitionAction);
+    const nextStatus = requireNextStatusCode(transitionAction, `[${op.input.tankId}] transitionAction`);
     const location = op.input.location ?? "倉庫";
     const tankLogNote = op.input.tankNote ?? "";
     const logNote = op.input.logNote ?? "";
-    const logAction = op.input.logAction ?? op.input.transitionAction;
+    const logAction = requireTankActionCode(
+      op.input.logAction ?? transitionAction,
+      `[${op.input.tankId}] logAction`
+    );
     const actor = op.input.context.actor;
     const nextSnapshot: TankSnapshot = {
       status: nextStatus,
@@ -323,7 +340,7 @@ async function commitPlannedOperations(
       ...sanitizeLogExtra(op.input.logExtra),
       tankId: op.input.tankId,
       action: logAction,
-      transitionAction: op.input.transitionAction,
+      transitionAction,
       prevStatus: prevSnapshot.status,
       newStatus: nextStatus,
       location,
@@ -436,9 +453,10 @@ export async function applyLogCorrection(
       ? requireTankSnapshot(oldLog.prevTankSnapshot, "対象ログのprevTankSnapshot")
       : snapshotFromTankData(newTankSnap.data());
 
-    const v = validateTransition(prevSnapshot.status, content.transitionAction);
-    if (!v.ok) {
-      throw new Error(`[${newTankId}] ${v.reason}`);
+    if (!validateTransitionCode(prevSnapshot.status, content.transitionAction)) {
+      throw new Error(
+        `[${newTankId}] ${transitionFailureReason(prevSnapshot.status, content.transitionAction)}`
+      );
     }
 
     const nextSnapshot = nextSnapshotFromContent(prevSnapshot, content);
@@ -549,7 +567,7 @@ function normalizeTankId(tankId: string): string {
 
 function snapshotFromTankData(data: DocumentData): TankSnapshot {
   const snapshot: TankSnapshot = {
-    status: String(data.status ?? ""),
+    status: requireTankStatusCode(data.status, "タンクのstatus"),
   };
   if (data.location != null) snapshot.location = String(data.location);
   if (data.staff != null) snapshot.staff = String(data.staff);
@@ -645,7 +663,7 @@ function nextSnapshotFromContent(
 ): TankSnapshot {
   return {
     ...prevSnapshot,
-    status: getNextStatus(content.transitionAction),
+    status: requireNextStatusCode(content.transitionAction, "ログのtransitionAction"),
     location: content.location,
     staff: content.staffName,
     logNote: content.logNote,
@@ -653,13 +671,21 @@ function nextSnapshotFromContent(
 }
 
 function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch): TankLogContent {
-  const oldTransitionAction = requireTankAction(
+  const oldTransitionAction = requireTankActionCode(
     oldLog.transitionAction ?? oldLog.action,
     "対象ログのtransitionAction"
   );
-  const transitionAction = patch.transitionAction ?? oldTransitionAction;
-  const transitionChanged = patch.transitionAction !== undefined && patch.transitionAction !== oldTransitionAction;
-  const action = patch.logAction ?? (transitionChanged ? transitionAction : stringOrDefault(oldLog.action, transitionAction));
+  const patchTransitionAction = patch.transitionAction !== undefined
+    ? requireTankActionCode(patch.transitionAction, "patch.transitionAction")
+    : undefined;
+  const transitionAction = patchTransitionAction ?? oldTransitionAction;
+  const transitionChanged = patchTransitionAction !== undefined
+    && patchTransitionAction !== oldTransitionAction;
+  const action = patch.logAction !== undefined
+    ? requireTankActionCode(patch.logAction, "patch.logAction")
+    : transitionChanged
+      ? transitionAction
+      : optionalTankActionCode(oldLog.action) ?? transitionAction;
   const tankId = patch.tankId != null ? normalizeTankId(patch.tankId) : requireString(oldLog.tankId, "対象ログのtankId");
   const identity = tankLogIdentityFromLog(oldLog, "対象ログ");
   const customer =
@@ -685,14 +711,14 @@ function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch): Ta
 }
 
 function tankLogContentFromSource(sourceLog: TankLogData): TankLogContent {
-  const transitionAction = requireTankAction(
+  const transitionAction = requireTankActionCode(
     sourceLog.transitionAction ?? sourceLog.action,
     "復元元ログのtransitionAction"
   );
   const identity = tankLogIdentityFromLog(sourceLog, "復元元ログ");
   return {
     tankId: requireString(sourceLog.tankId, "復元元ログのtankId"),
-    action: stringOrDefault(sourceLog.action, transitionAction),
+    action: optionalTankActionCode(sourceLog.action) ?? transitionAction,
     transitionAction,
     location: stringOrDefault(sourceLog.location, "倉庫"),
     staffId: identity.actor.staffId,
@@ -777,7 +803,7 @@ function requireTankSnapshot(value: unknown, label: string): TankSnapshot {
   }
   const raw = value as Record<string, unknown>;
   return {
-    status: requireString(raw.status, `${label}.status`),
+    status: requireTankStatusCode(raw.status, `${label}.status`),
     ...(raw.location != null ? { location: String(raw.location) } : {}),
     ...(raw.staff != null ? { staff: String(raw.staff) } : {}),
     ...(raw.logNote != null ? { logNote: String(raw.logNote) } : {}),
@@ -812,11 +838,50 @@ function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
 }
 
-function requireTankAction(value: unknown, label: string): TankAction {
-  if (typeof value !== "string" || !Object.values(ACTION).includes(value as TankAction)) {
+function requireTankActionCode(value: unknown, label: string): TankActionCode {
+  const code = optionalTankActionCode(value);
+  if (!code) {
     throw new Error(`${label}が不正です`);
   }
-  return value as TankAction;
+  return code;
+}
+
+function optionalTankActionCode(value: unknown): TankActionCode | null {
+  const code = normalizeTankActionCode(value);
+  if (code) return code;
+  return typeof value === "string" ? tankActionToCode(value) : null;
+}
+
+function requireTankStatusCode(value: unknown, label: string): TankStatusCode {
+  const code = optionalTankStatusCode(value);
+  if (!code) {
+    throw new Error(`${label}が不正です`);
+  }
+  return code;
+}
+
+function optionalTankStatusCode(value: unknown): TankStatusCode | null {
+  const code = normalizeTankStatusCode(value);
+  if (code) return code;
+  return typeof value === "string" ? tankStatusToCode(value) : null;
+}
+
+function requireNextStatusCode(
+  action: TankActionCode,
+  label: string
+): TankStatusCode {
+  const nextStatus = getNextStatusCode(action);
+  if (!nextStatus) {
+    throw new Error(`${label}に対応する遷移先ステータスがありません`);
+  }
+  return nextStatus;
+}
+
+function transitionFailureReason(
+  status: TankStatusCode,
+  action: TankActionCode
+): string {
+  return `「${tankStatusCodeToLegacyStatus(status)}」のタンクに「${tankActionCodeToLegacyAction(action)}」はできません`;
 }
 
 function assertNoDuplicateTankIds(inputs: TankOperationInput[]): void {

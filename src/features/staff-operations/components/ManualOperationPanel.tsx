@@ -5,6 +5,7 @@ import DrumRoll from "@/components/DrumRoll";
 import QuickSelect from "@/components/QuickSelect";
 import type { QuickSelectOption } from "@/components/QuickSelect";
 import ReturnTagSelector, { getReturnTagLabel, getReturnTagStyle } from "@/components/ReturnTagSelector";
+import type { Locale } from "@/lib/locale";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
 import type { ModeConfigItem, OpMode, TagType } from "../types";
@@ -12,6 +13,8 @@ import type { ModeConfigItem, OpMode, TagType } from "../types";
 interface ManualOperationPanelProps {
   mode: OpMode;
   config: ModeConfigItem;
+  operationLabel: string;
+  locale: Locale;
   prefixes: string[];
   customerOptions?: QuickSelectOption[];
   selectedCustomerId?: string;
@@ -23,6 +26,8 @@ interface ManualOperationPanelProps {
 export default function ManualOperationPanel({
   mode,
   config,
+  operationLabel,
+  locale,
   prefixes,
   customerOptions = [],
   selectedCustomerId = "",
@@ -155,7 +160,7 @@ export default function ManualOperationPanel({
                             color: getReturnTagStyle(item.tag).color,
                           }}
                         >
-                          {getReturnTagLabel(item.tag)}
+                          {getReturnTagLabel(item.tag, locale)}
                         </span>
                       )}
                     </div>
@@ -201,6 +206,7 @@ export default function ManualOperationPanel({
                 { value: "unused", label: "未使用" },
                 { value: "keep", label: "持ち越し" },
               ]}
+              locale={locale}
               compact
             />
           </div>
@@ -210,6 +216,7 @@ export default function ManualOperationPanel({
           <FloatingSubmitButton
             mode={mode}
             config={config}
+            operationLabel={operationLabel}
             validCount={validCount}
             submitting={submitting}
             onClick={() => handleSubmit(!isReturn)}
@@ -264,12 +271,13 @@ function OkButton({ activePrefix, inputValue, lastAdded, color, onClick, compact
 interface FloatingSubmitButtonProps {
   mode: OpMode;
   config: ModeConfigItem;
+  operationLabel: string;
   validCount: number;
   submitting: boolean;
   onClick: () => void;
 }
 
-function FloatingSubmitButton({ mode, config, validCount, submitting, onClick }: FloatingSubmitButtonProps) {
+function FloatingSubmitButton({ mode, config, operationLabel, validCount, submitting, onClick }: FloatingSubmitButtonProps) {
   const isLend = mode === "lend";
   const isReturn = mode === "return";
   const wrapperStyle = isLend
@@ -305,7 +313,7 @@ function FloatingSubmitButton({ mode, config, validCount, submitting, onClick }:
         }}
       >
         {submitting ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={16} />}
-        <span>{validCount}件の{mode === "return" ? "返却" : config.label}を実行</span>
+        <span>{validCount}件の{operationLabel}を実行</span>
       </button>
     </div>
   );

@@ -1,3 +1,5 @@
+import type { ReturnTag } from "./tank-rules";
+
 export type OperationActor = {
   staffId: string;
   staffName: string;
@@ -31,7 +33,7 @@ export type OperationWorkflow =
   | "dashboard_edit"
   | "dashboard_void";
 
-export type ReturnCondition = "normal" | "unused" | "uncharged" | "keep";
+export type ReturnCondition = ReturnTag;
 
 export type OperationContext = {
   actor: OperationActor;

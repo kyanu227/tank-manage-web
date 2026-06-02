@@ -3,25 +3,34 @@
 import { useCallback, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import type { Locale } from "@/lib/locale";
+import {
+  getManualOperationConfirmMessage,
+  getManualOperationSuccessMessage,
+  getManualReturnConfirmMessage,
+  getManualReturnSuccessMessage,
+} from "@/lib/operation-messages";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
-import type {
-  CustomerSnapshot,
-  OperationContext,
-  ReturnCondition,
-} from "@/lib/operation-context";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
+import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
+import type { CustomerSnapshot, OperationContext } from "@/lib/operation-context";
+import {
+  returnTagToReturnCondition,
+  returnTagToStoredLogNote,
+} from "@/lib/return-tag-rules";
 import {
   RETURN_TAG,
-  resolveReturnAction,
-  validateTransition,
   type ReturnTag,
-  type TankAction,
+  resolveReturnActionCode,
+  validateTransitionCode,
 } from "@/lib/tank-rules";
 import type { ModeConfigItem, OpMode, QueueItem, TagType, TankMap } from "../types";
 
 interface UseManualTankOperationParams {
   mode: OpMode;
   config: ModeConfigItem;
+  locale: Locale;
   allTanks: TankMap;
   selectedCustomer?: CustomerSnapshot | null;
   fetchData: () => Promise<void>;
@@ -48,7 +57,7 @@ export interface UseManualTankOperationResult {
 
 export function useManualTankOperation({
   mode,
-  config,
+  locale,
   allTanks,
   selectedCustomer,
   fetchData,
@@ -98,13 +107,18 @@ export function useManualTankOperation({
       valid = false;
       error = "未登録タンク";
     } else {
-      const actionToValidate: TankAction = mode === "return"
-        ? resolveReturnAction(returnTag as ReturnTag, currentStatus)
-        : config.action;
-      const v = validateTransition(currentStatus, actionToValidate);
-      if (!v.ok) {
+      const statusCode = coerceTankStatusCode(currentStatus);
+      if (!statusCode) {
         valid = false;
-        error = v.reason || `[${currentStatus}] は不可`;
+        error = "タンク状態が不正です";
+      } else {
+        const actionToValidate = mode === "return"
+          ? resolveReturnActionCode(returnTag as ReturnTag, statusCode)
+          : mode;
+        if (!validateTransitionCode(statusCode, actionToValidate)) {
+          valid = false;
+          error = `${getTankStatusLabel(statusCode, locale)} は不可`;
+        }
       }
     }
 
@@ -118,7 +132,7 @@ export function useManualTankOperation({
     successTimeoutRef.current = setTimeout(() => {
       setLastAdded(null);
     }, 1500);
-  }, [allTanks, config.action, mode, opQueue, returnTag]);
+  }, [allTanks, locale, mode, opQueue, returnTag]);
 
   const handleInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/[^0-9]/g, "");
@@ -166,14 +180,21 @@ export function useManualTankOperation({
       return;
     }
 
+    const keepCount = mode === "return"
+      ? validItems.filter((item) => item.tag === RETURN_TAG.KEEP).length
+      : 0;
+    const returnCount = validItems.length - keepCount;
+
     if (!skipConfirm) {
-      const keepCount = mode === "return"
-        ? validItems.filter((item) => item.tag === RETURN_TAG.KEEP).length
-        : 0;
-      const returnCount = validItems.length - keepCount;
-      const confirmMessage = keepCount > 0
-        ? `返却: ${returnCount}本 / 持ち越し: ${keepCount}本を処理しますか？`
-        : `${config.label}：${validItems.length}本を処理しますか？`;
+      const confirmMessage = mode === "return"
+        ? getManualReturnConfirmMessage(locale, {
+            tankCount: validItems.length,
+            returnCount,
+            keepCount,
+          })
+        : getManualOperationConfirmMessage(mode, locale, {
+            tankCount: validItems.length,
+          });
       if (!confirm(confirmMessage)) return;
     }
 
@@ -192,9 +213,13 @@ export function useManualTankOperation({
       await applyBulkTankOperations(
         validItems.map((item) => {
           const tag = (item.tag || RETURN_TAG.NORMAL) as ReturnTag;
-          const resolvedAction: TankAction = mode === "return"
-            ? resolveReturnAction(tag, item.status || "")
-            : config.action;
+          const statusCode = coerceTankStatusCode(item.status ?? "");
+          if (!statusCode) {
+            throw new Error(`[${item.tankId}] タンク状態が不正です`);
+          }
+          const resolvedAction = mode === "return"
+            ? resolveReturnActionCode(tag, statusCode)
+            : mode;
 
           const currentTank = allTanks[item.tankId];
           let finalLocation = "倉庫";
@@ -207,12 +232,10 @@ export function useManualTankOperation({
             if (tag === RETURN_TAG.KEEP) {
               finalLocation = currentTank?.location || "不明";
               finalLogNote = "持ち越し";
-            } else if (tag === RETURN_TAG.UNUSED) {
-              finalTankNote = "[TAG:unused]";
-              finalLogNote = finalTankNote;
-            } else if (tag === RETURN_TAG.UNCHARGED) {
-              finalTankNote = "[TAG:uncharged]";
-              finalLogNote = finalTankNote;
+            } else {
+              const storedLogNote = returnTagToStoredLogNote(tag);
+              finalTankNote = storedLogNote;
+              finalLogNote = storedLogNote;
             }
           }
 
@@ -223,7 +246,7 @@ export function useManualTankOperation({
             context: mode === "return"
               ? {
                   ...baseContext,
-                  returnCondition: returnConditionFromTag(tag),
+                  returnCondition: returnTagToReturnCondition(tag),
                 }
               : baseContext,
             location: finalLocation,
@@ -233,15 +256,27 @@ export function useManualTankOperation({
         })
       );
 
-      alert(`${validItems.length}本の処理が完了しました`);
+      const successMessage = mode === "return"
+        ? getManualReturnSuccessMessage(locale, {
+            tankCount: validItems.length,
+            returnCount,
+            keepCount,
+          })
+        : getManualOperationSuccessMessage(mode, locale, {
+            tankCount: validItems.length,
+          });
+      alert(successMessage);
       setOpQueue([]);
       fetchData();
-    } catch (e: any) {
-      alert("エラー: " + e.message);
+    } catch (e: unknown) {
+      const errorMessage = e && typeof e === "object" && "message" in e
+        ? String((e as { message: unknown }).message)
+        : undefined;
+      alert("エラー: " + errorMessage);
     } finally {
       setSubmitting(false);
     }
-  }, [allTanks, config.action, config.label, fetchData, mode, opQueue, selectedCustomer]);
+  }, [allTanks, fetchData, locale, mode, opQueue, selectedCustomer]);
 
   const validCount = useMemo(() => opQueue.filter(q => q.valid).length, [opQueue]);
 
@@ -263,18 +298,4 @@ export function useManualTankOperation({
     handleSubmit,
     reset,
   };
-}
-
-function returnConditionFromTag(tag: ReturnTag): ReturnCondition {
-  switch (tag) {
-    case RETURN_TAG.UNUSED:
-      return "unused";
-    case RETURN_TAG.UNCHARGED:
-      return "uncharged";
-    case RETURN_TAG.KEEP:
-      return "keep";
-    case RETURN_TAG.NORMAL:
-    default:
-      return "normal";
-  }
 }

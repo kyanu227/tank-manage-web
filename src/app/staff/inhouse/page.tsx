@@ -2,20 +2,23 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-import { STATUS, ACTION, resolveReturnAction, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { ACTION, resolveReturnActionCode, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
+import { storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { tryParseTankId } from "@/lib/tank-id";
 import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
-import { updateLogNote } from "@/lib/firebase/tank-tag-service";
+import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
 import TankIdInput from "@/components/TankIdInput";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
-import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
-type TagType = "normal" | "unused" | "uncharged";
+type TagType = Exclude<ReturnTag, typeof RETURN_TAG.KEEP>;
 
 const ACCENT = "#6366f1";
 
 export default function InHousePage() {
+  const staffLocale = useStaffLocale();
   const { tanks: allTanks, tankMap, prefixes, loading, refetch } = useTanks();
   const [activePrefix, setActivePrefix] = useState<string | null>(null);
   const [numberValue, setNumberValue] = useState("");
@@ -42,11 +45,12 @@ export default function InHousePage() {
   // 自社利用中タンク（tagOverrides を反映）
   const inHouseTanks = useMemo(() => {
     const list = allTanks
-      .filter((t) => t.status === STATUS.IN_HOUSE)
+      .filter((t) => coerceTankStatusCode(t.status) === "in_house")
       .map((t) => {
-        const baseTag: TagType =
-          t.logNote === "[TAG:unused]" ? "unused" :
-          t.logNote === "[TAG:uncharged]" ? "uncharged" : "normal";
+        const baseReturnTag = storedMarkerToReturnTag(t.logNote);
+        const baseTag: TagType = baseReturnTag === RETURN_TAG.KEEP
+          ? RETURN_TAG.NORMAL
+          : baseReturnTag;
         return {
           id: t.id,
           status: t.status,
@@ -63,10 +67,7 @@ export default function InHousePage() {
   const updateTag = async (tankId: string, newTag: TagType) => {
     setTagOverrides((prev) => ({ ...prev, [tankId]: newTag }));
     try {
-      let logNote = "";
-      if (newTag === "unused") logNote = "[TAG:unused]";
-      if (newTag === "uncharged") logNote = "[TAG:uncharged]";
-      await updateLogNote(tankId, logNote);
+      await updateTankReturnTagMarker(tankId, newTag);
     } catch (e) {
       console.error("Failed to update tag", e);
       // 失敗時はオーバーライドを取り消して最新状態を取り直す
@@ -97,7 +98,7 @@ export default function InHousePage() {
         setReportResult({ success: false, message: `${tankId} は登録されていません` });
         return;
       }
-      if (tank.status === STATUS.IN_HOUSE) {
+      if (coerceTankStatusCode(tank.status) === "in_house") {
         setReportResult({ success: true, message: `${tankId} は既に自社利用中です` });
         return;
       }
@@ -133,8 +134,8 @@ export default function InHousePage() {
           const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
           return {
             tankId: tank.id,
-            transitionAction: resolveReturnAction(tag, STATUS.IN_HOUSE),
-            currentStatus: STATUS.IN_HOUSE,
+            transitionAction: resolveReturnActionCode(tag, "in_house"),
+            currentStatus: "in_house",
             context,
             location: "倉庫",
           };
@@ -220,6 +221,7 @@ export default function InHousePage() {
                           { value: "uncharged", label: "未充填" },
                           { value: "unused", label: "未使用" },
                         ]}
+                        locale={staffLocale}
                         compact
                       />
                     </div>

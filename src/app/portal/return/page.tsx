@@ -9,7 +9,6 @@ import ReturnTagSelector, { getReturnTagLabel, getReturnTagStyle, type ReturnTag
 import { createPortalReturnRequests } from "@/lib/firebase/portal-transaction-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
-import { STATUS } from "@/lib/tank-rules";
 
 type Condition = ReturnTagValue;
 
@@ -22,6 +21,18 @@ interface TankItem {
 function fmtDate(d: Date | null): string {
   if (!d) return "日付不明";
   return `${d.getMonth() + 1}/${d.getDate()} 貸出`;
+}
+
+function timestampToDate(value: unknown): Date | null {
+  if (
+    typeof value === "object"
+    && value !== null
+    && "toDate" in value
+    && typeof value.toDate === "function"
+  ) {
+    return value.toDate();
+  }
+  return null;
 }
 
 export default function CustomerReturnPage() {
@@ -47,12 +58,12 @@ export default function CustomerReturnPage() {
       }
 
       const [tankDocs, settingsDoc] = await Promise.all([
-        tanksRepository.getTanks({ location: currentIdentity.customerName, status: STATUS.LENT }),
+        tanksRepository.getTanks({ location: currentIdentity.customerName, status: "lent" }),
         getDoc(doc(db, "settings", "portal")),
       ]);
 
       const items: TankItem[] = tankDocs.map((t) => {
-        const lentAt = (t.updatedAt as any)?.toDate?.() ?? null;
+        const lentAt = timestampToDate(t.updatedAt);
         return { id: t.id, lentAt, condition: "normal" };
       });
       // Sort by lent date ascending (oldest first)

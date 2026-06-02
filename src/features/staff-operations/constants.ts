@@ -1,6 +1,8 @@
 "use client";
 
 import { ArrowDownToLine, ArrowUpFromLine, Droplets } from "lucide-react";
+import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
+import type { Locale } from "@/lib/locale";
 import { ACTION } from "@/lib/tank-rules";
 import type {
   ModeConfig,
@@ -35,3 +37,8 @@ export const MODE_CONFIG: ModeConfig = {
     action: ACTION.FILL,
   },
 };
+
+export function getOperationModeLabel(mode: OpMode, locale: Locale): string {
+  const config = MODE_CONFIG[mode];
+  return getLegacyTankActionLabel(config.action, locale) ?? config.label;
+}

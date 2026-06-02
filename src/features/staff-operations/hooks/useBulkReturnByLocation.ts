@@ -2,10 +2,12 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
-import { updateLogNote } from "@/lib/firebase/tank-tag-service";
+import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
+import { storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
-import { RETURN_TAG, STATUS, resolveReturnAction, type ReturnTag } from "@/lib/tank-rules";
+import { coerceTankStatusCode, type TankStatusCode } from "@/lib/tank-action-status-codes";
+import { RETURN_TAG, resolveReturnActionCode, type ReturnTag } from "@/lib/tank-rules";
 import type { BulkReturnDatePool, BulkReturnGroupMeta, BulkTagType, BulkTankDoc } from "../types";
 
 type BulkTankWithTag = BulkTankDoc & { tag: BulkTagType };
@@ -42,8 +44,8 @@ function formatJstMonthDay(millis: number): string {
   }).format(new Date(millis));
 }
 
-function resolveDatePool(status: string, updatedAt: unknown, nowMillis: number): BulkReturnDatePool {
-  if (status === STATUS.UNRETURNED) return "long_term";
+function resolveDatePool(status: TankStatusCode, updatedAt: unknown, nowMillis: number): BulkReturnDatePool {
+  if (status === "unreturned") return "long_term";
   const updatedMillis = toMillis(updatedAt);
   if (updatedMillis == null) return "unknown_lent";
 
@@ -152,21 +154,19 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     setBulkLoading(true);
     try {
       const tanks = await tanksRepository.getTanks({
-        statusIn: [STATUS.LENT, STATUS.UNRETURNED],
+        statusIn: ["lent", "unreturned"],
       });
       const groups: Record<string, BulkTankWithTag[]> = {};
       const metas: Record<string, BulkReturnGroupMeta> = {};
       const nowMillis = Date.now();
       tanks.forEach((tank) => {
         const loc = tank.location || "不明";
-        const pool = resolveDatePool(tank.status, tank.updatedAt, nowMillis);
+        const status = requireBulkTankStatusCode(tank.status, tank.id);
+        const pool = resolveDatePool(status, tank.updatedAt, nowMillis);
         const groupKey = `${pool}::${loc}`;
         const sortMillis = toMillis(tank.updatedAt);
         if (!groups[groupKey]) groups[groupKey] = [];
-        let tag: BulkTagType = "normal";
-        if (tank.logNote === "[TAG:unused]") tag = "unused";
-        if (tank.logNote === "[TAG:uncharged]") tag = "uncharged";
-        if (tank.status === STATUS.LENT && tank.logNote === "[TAG:keep]") tag = "keep";
+        const tag = storedMarkerToReturnTag(tank.logNote, { allowKeep: status === "lent" });
         groups[groupKey].push({ ...tank, tag } as unknown as BulkTankWithTag);
         const currentSortMillis = metas[groupKey]?.sortMillis ?? null;
         const mergedSortMillis = mergeSortMillis(pool, currentSortMillis, sortMillis);
@@ -194,7 +194,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   const updateTag = useCallback(async (groupKey: string, tankId: string, newTag: BulkTagType) => {
     const targetTank = groupedTanks[groupKey]?.find((tank) => tank.id === tankId);
     if (!targetTank) return;
-    if (newTag === RETURN_TAG.KEEP && targetTank.status !== STATUS.LENT) {
+    if (newTag === RETURN_TAG.KEEP && coerceTankStatusCode(targetTank.status) !== "lent") {
       alert("持ち越しは貸出中のタンクのみ選択できます。");
       return;
     }
@@ -204,14 +204,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       return g;
     });
     try {
-      let logNote = "";
-      if (newTag === RETURN_TAG.UNUSED) logNote = "[TAG:unused]";
-      if (newTag === RETURN_TAG.UNCHARGED) logNote = "[TAG:uncharged]";
-      if (newTag === RETURN_TAG.KEEP) {
-        await updateLogNote(tankId, "");
-        return;
-      }
-      await updateLogNote(tankId, logNote);
+      await updateTankReturnTagMarker(tankId, newTag);
     } catch (e) {
       console.error("Failed to update tag", e);
       fetchBulkTanks();
@@ -224,7 +217,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     const meta = groupMeta[groupKey];
     const loc = meta?.location ?? tanksToReturn[0]?.location ?? "不明";
     const groupLabel = meta ? `${loc}（${meta.poolLabel}）` : loc;
-    const invalidKeepTanks = tanksToReturn.filter((tank) => tank.tag === RETURN_TAG.KEEP && tank.status !== STATUS.LENT);
+    const invalidKeepTanks = tanksToReturn.filter((tank) => tank.tag === RETURN_TAG.KEEP && coerceTankStatusCode(tank.status) !== "lent");
     if (invalidKeepTanks.length > 0) {
       alert("持ち越しは貸出中のタンクのみ処理できます。未返却タンクの持ち越しを外してください。");
       return;
@@ -246,7 +239,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
           const isKeep = tag === RETURN_TAG.KEEP;
           return {
             tankId: tank.id,
-            transitionAction: resolveReturnAction(tag, tank.status),
+            transitionAction: resolveReturnActionCode(tag, requireBulkTankStatusCode(tank.status, tank.id)),
             currentStatus: tank.status,
             context,
             location: isKeep ? tank.location || loc || "不明" : "倉庫",
@@ -261,8 +254,8 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
         : `${groupLabel} の一括返却が完了しました。`;
       alert(completeMessage);
       fetchBulkTanks();
-    } catch (e: any) {
-      alert("エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("エラー: " + errorMessage(e));
     } finally {
       setReturning(prev => ({ ...prev, [groupKey]: false }));
     }
@@ -285,4 +278,16 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     updateTag,
     handleBulkReturnForGroup,
   };
+}
+
+function requireBulkTankStatusCode(status: string, tankId: string): TankStatusCode {
+  const code = coerceTankStatusCode(status);
+  if (!code) {
+    throw new Error(`[${tankId}] status が不正です`);
+  }
+  return code;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

@@ -5,6 +5,7 @@ import {
   doc,
   runTransaction,
   serverTimestamp,
+  type DocumentData,
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import type { OperationActor } from "@/lib/operation-context";
@@ -31,31 +32,33 @@ export interface SubmitTankEntryBatchResult {
   totalCost: number;
 }
 
+type NormalizedTankEntryBatch = {
+  mode: TankEntryMode;
+  tankIds: string[];
+  tankType: string;
+  initialStatus: string;
+  location: string;
+  note: string;
+  nextMaintenanceDate?: string;
+  purchaseDate?: string;
+  vendor?: string;
+  unitCost: number;
+  totalCost: number;
+  actor: OperationActor;
+};
+
 export async function submitTankEntryBatch(
   input: SubmitTankEntryBatchInput
 ): Promise<SubmitTankEntryBatchResult> {
-  const tankIds = uniqueTankIds(input.tankIds);
-  const tankType = String(input.tankType || "").trim();
-  const location = String(input.location || "").trim();
-  const note = String(input.note || "").trim();
-  const actor = normalizeActor(input.actor);
-  const nextMaintenanceDate = normalizeDateYmd(input.nextMaintenanceDate);
-  const purchaseDate = normalizeDateYmd(input.purchaseDate);
-  const unitCost = input.mode === "purchase" ? Number(input.unitCost) || 0 : 0;
-  const totalCost = unitCost * tankIds.length;
-
-  if (tankIds.length === 0) throw new Error("タンクIDを1件以上追加してください");
-  if (!tankType) throw new Error("タンク種別を選択してください");
-  if (!location) throw new Error("保管場所を選択してください");
-  if (input.mode === "purchase" && unitCost <= 0) {
-    throw new Error("購入単価を入力してください");
-  }
+  const batchInput = normalizeTankEntryBatch(input);
+  validateTankEntryBatch(batchInput);
 
   const procurementRef = doc(collection(db, "tankProcurements"));
   const logRef = doc(collection(db, "logs"));
 
+  // procurement は初期登録・購入記録であり、通常の tank operation 状態遷移とは分けて直接作成する。
   await runTransaction(db, async (tx) => {
-    for (const tankId of tankIds) {
+    for (const tankId of batchInput.tankIds) {
       const tankRef = doc(db, "tanks", tankId);
       const tankSnap = await tx.get(tankRef);
       if (tankSnap.exists()) {
@@ -63,61 +66,109 @@ export async function submitTankEntryBatch(
       }
     }
 
-    for (const tankId of tankIds) {
+    for (const tankId of batchInput.tankIds) {
       const tankRef = doc(db, "tanks", tankId);
-      tx.set(tankRef, {
-        status: input.initialStatus,
-        location,
-        type: tankType,
-        ...(note ? { note } : {}),
-        ...(nextMaintenanceDate ? { nextMaintenanceDate } : {}),
-        updatedAt: serverTimestamp(),
-        createdAt: serverTimestamp(),
-      });
+      tx.set(tankRef, buildTankCreationPayload(batchInput));
     }
 
-    tx.set(procurementRef, {
-      kind: input.mode,
-      tankIds,
-      itemCount: tankIds.length,
-      tankType,
-      initialStatus: input.initialStatus,
-      location,
-      note,
-      ...(nextMaintenanceDate ? { nextMaintenanceDate } : {}),
-      ...(purchaseDate ? { purchaseDate } : {}),
-      ...(input.vendor?.trim() ? { vendor: input.vendor.trim() } : {}),
-      unitCost,
-      totalCost,
-      logId: logRef.id,
-      staff: actor.staffName,
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp(),
-    });
-
-    tx.set(logRef, {
-      tankId: summarizeTankIds(tankIds),
-      action: input.mode === "purchase" ? "タンク購入" : "タンク登録",
-      newStatus: input.initialStatus,
-      location,
-      staffId: actor.staffId,
-      staffName: actor.staffName,
-      ...(actor.staffEmail ? { staffEmail: actor.staffEmail } : {}),
-      note: buildLogNote({
-        tankIds,
-        tankType,
-        note,
-        totalCost,
-        mode: input.mode,
-      }),
-      logStatus: "active",
-      logKind: "procurement",
-      procurementId: procurementRef.id,
-      timestamp: serverTimestamp(),
-    });
+    tx.set(procurementRef, buildTankProcurementPayload(batchInput, logRef.id));
+    tx.set(logRef, buildProcurementLogPayload(batchInput, procurementRef.id));
   });
 
-  return { count: tankIds.length, totalCost };
+  return { count: batchInput.tankIds.length, totalCost: batchInput.totalCost };
+}
+
+function normalizeTankEntryBatch(input: SubmitTankEntryBatchInput): NormalizedTankEntryBatch {
+  const tankIds = uniqueTankIds(input.tankIds);
+  const tankType = String(input.tankType || "").trim();
+  const location = String(input.location || "").trim();
+  const note = String(input.note || "").trim();
+  const actor = normalizeActor(input.actor);
+  const nextMaintenanceDate = normalizeDateYmd(input.nextMaintenanceDate);
+  const purchaseDate = normalizeDateYmd(input.purchaseDate);
+  const vendor = String(input.vendor || "").trim();
+  const unitCost = input.mode === "purchase" ? Number(input.unitCost) || 0 : 0;
+  const totalCost = unitCost * tankIds.length;
+
+  return {
+    mode: input.mode,
+    tankIds,
+    tankType,
+    initialStatus: input.initialStatus,
+    location,
+    note,
+    ...(nextMaintenanceDate ? { nextMaintenanceDate } : {}),
+    ...(purchaseDate ? { purchaseDate } : {}),
+    ...(vendor ? { vendor } : {}),
+    unitCost,
+    totalCost,
+    actor,
+  };
+}
+
+function validateTankEntryBatch(input: NormalizedTankEntryBatch): void {
+  if (input.tankIds.length === 0) throw new Error("タンクIDを1件以上追加してください");
+  if (!input.tankType) throw new Error("タンク種別を選択してください");
+  if (!input.location) throw new Error("保管場所を選択してください");
+  if (input.mode === "purchase" && input.unitCost <= 0) {
+    throw new Error("購入単価を入力してください");
+  }
+}
+
+function buildTankCreationPayload(input: NormalizedTankEntryBatch): DocumentData {
+  return {
+    status: input.initialStatus,
+    location: input.location,
+    type: input.tankType,
+    ...(input.note ? { note: input.note } : {}),
+    ...(input.nextMaintenanceDate ? { nextMaintenanceDate: input.nextMaintenanceDate } : {}),
+    updatedAt: serverTimestamp(),
+    createdAt: serverTimestamp(),
+  };
+}
+
+function buildTankProcurementPayload(
+  input: NormalizedTankEntryBatch,
+  logId: string,
+): DocumentData {
+  return {
+    kind: input.mode,
+    tankIds: input.tankIds,
+    itemCount: input.tankIds.length,
+    tankType: input.tankType,
+    initialStatus: input.initialStatus,
+    location: input.location,
+    note: input.note,
+    ...(input.nextMaintenanceDate ? { nextMaintenanceDate: input.nextMaintenanceDate } : {}),
+    ...(input.purchaseDate ? { purchaseDate: input.purchaseDate } : {}),
+    ...(input.vendor ? { vendor: input.vendor } : {}),
+    unitCost: input.unitCost,
+    totalCost: input.totalCost,
+    logId,
+    staff: input.actor.staffName,
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  };
+}
+
+function buildProcurementLogPayload(
+  input: NormalizedTankEntryBatch,
+  procurementId: string,
+): DocumentData {
+  return {
+    tankId: summarizeTankIds(input.tankIds),
+    action: input.mode === "purchase" ? "タンク購入" : "タンク登録",
+    newStatus: input.initialStatus,
+    location: input.location,
+    staffId: input.actor.staffId,
+    staffName: input.actor.staffName,
+    ...(input.actor.staffEmail ? { staffEmail: input.actor.staffEmail } : {}),
+    note: buildLogNote(input),
+    logStatus: "active",
+    logKind: "procurement",
+    procurementId,
+    timestamp: serverTimestamp(),
+  };
 }
 
 function normalizeActor(actor: OperationActor): OperationActor {

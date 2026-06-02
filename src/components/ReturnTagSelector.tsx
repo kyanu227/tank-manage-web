@@ -2,8 +2,11 @@
 
 import { AlertCircle, Clock, Droplets, type LucideIcon } from "lucide-react";
 import { useRef } from "react";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
+import { getReturnTagLabel as getLocalizedReturnTagLabel } from "@/lib/return-tag-labels";
+import type { ReturnTag } from "@/lib/return-tag-rules";
 
-export type ReturnTagValue = "normal" | "unused" | "uncharged" | "keep";
+export type ReturnTagValue = ReturnTag;
 
 export interface ReturnTagOption {
   value: Exclude<ReturnTagValue, "normal">;
@@ -18,6 +21,7 @@ interface ReturnTagSelectorProps<T extends ReturnTagValue = ReturnTagValue> {
   swipeLeftValue?: T;
   swipeRightValue?: T;
   compact?: boolean;
+  locale?: Locale;
 }
 
 const TAG_STYLES: Record<Exclude<ReturnTagValue, "normal">, {
@@ -57,11 +61,11 @@ export function getReturnTagStyle(value: ReturnTagValue): {
   return TAG_STYLES[value];
 }
 
-export function getReturnTagLabel(value: ReturnTagValue): string {
-  if (value === "normal") return "通常";
-  if (value === "unused") return "未使用";
-  if (value === "uncharged") return "未充填";
-  return "持ち越し";
+export function getReturnTagLabel(
+  value: ReturnTagValue,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return getLocalizedReturnTagLabel(value, locale);
 }
 
 export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagValue>({
@@ -72,6 +76,7 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
   swipeLeftValue,
   swipeRightValue,
   compact = false,
+  locale = DEFAULT_LOCALE,
 }: ReturnTagSelectorProps<T>) {
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
   const suppressClickRef = useRef(false);
@@ -147,7 +152,7 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
             }}
           >
             <Icon size={compact ? 13 : 14} />
-            <span>{option.label}</span>
+            <span>{getReturnTagLabel(option.value, locale)}</span>
           </button>
         );
       })}

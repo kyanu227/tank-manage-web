@@ -4,9 +4,10 @@ import type {
   PortalIdentity,
 } from "@/lib/portal";
 import { transactionsRepository } from "@/lib/firebase/repositories";
+import type { ReturnTag } from "@/lib/return-tag-rules";
 
 export type PortalDeliveryType = "pickup" | "delivery";
-export type PortalReturnCondition = "normal" | "unused" | "uncharged" | "keep";
+export type PortalReturnCondition = ReturnTag;
 export type PortalReturnSource = "customer_portal" | "auto_schedule";
 export type PortalUnfilledSource = "customer_app" | "customer_portal";
 
@@ -31,6 +32,11 @@ export type CreatePortalUnfilledReportsInput = {
   identity: LinkedPortalIdentity;
   tankIds: string[];
   source?: PortalUnfilledSource;
+};
+
+type PendingPortalReturnRequestItem = {
+  tankId: string;
+  condition: PortalReturnCondition;
 };
 
 export async function createPortalOrder(
@@ -67,31 +73,13 @@ export async function createPortalOrder(
 export async function createPortalReturnRequests(
   input: CreatePortalReturnRequestsInput,
 ): Promise<string[]> {
-  const items = input.items
-    .map((item) => ({
-      tankId: item.tankId.trim(),
-      condition: item.condition,
-    }))
-    .filter((item) => item.tankId);
+  const items = normalizePortalReturnRequestItems(input.items);
 
   if (items.length === 0) {
     throw new Error("Portal return requires at least one tank.");
   }
 
-  return Promise.all(
-    items.map((item) =>
-      transactionsRepository.createTransaction({
-        type: "return",
-        status: "pending_return",
-        tankId: item.tankId,
-        condition: item.condition,
-        customerId: input.identity.customerId,
-        customerName: input.identity.customerName,
-        createdByUid: input.identity.customerUserUid,
-        source: input.source,
-      }),
-    ),
-  );
+  return Promise.all(items.map((item) => createPendingPortalReturnRequest(input, item)));
 }
 
 export async function createPortalUnfilledReports(
@@ -144,4 +132,32 @@ function normalizeOrderItems(items: OrderItem[]): OrderItem[] {
       quantity: Number(item.quantity) || 0,
     }))
     .filter((item) => item.tankType && item.quantity > 0);
+}
+
+function normalizePortalReturnRequestItems(
+  items: CreatePortalReturnRequestsInput["items"],
+): PendingPortalReturnRequestItem[] {
+  return items
+    .map((item) => ({
+      tankId: item.tankId.trim(),
+      condition: item.condition,
+    }))
+    .filter((item) => item.tankId);
+}
+
+function createPendingPortalReturnRequest(
+  input: CreatePortalReturnRequestsInput,
+  item: PendingPortalReturnRequestItem,
+): Promise<string> {
+  // ポータル返却は申請作成のみ。tanks/logs の更新はスタッフ返却確定側で行う。
+  return transactionsRepository.createTransaction({
+    type: "return",
+    status: "pending_return",
+    tankId: item.tankId,
+    condition: item.condition,
+    customerId: input.identity.customerId,
+    customerName: input.identity.customerName,
+    createdByUid: input.identity.customerUserUid,
+    source: input.source,
+  });
 }

@@ -2,7 +2,8 @@
 
 import { useState, useMemo } from "react";
 import { ShieldCheck, CheckCircle2, Send, Loader2, Sparkles, AlertTriangle } from "lucide-react";
-import { STATUS, ACTION } from "@/lib/tank-rules";
+import { ACTION } from "@/lib/tank-rules";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
@@ -17,11 +18,15 @@ const ACCENT_BG = "#f5f3ff";
 const MS_PER_DAY = 1000 * 60 * 60 * 24;
 
 /** Firestore Timestamp | Date | 文字列 などから Date を取り出す。取れなければ null。 */
-function toDate(v: any): Date | null {
+function toDate(v: unknown): Date | null {
   if (!v) return null;
   if (v instanceof Date) return v;
-  if (typeof v?.toDate === "function") return v.toDate();
-  if (typeof v?.toMillis === "function") return new Date(v.toMillis());
+  if (typeof (v as { toDate?: unknown }).toDate === "function") {
+    return (v as { toDate: () => Date }).toDate();
+  }
+  if (typeof (v as { toMillis?: unknown }).toMillis === "function") {
+    return new Date((v as { toMillis: () => number }).toMillis());
+  }
   if (typeof v === "number") return new Date(v);
   if (typeof v === "string") {
     // 旧GAS互換の "YYYY/MM/DD" と ISO文字列の両方を受ける
@@ -61,7 +66,7 @@ export default function InspectionPage() {
     limit.setMonth(limit.getMonth() + settings.alertMonths);
 
     return allTanks
-      .filter((t) => t.status !== STATUS.DISPOSED)
+      .filter((t) => coerceTankStatusCode(t.status) !== "disposed")
       .map((t) => ({ tank: t, nextDate: toDate(t.nextMaintenanceDate) }))
       .filter(({ nextDate }) => nextDate && nextDate.getTime() <= limit.getTime())
       .map(({ tank, nextDate }) => {
@@ -127,8 +132,8 @@ export default function InspectionPage() {
       setResult({ success: true, message: `${selected.length}本の耐圧検査完了を処理しました` });
       setSelectedIds(new Set());
       refetch();
-    } catch (e: any) {
-      setResult({ success: false, message: e.message });
+    } catch (e: unknown) {
+      setResult({ success: false, message: errorMessage(e) });
     } finally {
       setSubmitting(false);
     }
@@ -410,4 +415,8 @@ export default function InspectionPage() {
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

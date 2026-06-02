@@ -1,6 +1,7 @@
 import { collection, doc, getDocs, serverTimestamp, writeBatch, type DocumentData } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { assertNotChangedSinceLoad, createDocId, hasFieldChanges, isNewDocId } from "@/lib/firebase/diff-write";
+import { normalizeLocale, type Locale } from "@/lib/locale";
 import {
   deleteStaffAuthMirrorInBatch,
   setStaffAuthMirrorInBatch,
@@ -15,6 +16,7 @@ export interface StaffMember {
   role: "一般" | "準管理者" | "管理者";
   rank: string;
   isActive: boolean;
+  locale?: Locale;
   authUid?: string;
   authEmail?: string;
   updatedAt?: unknown;
@@ -23,7 +25,10 @@ export interface StaffMember {
 export async function listStaffMembers(): Promise<StaffMember[]> {
   const snap = await getDocs(collection(db, "staff"));
   const staff: StaffMember[] = [];
-  snap.forEach((d) => staff.push({ id: d.id, ...d.data() } as StaffMember));
+  snap.forEach((d) => {
+    const data = d.data() as Omit<StaffMember, "id">;
+    staff.push({ id: d.id, ...data, locale: normalizeLocale(data.locale) });
+  });
   return staff;
 }
 
@@ -52,6 +57,7 @@ export async function saveStaffMembers({
       role: s.role,
       rank: s.rank,
       isActive: s.isActive,
+      locale: normalizeLocale(s.locale),
     };
 
     if (isNewDocId(s.id)) {

@@ -27,7 +27,7 @@ import {
 import { logsRepository, transactionsRepository } from "@/lib/firebase/repositories";
 import type { TransactionDoc } from "@/lib/firebase/repositories/types";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
-import { requireStaffIdentity, useStaffSession } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale, useStaffSession } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import {
   applyLogCorrection,
@@ -38,12 +38,15 @@ import {
 } from "@/lib/tank-operation";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import { db } from "@/lib/firebase/config";
+import { STATUS_COLORS } from "@/lib/tank-rules";
 import {
-  ACTION,
-  STATUS,
-  STATUS_COLORS,
-  type TankAction,
-} from "@/lib/tank-rules";
+  coerceTankActionCode,
+  coerceTankStatusCode,
+  tankStatusCodeToLegacyStatus,
+  type TankActionCode,
+} from "@/lib/tank-action-status-codes";
+import { getDashboardActionBadgeTone } from "@/lib/tank-action-status-display";
+import { getLegacyTankActionLabel, getLegacyTankStatusLabel } from "@/lib/tank-action-status-labels";
 
 type LogSortOrder = "desc" | "asc";
 
@@ -100,11 +103,11 @@ type BulkLocationOption = {
 type BulkLocationMode = "lend" | "inhouse" | null;
 
 const LIMIT_MS = 72 * 60 * 60 * 1000;
-const ACTION_OPTIONS = Object.values(ACTION) as TankAction[];
 const IN_HOUSE_LOCATION_VALUE = "__inhouse__";
 
 export default function StaffDashboard() {
   const session = useStaffSession();
+  const staffLocale = useStaffLocale();
   const correctionRole = useMemo(
     () => normalizeCorrectionRole(session?.role),
     [session?.role]
@@ -210,10 +213,11 @@ export default function StaffDashboard() {
   const byLocation = useMemo(() => {
     const map: Record<string, { lent: number; unreturned: number }> = {};
     tanks.forEach((tank) => {
-      if (tank.status !== STATUS.LENT && tank.status !== STATUS.UNRETURNED) return;
+      const statusCode = coerceTankStatusCode(tank.status);
+      if (statusCode !== "lent" && statusCode !== "unreturned") return;
       const location = (tank.location || "未設定").trim() || "未設定";
       if (!map[location]) map[location] = { lent: 0, unreturned: 0 };
-      if (tank.status === STATUS.LENT) map[location].lent += 1;
+      if (statusCode === "lent") map[location].lent += 1;
       else map[location].unreturned += 1;
     });
 
@@ -269,10 +273,10 @@ export default function StaffDashboard() {
 
   const bulkLocationMode = useMemo(() => {
     if (selectedLogs.length === 0) return null;
-    const actions = selectedLogs.map((log) => toTankAction(log.transitionAction ?? log.action));
+    const actions = selectedLogs.map((log) => toTankActionCode(log.transitionAction ?? log.action));
     if (actions.some((action) => action == null)) return null;
-    if (actions.every((action) => action === ACTION.LEND)) return "lend";
-    if (actions.every((action) => action === ACTION.IN_HOUSE_USE || action === ACTION.IN_HOUSE_USE_RETRO)) {
+    if (actions.every((action) => action === "lend")) return "lend";
+    if (actions.every((action) => action === "inhouse_use" || action === "inhouse_use_retro")) {
       return "inhouse";
     }
     return null;
@@ -578,8 +582,8 @@ export default function StaffDashboard() {
                         border: "1px solid #eef2f7",
                       }}
                     >
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: STATUS_COLORS[status] || "#cbd5e1" }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{status}</span>
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: tankStatusColor(status) }} />
+                      <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{getLegacyTankStatusLabel(status) ?? status}</span>
                       <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
                         {count}
                       </span>
@@ -873,6 +877,7 @@ export default function StaffDashboard() {
                     const isTankLog = log.logKind === "tank";
                     const history = historyByRoot[rootId] ?? [];
                     const historyLoading = historyLoadingRoot === rootId;
+                    const actionLabel = getLegacyTankActionLabel(log.action, staffLocale) ?? log.action;
 
                     return (
                       <div key={log.id} style={{ border: "1px solid #eef2f7", borderRadius: 10, background: "#f8fafc", overflow: "hidden" }}>
@@ -924,7 +929,7 @@ export default function StaffDashboard() {
                               whiteSpace: "nowrap",
                             }}
                           >
-                            {log.action}
+                            {actionLabel}
                           </span>
                           <div className="dashboard-log-body" style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
                             <span
@@ -1411,9 +1416,14 @@ function normalizeCorrectionRole(role?: string): StaffCorrectionRole {
   return "一般";
 }
 
-function toTankAction(value: unknown): TankAction | null {
-  if (typeof value !== "string") return null;
-  return ACTION_OPTIONS.includes(value as TankAction) ? (value as TankAction) : null;
+function toTankActionCode(value: unknown): TankActionCode | null {
+  return typeof value === "string" ? coerceTankActionCode(value) : null;
+}
+
+function tankStatusColor(status: string): string {
+  const code = coerceTankStatusCode(status);
+  const legacyStatus = code ? tankStatusCodeToLegacyStatus(code) : status;
+  return STATUS_COLORS[legacyStatus] || "#cbd5e1";
 }
 
 function canModifyLog(log: LogEntry, role: StaffCorrectionRole): boolean {
@@ -1523,25 +1533,11 @@ function statusColor(status?: LogStatus): string {
 }
 
 function actionBg(action?: string): string {
-  if (!action) return "#f1f5f9";
-  if (action.includes("破損") || action.includes("破棄")) return "#fef2f2";
-  if (action.includes("返却")) return "#eff6ff";
-  if (action.includes("貸出")) return "#eef2ff";
-  if (action.includes("充填")) return "#ecfdf5";
-  if (action.includes("自社")) return "#fffbeb";
-  if (action.includes("耐圧") || action.includes("修理")) return "#f5f3ff";
-  return "#f1f5f9";
+  return getDashboardActionBadgeTone(action).background;
 }
 
 function actionFg(action?: string): string {
-  if (!action) return "#475569";
-  if (action.includes("破損") || action.includes("破棄")) return "#b91c1c";
-  if (action.includes("返却")) return "#1d4ed8";
-  if (action.includes("貸出")) return "#4338ca";
-  if (action.includes("充填")) return "#047857";
-  if (action.includes("自社")) return "#b45309";
-  if (action.includes("耐圧") || action.includes("修理")) return "#6d28d9";
-  return "#475569";
+  return getDashboardActionBadgeTone(action).color;
 }
 
 function errorMessage(error: unknown): string {

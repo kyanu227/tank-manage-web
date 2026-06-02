@@ -1,13 +1,21 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Package, Clock, Activity, ShoppingCart, RotateCcw, AlertTriangle } from "lucide-react";
+import { Package, Clock, ShoppingCart, RotateCcw, AlertTriangle } from "lucide-react";
 import Link from "next/link";
 import { logsRepository, tanksRepository } from "@/lib/firebase/repositories";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
-import { STATUS } from "@/lib/tank-rules";
+import { getPortalHistoryActionBadgeTone } from "@/lib/tank-action-status-display";
+import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
 
-interface LogEntry { action: string; timestamp: any; tankId: string; staffName?: string; }
+type PortalLogTimestamp = { toDate?: () => Date } | null | undefined;
+
+interface LogEntry {
+  action: string;
+  timestamp?: PortalLogTimestamp;
+  tankId: string;
+  staffName?: string;
+}
 
 export default function PortalPage() {
   const [rentedTanks, setRentedTanks] = useState<string[]>([]);
@@ -26,7 +34,7 @@ export default function PortalPage() {
           return;
         }
 
-        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: STATUS.LENT });
+        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: "lent" });
         const tanks: string[] = tankDocs.map((t) => t.id);
         setRentedTanks(tanks.sort());
 
@@ -41,8 +49,8 @@ export default function PortalPage() {
     fetchData();
   }, []);
 
-  const formatTime = (ts: any) => {
-    if (!ts?.toDate) return "—";
+  const formatTime = (ts: PortalLogTimestamp) => {
+    if (typeof ts?.toDate !== "function") return "—";
     const d = ts.toDate();
     return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
   };
@@ -165,27 +173,31 @@ export default function PortalPage() {
           {logs.length === 0 ? (
             <p style={{ textAlign: "center", padding: "3dvh 0", color: "#cbd5e1", fontSize: 13 }}>履歴がありません</p>
           ) : (
-            logs.map((log, i) => (
-              <div key={i} style={{
-                display: "flex", alignItems: "center", gap: "2.5vw",
-                padding: "1dvh 3vw", borderRadius: 10,
-                background: "#f8fafc", border: "1px solid #f1f5f9",
-                flexShrink: 0,
-              }}>
-                <span style={{ fontSize: "clamp(9px, 2.4vw, 11px)", color: "#94a3b8", minWidth: "9vw" }}>{formatTime(log.timestamp)}</span>
-                <span style={{
-                  fontSize: "clamp(9px, 2.4vw, 11px)", fontWeight: 700,
-                  padding: "3px 6px", borderRadius: 5,
-                  color: log.action === "貸出" ? "#6366f1" : "#ef4444",
-                  background: log.action === "貸出" ? "#eef2ff" : "#fee2e2",
+            logs.map((log, i) => {
+              const badgeStyle = getPortalHistoryActionBadgeTone(log.action);
+              const actionLabel = getLegacyTankActionLabel(log.action) ?? log.action;
+              return (
+                <div key={i} style={{
+                  display: "flex", alignItems: "center", gap: "2.5vw",
+                  padding: "1dvh 3vw", borderRadius: 10,
+                  background: "#f8fafc", border: "1px solid #f1f5f9",
                   flexShrink: 0,
                 }}>
-                  {log.action}
-                </span>
-                <span style={{ flex: 1, fontFamily: "monospace", fontSize: "clamp(11px, 3vw, 13px)", fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{log.tankId}</span>
-                <span style={{ fontSize: "clamp(9px, 2.4vw, 10px)", color: "#cbd5e1", flexShrink: 0, whiteSpace: "nowrap" }}>{log.staffName || "-"}</span>
-              </div>
-            ))
+                  <span style={{ fontSize: "clamp(9px, 2.4vw, 11px)", color: "#94a3b8", minWidth: "9vw" }}>{formatTime(log.timestamp)}</span>
+                  <span style={{
+                    fontSize: "clamp(9px, 2.4vw, 11px)", fontWeight: 700,
+                    padding: "3px 6px", borderRadius: 5,
+                    color: badgeStyle.color,
+                    background: badgeStyle.background,
+                    flexShrink: 0,
+                  }}>
+                    {actionLabel}
+                  </span>
+                  <span style={{ flex: 1, fontFamily: "monospace", fontSize: "clamp(11px, 3vw, 13px)", fontWeight: 700, color: "#0f172a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{log.tankId}</span>
+                  <span style={{ fontSize: "clamp(9px, 2.4vw, 10px)", color: "#cbd5e1", flexShrink: 0, whiteSpace: "nowrap" }}>{log.staffName || "-"}</span>
+                </div>
+              );
+            })
           )}
         </div>
       </div>

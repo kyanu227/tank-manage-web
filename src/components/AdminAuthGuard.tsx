@@ -19,6 +19,7 @@ import {
 import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
 import { DEV_ADMIN_ALLOWED_PATHS, DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
+import type { Locale } from "@/lib/locale";
 
 interface StaffUser {
   id: string;
@@ -26,6 +27,7 @@ interface StaffUser {
   role: string;
   rank: string;
   email: string;
+  locale: Locale;
 }
 
 interface AdminAuthGuardProps {
@@ -109,6 +111,8 @@ export default function AdminAuthGuard({
       setFirebaseUser(user);
       setAuthChecked(true);
       if (!user) {
+        localStorage.removeItem("staffSession");
+        window.dispatchEvent(new Event("staffLogin"));
         setStaffUser(null);
         setStaffChecked(true);
         setPermChecked(true);
@@ -126,6 +130,8 @@ export default function AdminAuthGuard({
       try {
         const userEmail = firebaseUser.email;
         if (!userEmail) {
+          localStorage.removeItem("staffSession");
+          window.dispatchEvent(new Event("staffLogin"));
           setStaffUser(null);
           setStaffChecked(true);
           return;
@@ -134,6 +140,8 @@ export default function AdminAuthGuard({
         const profile = await findActiveStaffByEmail(userEmail);
 
         if (!profile) {
+          localStorage.removeItem("staffSession");
+          window.dispatchEvent(new Event("staffLogin"));
           setStaffUser(null);
           setStaffChecked(true);
           return;
@@ -145,11 +153,16 @@ export default function AdminAuthGuard({
           role: profile.role,
           rank: profile.rank,
           email: profile.email,
+          locale: profile.locale,
         };
+        localStorage.setItem("staffSession", JSON.stringify(staff));
+        window.dispatchEvent(new Event("staffLogin"));
         setStaffUser(staff);
         onStaffLoaded?.(staff);
       } catch (e) {
         console.error("Staff lookup failed:", e);
+        localStorage.removeItem("staffSession");
+        window.dispatchEvent(new Event("staffLogin"));
         setStaffUser(null);
       } finally {
         setStaffChecked(true);

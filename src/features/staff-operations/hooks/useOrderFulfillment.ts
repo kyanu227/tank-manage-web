@@ -14,7 +14,9 @@ import {
   type PendingOrder,
 } from "@/lib/order-types";
 import { tryParseTankId } from "@/lib/tank-id";
-import { ACTION, validateTransition } from "@/lib/tank-rules";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
+import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
+import { validateTransitionCode } from "@/lib/tank-rules";
 import type { ScannedTank, TankMap } from "../types";
 
 interface UseOrderFulfillmentParams {
@@ -107,8 +109,8 @@ export function useOrderFulfillment({
       const actor = requireStaffIdentity();
       await approveOrderTransaction(order.id, actor);
       await fetchOrders();
-    } catch (err: any) {
-      alert("承認エラー: " + err.message);
+    } catch (err: unknown) {
+      alert("承認エラー: " + errorMessage(err));
     } finally {
       setApprovingOrderId(null);
     }
@@ -147,10 +149,13 @@ export function useOrderFulfillment({
       valid = false;
       error = "未登録タンク";
     } else {
-      const v = validateTransition(tank.status, ACTION.LEND);
-      if (!v.ok) {
+      const statusCode = coerceTankStatusCode(tank.status);
+      if (!statusCode) {
         valid = false;
-        error = v.reason || `[${tank.status}] は貸出不可`;
+        error = "タンク状態が不正です";
+      } else if (!validateTransitionCode(statusCode, "lend")) {
+        valid = false;
+        error = `[${getTankStatusLabel(statusCode)}] は貸出不可`;
       } else if (tank.location !== "倉庫") {
         valid = false;
         error = "倉庫にありません";
@@ -244,8 +249,8 @@ export function useOrderFulfillment({
       closeFulfillment();
       fetchOrders();
       fetchData();
-    } catch (err: any) {
-      alert("エラー: " + err.message);
+    } catch (err: unknown) {
+      alert("エラー: " + errorMessage(err));
     } finally {
       setOrderSubmitting(false);
     }
@@ -273,4 +278,8 @@ export function useOrderFulfillment({
     removeScannedTank,
     fulfillOrder,
   };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

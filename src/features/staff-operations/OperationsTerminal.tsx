@@ -3,7 +3,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { ArrowDownToLine } from "lucide-react";
 import { useTanks } from "@/hooks/useTanks";
-import { DEFAULT_OP_STYLE, MODE_CONFIG } from "./constants";
+import { useStaffLocale } from "@/hooks/useStaffSession";
+import type { Locale } from "@/lib/locale";
+import { DEFAULT_OP_STYLE, getOperationModeLabel, MODE_CONFIG } from "./constants";
 import { useBulkReturnByLocation } from "./hooks/useBulkReturnByLocation";
 import { useDestinations } from "./hooks/useDestinations";
 import { useManualTankOperation } from "./hooks/useManualTankOperation";
@@ -29,6 +31,36 @@ interface OperationsTerminalProps {
 
 const RETURN_SEGMENT_ORDER: ReturnSegmentKey[] = ["normal", "customer_requests", "long_term"];
 
+const RETURN_UI_TEXT = {
+  manualReturn: {
+    ja: "手動返却",
+    en: "Manual return",
+  },
+  customerUnit: {
+    ja: "顧客",
+    en: "customers",
+  },
+  tankUnit: {
+    ja: "本",
+    en: "tanks",
+  },
+} satisfies Record<string, Record<Locale, string>>;
+
+const RETURN_SEGMENT_LABELS = {
+  normal: {
+    ja: { label: "通常返却", shortLabel: "通常" },
+    en: { label: "Normal returns", shortLabel: "Normal" },
+  },
+  customer_requests: {
+    ja: { label: "返却タグ処理待ち", shortLabel: "タグ待ち" },
+    en: { label: "Pending return tags", shortLabel: "Tags" },
+  },
+  long_term: {
+    ja: { label: "長期貸出", shortLabel: "長期" },
+    en: { label: "Long-term rentals", shortLabel: "Long-term" },
+  },
+} satisfies Record<ReturnSegmentKey, Record<Locale, Pick<ReturnSegmentStat, "label" | "shortLabel">>>;
+
 const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
   normal: {
     key: "normal",
@@ -53,10 +85,32 @@ const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "c
   },
 };
 
+function getReturnSegmentConfig(
+  segment: ReturnSegmentKey,
+  locale: Locale,
+): Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount"> {
+  return {
+    ...RETURN_SEGMENT_CONFIG[segment],
+    ...RETURN_SEGMENT_LABELS[segment][locale],
+  };
+}
+
+function formatReturnSegmentCount(segment: ReturnSegmentStat, locale: Locale): string {
+  const customerCount = locale === "ja"
+    ? `${segment.customerCount}${RETURN_UI_TEXT.customerUnit[locale]}`
+    : `${segment.customerCount} ${RETURN_UI_TEXT.customerUnit[locale]}`;
+  const tankCount = locale === "ja"
+    ? `${segment.tankCount}${RETURN_UI_TEXT.tankUnit[locale]}`
+    : `${segment.tankCount} ${RETURN_UI_TEXT.tankUnit[locale]}`;
+  return `${customerCount} / ${tankCount}`;
+}
+
 export default function OperationsTerminal({ initialMode }: OperationsTerminalProps) {
   // mode は URL 由来で固定。ページ遷移時は OperationsTerminal 自体がリマウントされる。
   const mode: OpMode = initialMode;
   const config = MODE_CONFIG[mode];
+  const staffLocale = useStaffLocale();
+  const modeLabel = getOperationModeLabel(mode, staffLocale);
 
   // 操作スタイル（手動/受注）はヘッダーのチップと同期
   const [opStyle, setOpStyle] = useState<OpStyle>(DEFAULT_OP_STYLE);
@@ -106,6 +160,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   const manual = useManualTankOperation({
     mode,
     config,
+    locale: staffLocale,
     allTanks,
     selectedCustomer: destinations.selectedCustomer,
     fetchData,
@@ -113,9 +168,9 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
   const returnSegmentStats = useMemo<ReturnSegmentStat[]>(() => {
     const stats: Record<ReturnSegmentKey, ReturnSegmentStat> = {
-      customer_requests: { ...RETURN_SEGMENT_CONFIG.customer_requests, customerCount: 0, tankCount: 0, taggedCount: 0 },
-      long_term: { ...RETURN_SEGMENT_CONFIG.long_term, customerCount: 0, tankCount: 0, taggedCount: 0 },
-      normal: { ...RETURN_SEGMENT_CONFIG.normal, customerCount: 0, tankCount: 0, taggedCount: 0 },
+      customer_requests: { ...getReturnSegmentConfig("customer_requests", staffLocale), customerCount: 0, tankCount: 0, taggedCount: 0 },
+      long_term: { ...getReturnSegmentConfig("long_term", staffLocale), customerCount: 0, tankCount: 0, taggedCount: 0 },
+      normal: { ...getReturnSegmentConfig("normal", staffLocale), customerCount: 0, tankCount: 0, taggedCount: 0 },
     };
 
     const returnTagWaitingTankCount = returnTagProcessing.returnGroups.reduce((sum, group) => sum + group.items.length, 0);
@@ -143,7 +198,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     stats.long_term.customerCount = locationsBySegment.long_term.size;
 
     return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
-  }, [bulk.groupMeta, bulk.groupKeys, bulk.groupedTanks, returnTagProcessing.returnGroups]);
+  }, [bulk.groupMeta, bulk.groupKeys, bulk.groupedTanks, returnTagProcessing.returnGroups, staffLocale]);
 
   const openManualReturn = () => {
     setActiveReturnSegment(null);
@@ -170,7 +225,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   if (mode === "lend" && opStyle === "order" && orders.selectedOrder) {
     return (
       <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden", overscrollBehavior: "contain" }}>
-        <OperationModeTabs mode={mode} />
+        <OperationModeTabs mode={mode} locale={staffLocale} />
         <OrderFulfillmentScreen
           selectedOrder={orders.selectedOrder}
           prefixes={prefixes}
@@ -186,7 +241,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   if (mode === "return" && returnTagProcessing.selectedReturnGroup) {
     return (
       <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden", overscrollBehavior: "contain" }}>
-        <OperationModeTabs mode={mode} />
+        <OperationModeTabs mode={mode} locale={staffLocale} />
         <ReturnTagProcessingScreen
           selectedReturnGroup={returnTagProcessing.selectedReturnGroup}
           returnTagProcessing={returnTagProcessing}
@@ -204,13 +259,15 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         overscrollBehavior: "contain",
       }}
     >
-      <OperationModeTabs mode={mode} />
+      <OperationModeTabs mode={mode} locale={staffLocale} />
 
       {/* 貸出モード: 手動 */}
       {mode === "lend" && opStyle === "manual" && (
         <ManualOperationPanel
           mode={mode}
           config={config}
+          operationLabel={modeLabel}
+          locale={staffLocale}
           prefixes={prefixes}
           customerOptions={destinations.customerSelectOptions}
           selectedCustomerId={destinations.selectedCustomerId}
@@ -254,7 +311,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
               }}
             >
               <ArrowDownToLine size={16} />
-              手動返却
+              {RETURN_UI_TEXT.manualReturn[staffLocale]}
             </button>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginBottom: 12 }}>
@@ -288,7 +345,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
                   >
                     <span style={{ fontSize: 12, fontWeight: 900, lineHeight: 1.2 }}>{segment.label}</span>
                     <span style={{ fontSize: 11, fontWeight: 800, color: hasItems || isActive ? segment.color : "#cbd5e1" }}>
-                      {segment.customerCount}顧客 / {segment.tankCount}本
+                      {formatReturnSegmentCount(segment, staffLocale)}
                     </span>
                   </button>
                 );
@@ -332,6 +389,8 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         <ManualOperationPanel
           mode={mode}
           config={config}
+          operationLabel={modeLabel}
+          locale={staffLocale}
           prefixes={prefixes}
           manual={manual}
           onBack={() => setShowManualReturn(false)}
@@ -343,6 +402,8 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         <ManualOperationPanel
           mode={mode}
           config={config}
+          operationLabel={modeLabel}
+          locale={staffLocale}
           prefixes={prefixes}
           manual={manual}
         />

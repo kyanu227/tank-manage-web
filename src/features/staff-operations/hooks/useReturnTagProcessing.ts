@@ -2,9 +2,9 @@
 
 import { useCallback, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
-import { processReturnTags as processReturnTagsTransaction } from "@/lib/firebase/return-tag-processing-service";
+import { confirmPendingReturnRequests } from "@/lib/firebase/return-tag-processing-service";
 import { transactionsRepository } from "@/lib/firebase/repositories";
-import type { PendingReturn, ReturnGroup, ReturnTagSelectionMap } from "../types";
+import type { PendingReturn, ReturnConfirmationSelectionMap, ReturnGroup } from "../types";
 
 interface UseReturnTagProcessingParams {
   fetchBulkTanks: () => Promise<void>;
@@ -15,12 +15,12 @@ export interface UseReturnTagProcessingResult {
   returnGroups: ReturnGroup[];
   selectedReturnGroup: ReturnGroup | null;
   setSelectedReturnGroup: (group: ReturnGroup | null) => void;
-  returnTagSelections: ReturnTagSelectionMap;
-  setReturnTagSelections: React.Dispatch<React.SetStateAction<ReturnTagSelectionMap>>;
-  returnTagProcessingSubmitting: boolean;
+  returnTagSelections: ReturnConfirmationSelectionMap;
+  setReturnTagSelections: React.Dispatch<React.SetStateAction<ReturnConfirmationSelectionMap>>;
+  returnConfirmationSubmitting: boolean;
   fetchPendingReturnTags: () => Promise<void>;
   openReturnTagGroup: (group: ReturnGroup) => void;
-  processReturnTags: () => Promise<void>;
+  confirmSelectedReturnRequests: () => Promise<void>;
 }
 
 export function useReturnTagProcessing({
@@ -29,8 +29,8 @@ export function useReturnTagProcessing({
   const [pendingReturnTagsLoading, setPendingReturnTagsLoading] = useState(true);
   const [returnGroups, setReturnGroups] = useState<ReturnGroup[]>([]);
   const [selectedReturnGroup, setSelectedReturnGroup] = useState<ReturnGroup | null>(null);
-  const [returnTagSelections, setReturnTagSelections] = useState<ReturnTagSelectionMap>({});
-  const [returnTagProcessingSubmitting, setReturnTagProcessingSubmitting] = useState(false);
+  const [returnTagSelections, setReturnTagSelections] = useState<ReturnConfirmationSelectionMap>({});
+  const [returnConfirmationSubmitting, setReturnConfirmationSubmitting] = useState(false);
 
   const fetchPendingReturnTags = useCallback(async () => {
     setPendingReturnTagsLoading(true);
@@ -55,24 +55,24 @@ export function useReturnTagProcessing({
 
   const openReturnTagGroup = useCallback((group: ReturnGroup) => {
     setSelectedReturnGroup(group);
-    const init: ReturnTagSelectionMap = {};
+    const init: ReturnConfirmationSelectionMap = {};
     group.items.forEach((item) => {
       init[item.id] = { selected: false, condition: item.condition };
     });
     setReturnTagSelections(init);
   }, []);
 
-  const processReturnTags = useCallback(async () => {
+  const confirmSelectedReturnRequests = useCallback(async () => {
     if (!selectedReturnGroup) return;
     const selectedCount = selectedReturnGroup.items.filter((i) => returnTagSelections[i.id]?.selected).length;
     if (selectedCount === 0) {
       alert("処理するタンクを選択してください");
       return;
     }
-    setReturnTagProcessingSubmitting(true);
+    setReturnConfirmationSubmitting(true);
     try {
       const actor = requireStaffIdentity();
-      const { processedCount } = await processReturnTagsTransaction({
+      const { processedCount } = await confirmPendingReturnRequests({
         group: selectedReturnGroup,
         selections: returnTagSelections,
         actor,
@@ -82,10 +82,10 @@ export function useReturnTagProcessing({
       setSelectedReturnGroup(null);
       fetchPendingReturnTags();
       fetchBulkTanks();
-    } catch (e: any) {
-      alert("エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("エラー: " + errorMessage(e));
     } finally {
-      setReturnTagProcessingSubmitting(false);
+      setReturnConfirmationSubmitting(false);
     }
   }, [fetchBulkTanks, fetchPendingReturnTags, returnTagSelections, selectedReturnGroup]);
 
@@ -96,9 +96,13 @@ export function useReturnTagProcessing({
     setSelectedReturnGroup,
     returnTagSelections,
     setReturnTagSelections,
-    returnTagProcessingSubmitting,
+    returnConfirmationSubmitting,
     fetchPendingReturnTags,
     openReturnTagGroup,
-    processReturnTags,
+    confirmSelectedReturnRequests,
   };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
