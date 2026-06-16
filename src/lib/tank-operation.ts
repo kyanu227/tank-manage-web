@@ -44,6 +44,10 @@ import type {
 
 export type TankSnapshot = {
   status: TankStatusCode;
+  /** 現在貸出先の customers/{customerId} projection。undefined は legacy/未導入、null は顧客なしの明示値。 */
+  customerId?: string | null;
+  /** 現在貸出先の表示 snapshot。undefined は legacy/未導入、null は顧客なしの明示値。 */
+  customerName?: string | null;
   location?: string;
   staff?: string;
   logNote?: string;
@@ -333,6 +337,12 @@ async function commitPlannedOperations(
       location,
       staff: actor.staffName,
       logNote: tankLogNote,
+      ...(prevSnapshot.customerId !== undefined
+        ? { customerId: prevSnapshot.customerId }
+        : {}),
+      ...(prevSnapshot.customerName !== undefined
+        ? { customerName: prevSnapshot.customerName }
+        : {}),
     };
     const now = serverTimestamp();
 
@@ -569,6 +579,10 @@ function snapshotFromTankData(data: DocumentData): TankSnapshot {
   const snapshot: TankSnapshot = {
     status: requireTankStatusCode(data.status, "タンクのstatus"),
   };
+  const customerId = optionalNullableString(data.customerId);
+  const customerName = optionalNullableString(data.customerName);
+  if (customerId !== undefined) snapshot.customerId = customerId;
+  if (customerName !== undefined) snapshot.customerName = customerName;
   if (data.location != null) snapshot.location = String(data.location);
   if (data.staff != null) snapshot.staff = String(data.staff);
   if (data.logNote != null) snapshot.logNote = String(data.logNote);
@@ -584,9 +598,21 @@ function tankUpdateFromSnapshot(
     location: snapshot.location ?? deleteField(),
     staff: snapshot.staff ?? deleteField(),
     logNote: snapshot.logNote ?? deleteField(),
+    ...(snapshot.customerId !== undefined
+      ? { customerId: snapshot.customerId }
+      : {}),
+    ...(snapshot.customerName !== undefined
+      ? { customerName: snapshot.customerName }
+      : {}),
     latestLogId,
     updatedAt: serverTimestamp(),
   };
+}
+
+function optionalNullableString(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return String(value);
 }
 
 function operationIdentityFields(context: OperationContext): DocumentData {
@@ -802,8 +828,12 @@ function requireTankSnapshot(value: unknown, label: string): TankSnapshot {
     throw new Error(`${label}がありません`);
   }
   const raw = value as Record<string, unknown>;
+  const customerId = optionalNullableString(raw.customerId);
+  const customerName = optionalNullableString(raw.customerName);
   return {
     status: requireTankStatusCode(raw.status, `${label}.status`),
+    ...(customerId !== undefined ? { customerId } : {}),
+    ...(customerName !== undefined ? { customerName } : {}),
     ...(raw.location != null ? { location: String(raw.location) } : {}),
     ...(raw.staff != null ? { staff: String(raw.staff) } : {}),
     ...(raw.logNote != null ? { logNote: String(raw.logNote) } : {}),
