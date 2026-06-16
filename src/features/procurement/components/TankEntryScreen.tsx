@@ -16,7 +16,8 @@ import ProcurementTabs from "@/components/ProcurementTabs";
 import { db } from "@/lib/firebase/config";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
-import { STATUS } from "@/lib/tank-rules";
+import type { TankStatusCode } from "@/lib/tank-action-status-codes";
+import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
 import { tryParseTankId } from "@/lib/tank-id";
 import {
   submitTankEntryBatch,
@@ -26,7 +27,7 @@ import { useProcurementSwipe } from "@/features/procurement/hooks/useProcurement
 
 const DEFAULT_TANK_TYPES = ["スチール 10L", "スチール 12L", "アルミ"];
 const LOCATION_OPTIONS = ["倉庫", "自社"];
-const STATUS_OPTIONS = [STATUS.EMPTY, STATUS.FILLED];
+const STATUS_OPTIONS: readonly TankStatusCode[] = ["empty", "filled"];
 
 interface TankEntryScreenProps {
   mode: TankEntryMode;
@@ -41,7 +42,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
   const [masterTankTypes, setMasterTankTypes] = useState<string[]>([]);
   const [masterLoading, setMasterLoading] = useState(true);
   const [tankType, setTankType] = useState("");
-  const [initialStatus, setInitialStatus] = useState<string>(STATUS.EMPTY);
+  const [initialStatus, setInitialStatus] = useState<TankStatusCode>("empty");
   const [location, setLocation] = useState<string>("倉庫");
   const [nextMaintenanceDate, setNextMaintenanceDate] = useState("");
   const [note, setNote] = useState("");
@@ -353,7 +354,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
                     onClick={() => setInitialStatus(status)}
                     style={toggleButtonStyle(initialStatus === status, accent, accentBg)}
                   >
-                    {status}
+                    {getTankStatusLabel(status)}
                   </button>
                 ))}
               </div>
