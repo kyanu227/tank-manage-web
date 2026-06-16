@@ -5,6 +5,8 @@ import DrumRoll from "@/components/DrumRoll";
 import QuickSelect from "@/components/QuickSelect";
 import type { QuickSelectOption } from "@/components/QuickSelect";
 import ReturnTagSelector, { getReturnTagLabel, getReturnTagStyle } from "@/components/ReturnTagSelector";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
+import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
 import type { Locale } from "@/lib/locale";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
@@ -55,6 +57,12 @@ export default function ManualOperationPanel({
   const isLend = mode === "lend";
   const isReturn = mode === "return";
   const isFill = mode === "fill";
+
+  const formatStatusLabel = (status?: string): string => {
+    const code = coerceTankStatusCode(status);
+    if (code) return getTankStatusLabel(code, locale);
+    return status || "不明";
+  };
 
   const customerSnapshotFromOption = (customerId: string): CustomerSnapshot | null => {
     const option = customerOptions.find((item) => typeof item !== "string" && item.value === customerId);
@@ -165,7 +173,7 @@ export default function ManualOperationPanel({
                       )}
                     </div>
                     <div style={{ fontSize: 11, color: item.valid ? "#64748b" : "#ef4444", fontWeight: 600, marginTop: 4 }}>
-                      {item.valid ? `現在: ${item.status || "不明"} ` : item.error}
+                      {item.valid ? `現在: ${formatStatusLabel(item.status)} ` : item.error}
                     </div>
                   </div>
                   <button onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer", marginRight: isReturn ? undefined : -8 }}>
