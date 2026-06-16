@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo } from "react";
-import { BarChart3, TrendingUp, Calendar, Archive } from "lucide-react";
+import { BarChart3, Calendar, Archive } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
@@ -13,6 +13,16 @@ import {
 
 interface DailyStat { date: string; lend: number; return_: number; fill: number; total: number; }
 interface MonthlyStat { id: string; month: string; location: string; lends: number; returns: number; unused: number; defaults: number; }
+
+function toLocalDateKey(date: Date): string {
+  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function addLocalDays(date: Date, days: number): Date {
+  const next = new Date(date);
+  next.setDate(next.getDate() + days);
+  return next;
+}
 
 export default function SalesPage() {
   const [tab, setTab] = useState<"daily" | "monthly">("daily");
@@ -35,7 +45,7 @@ export default function SalesPage() {
         logs.forEach((log) => {
           if (!log.timestamp?.toDate) return;
           const dt = log.timestamp.toDate();
-          const key = `${dt.getFullYear()}/${String(dt.getMonth() + 1).padStart(2, "0")}/${String(dt.getDate()).padStart(2, "0")}`;
+          const key = toLocalDateKey(dt);
           if (!dateMap[key]) dateMap[key] = { lend: 0, return_: 0, fill: 0 };
           if (isLendTankLogAction(log.action, log.transitionAction)) dateMap[key].lend++;
           else if (isReturnTankLogAction(log.action, log.transitionAction)) dateMap[key].return_++;
@@ -64,8 +74,12 @@ export default function SalesPage() {
     })();
   }, []);
 
-  const todayTotal = dailyStats[0]?.total || 0;
-  const yesterdayTotal = dailyStats[1]?.total || 0;
+  const todayKey = toLocalDateKey(new Date());
+  const yesterdayKey = toLocalDateKey(addLocalDays(new Date(), -1));
+  const todayStat = dailyStats.find((stat) => stat.date === todayKey);
+  const yesterdayStat = dailyStats.find((stat) => stat.date === yesterdayKey);
+  const todayTotal = todayStat?.total || 0;
+  const yesterdayTotal = yesterdayStat?.total || 0;
   const ratio = yesterdayTotal > 0 ? Math.round(((todayTotal - yesterdayTotal) / yesterdayTotal) * 100) : 0;
 
   // Group monthly stats by month for accordion/table display
@@ -132,15 +146,15 @@ export default function SalesPage() {
                 </div>
                 <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "20px 16px" }}>
                   <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", marginBottom: 6 }}>本日の貸出</p>
-                  <p style={{ fontSize: 28, fontWeight: 800, color: "#6366f1" }}>{dailyStats[0]?.lend || 0}</p>
+                  <p style={{ fontSize: 28, fontWeight: 800, color: "#6366f1" }}>{todayStat?.lend || 0}</p>
                 </div>
                 <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "20px 16px" }}>
                   <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", marginBottom: 6 }}>本日の返却</p>
-                  <p style={{ fontSize: 28, fontWeight: 800, color: "#0ea5e9" }}>{dailyStats[0]?.return_ || 0}</p>
+                  <p style={{ fontSize: 28, fontWeight: 800, color: "#0ea5e9" }}>{todayStat?.return_ || 0}</p>
                 </div>
                 <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "20px 16px" }}>
                   <p style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8", marginBottom: 6 }}>本日の充填</p>
-                  <p style={{ fontSize: 28, fontWeight: 800, color: "#10b981" }}>{dailyStats[0]?.fill || 0}</p>
+                  <p style={{ fontSize: 28, fontWeight: 800, color: "#10b981" }}>{todayStat?.fill || 0}</p>
                 </div>
               </div>
 
