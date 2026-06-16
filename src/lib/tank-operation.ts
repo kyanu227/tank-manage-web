@@ -53,6 +53,9 @@ export type TankSnapshot = {
   logNote?: string;
 };
 
+type TankCustomerProjection = Pick<TankSnapshot, "customerId" | "customerName">;
+type CustomerProjectionResolveMode = "operation" | "revision";
+
 export interface TankOperationInput {
   /** タンク ID */
   tankId: string;
@@ -332,17 +335,18 @@ async function commitPlannedOperations(
       `[${op.input.tankId}] logAction`
     );
     const actor = op.input.context.actor;
+    const nextCustomerProjection = resolveNextTankCustomerProjection({
+      action: transitionAction,
+      previous: prevSnapshot,
+      customer: op.input.context.customer,
+      mode: "operation",
+    });
     const nextSnapshot: TankSnapshot = {
       status: nextStatus,
       location,
       staff: actor.staffName,
       logNote: tankLogNote,
-      ...(prevSnapshot.customerId !== undefined
-        ? { customerId: prevSnapshot.customerId }
-        : {}),
-      ...(prevSnapshot.customerName !== undefined
-        ? { customerName: prevSnapshot.customerName }
-        : {}),
+      ...nextCustomerProjection,
     };
     const now = serverTimestamp();
 
@@ -370,8 +374,8 @@ async function commitPlannedOperations(
     });
 
     tx.update(op.tankRef, {
-      ...tankUpdateFromSnapshot(nextSnapshot, op.logRef.id),
       ...(op.input.tankExtra ?? {}),
+      ...tankUpdateFromSnapshot(nextSnapshot, op.logRef.id),
     });
 
     results.push({
@@ -615,6 +619,154 @@ function optionalNullableString(value: unknown): string | null | undefined {
   return String(value);
 }
 
+function resolveNextTankCustomerProjection(input: {
+  action: TankActionCode;
+  previous: TankSnapshot;
+  customer?: CustomerSnapshot;
+  mode: CustomerProjectionResolveMode;
+}): TankCustomerProjection {
+  const { action, previous, customer, mode } = input;
+
+  switch (action) {
+    case "lend":
+    case "order_lend":
+      if (mode === "operation") {
+        return requireCustomerProjection(customer, "貸出操作");
+      }
+      return customer
+        ? requireCustomerProjection(customer, "貸出ログ")
+        : requireExistingCustomerProjection(previous, "貸出前");
+
+    case "carry_over":
+      return resolveCarryOverCustomerProjection(previous, customer);
+
+    case "return":
+    case "return_unused":
+    case "return_uncharged":
+    case "fill":
+    case "inhouse_use":
+    case "inhouse_use_retro":
+    case "inhouse_return":
+    case "inhouse_return_unused":
+    case "inhouse_return_uncharged":
+    case "damage_report":
+    case "repaired":
+    case "inspection":
+    case "dispose":
+      return { customerId: null, customerName: null };
+
+    case "procurement_purchase":
+    case "procurement_register":
+    case "supply_order":
+      throw new Error(`通常タンク操作ではないactionです: ${action}`);
+
+    default: {
+      const exhaustive: never = action;
+      throw new Error(`未対応のactionです: ${exhaustive}`);
+    }
+  }
+}
+
+function resolveCarryOverCustomerProjection(
+  previous: TankSnapshot,
+  customer: CustomerSnapshot | undefined
+): TankCustomerProjection {
+  const customerProjection = customer
+    ? requireCustomerProjection(customer, "持ち越し操作")
+    : undefined;
+
+  try {
+    const previousProjection = requireExistingCustomerProjection(previous, "持ち越し前");
+    if (
+      previousProjection.customerId === undefined
+      && previousProjection.customerName === undefined
+    ) {
+      return customerProjection ?? {};
+    }
+    if (previousProjection.customerId === null && previousProjection.customerName === null) {
+      return previousProjection;
+    }
+    if (customerProjection && previousProjection.customerId !== customerProjection.customerId) {
+      throw new Error("持ち越し操作の顧客情報が現在貸出先と一致しません");
+    }
+    return previousProjection;
+  } catch (error) {
+    if (!customerProjection) throw error;
+    return completeMalformedCarryOverProjection(previous, customerProjection);
+  }
+}
+
+function completeMalformedCarryOverProjection(
+  previous: TankSnapshot,
+  customer: Required<TankCustomerProjection>
+): TankCustomerProjection {
+  if (previous.customerId === null || previous.customerName === null) {
+    throw new Error("持ち越し前の顧客projectionが不正です");
+  }
+
+  const previousCustomerId = normalizedProjectionString(previous.customerId);
+  const previousCustomerName = normalizedProjectionString(previous.customerName);
+
+  if (
+    (previousCustomerId === undefined || previousCustomerId === customer.customerId)
+    && (previousCustomerName === undefined || previousCustomerName === customer.customerName)
+  ) {
+    return customer;
+  }
+
+  throw new Error("持ち越し前の顧客projectionが不正です");
+}
+
+function requireExistingCustomerProjection(
+  snapshot: TankSnapshot,
+  label: string
+): TankCustomerProjection {
+  const customerId = normalizedProjectionValue(snapshot.customerId, `${label}.customerId`);
+  const customerName = normalizedProjectionValue(snapshot.customerName, `${label}.customerName`);
+
+  if (customerId === undefined && customerName === undefined) return {};
+  if (customerId === null && customerName === null) {
+    return { customerId: null, customerName: null };
+  }
+  if (typeof customerId === "string" && typeof customerName === "string") {
+    return { customerId, customerName };
+  }
+
+  throw new Error(`${label}の顧客projectionが不正です`);
+}
+
+function requireCustomerProjection(
+  customer: CustomerSnapshot | undefined,
+  label: string
+): Required<TankCustomerProjection> {
+  const customerId = customer?.customerId.trim() ?? "";
+  const customerName = customer?.customerName.trim() ?? "";
+
+  if (!customerId || !customerName) {
+    throw new Error(`${label}の顧客情報がありません`);
+  }
+
+  return { customerId, customerName };
+}
+
+function normalizedProjectionValue(
+  value: string | null | undefined,
+  label: string
+): string | null | undefined {
+  if (value === undefined || value === null) return value;
+  const trimmed = value.trim();
+  if (!trimmed) {
+    throw new Error(`${label}が空です`);
+  }
+  return trimmed;
+}
+
+function normalizedProjectionString(value: string | null | undefined): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed || undefined;
+}
+
 function operationIdentityFields(context: OperationContext): DocumentData {
   const actor = context.actor;
   const transactionId = stringOrUndefined(context.transactionId);
@@ -687,13 +839,29 @@ function nextSnapshotFromContent(
   prevSnapshot: TankSnapshot,
   content: TankLogContent
 ): TankSnapshot {
+  const nextCustomerProjection = resolveNextTankCustomerProjection({
+    action: content.transitionAction,
+    previous: prevSnapshot,
+    customer: customerSnapshotFromTankLogContent(content),
+    mode: "revision",
+  });
   return {
     ...prevSnapshot,
     status: requireNextStatusCode(content.transitionAction, "ログのtransitionAction"),
     location: content.location,
     staff: content.staffName,
     logNote: content.logNote,
+    ...nextCustomerProjection,
   };
+}
+
+function customerSnapshotFromTankLogContent(
+  content: TankLogContent
+): CustomerSnapshot | undefined {
+  const customerId = content.customerId?.trim() ?? "";
+  const customerName = content.customerName?.trim() ?? "";
+  if (!customerId || !customerName) return undefined;
+  return { customerId, customerName };
 }
 
 function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch): TankLogContent {
