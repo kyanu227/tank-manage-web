@@ -9,6 +9,10 @@ import {
 } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import type { OperationActor } from "@/lib/operation-context";
+import {
+  coerceTankStatusCode,
+  type TankStatusCode,
+} from "@/lib/tank-action-status-codes";
 import { normalizeTankId } from "@/lib/tank-id";
 
 export type TankEntryMode = "purchase" | "register";
@@ -17,7 +21,7 @@ export interface SubmitTankEntryBatchInput {
   mode: TankEntryMode;
   tankIds: string[];
   tankType: string;
-  initialStatus: string;
+  initialStatus: TankStatusCode;
   location: string;
   note?: string;
   nextMaintenanceDate?: string;
@@ -36,7 +40,7 @@ type NormalizedTankEntryBatch = {
   mode: TankEntryMode;
   tankIds: string[];
   tankType: string;
-  initialStatus: string;
+  initialStatus: TankStatusCode;
   location: string;
   note: string;
   nextMaintenanceDate?: string;
@@ -83,6 +87,7 @@ function normalizeTankEntryBatch(input: SubmitTankEntryBatchInput): NormalizedTa
   const tankType = String(input.tankType || "").trim();
   const location = String(input.location || "").trim();
   const note = String(input.note || "").trim();
+  const initialStatus = requireInitialTankStatusCode(input.initialStatus);
   const actor = normalizeActor(input.actor);
   const nextMaintenanceDate = normalizeDateYmd(input.nextMaintenanceDate);
   const purchaseDate = normalizeDateYmd(input.purchaseDate);
@@ -94,7 +99,7 @@ function normalizeTankEntryBatch(input: SubmitTankEntryBatchInput): NormalizedTa
     mode: input.mode,
     tankIds,
     tankType,
-    initialStatus: input.initialStatus,
+    initialStatus,
     location,
     note,
     ...(nextMaintenanceDate ? { nextMaintenanceDate } : {}),
@@ -113,6 +118,14 @@ function validateTankEntryBatch(input: NormalizedTankEntryBatch): void {
   if (input.mode === "purchase" && input.unitCost <= 0) {
     throw new Error("購入単価を入力してください");
   }
+}
+
+function requireInitialTankStatusCode(status: string | null | undefined): TankStatusCode {
+  const code = coerceTankStatusCode(status);
+  if (!code) {
+    throw new Error("初期ステータスが不正です");
+  }
+  return code;
 }
 
 function buildTankCreationPayload(input: NormalizedTankEntryBatch): DocumentData {
