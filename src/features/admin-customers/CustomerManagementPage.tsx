@@ -73,11 +73,24 @@ const toNumber = (value: unknown) => {
 
 const toText = (value: unknown) => (typeof value === "string" ? value : "");
 
-const createdAtMillis = (value: unknown) => {
-  if (value && typeof value === "object" && "toMillis" in value) {
-    const toMillis = (value as { toMillis?: () => number }).toMillis;
-    if (typeof toMillis === "function") return toMillis();
+const createdAtMillis = (value: unknown): number => {
+  if (value instanceof Date) {
+    const millis = value.getTime();
+    return Number.isFinite(millis) ? millis : 0;
   }
+
+  if (value && typeof value === "object" && "toMillis" in value) {
+    const timestamp = value as { toMillis?: unknown };
+    if (typeof timestamp.toMillis === "function") {
+      try {
+        const millis = timestamp.toMillis();
+        return Number.isFinite(millis) ? millis : 0;
+      } catch {
+        return 0;
+      }
+    }
+  }
+
   return 0;
 };
 
@@ -114,6 +127,10 @@ const buildCustomerPayload = (customer: Customer) => {
     isActive: customer.isActive,
   };
 };
+
+const errorMessage = (error: unknown, fallback: string): string => (
+  error instanceof Error && error.message ? error.message : fallback
+);
 
 export type AdminCustomersInitialTab = "customers" | "portalUsers";
 
@@ -279,8 +296,8 @@ function CustomersPanel() {
     let payload: ReturnType<typeof buildCustomerPayload>;
     try {
       payload = buildCustomerPayload(customer);
-    } catch (error: any) {
-      alert(error?.message || "保存に失敗しました。");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "保存に失敗しました。"));
       return;
     }
 
@@ -296,9 +313,9 @@ function CustomersPanel() {
         item.id === customer.id ? { ...item, ...payload } : item
       )));
       setDirtyCustomerIds((prev) => prev.filter((id) => id !== customer.id));
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error saving customer:", error);
-      alert(error?.message || "保存に失敗しました。");
+      alert(errorMessage(error, "保存に失敗しました。"));
     } finally {
       setSavingCustomerIds((prev) => prev.filter((id) => id !== customer.id));
     }
@@ -309,8 +326,8 @@ function CustomersPanel() {
     let payload: ReturnType<typeof buildCustomerPayload>;
     try {
       payload = buildCustomerPayload(nextCustomer);
-    } catch (error: any) {
-      alert(error?.message || "ステータスの更新に失敗しました。");
+    } catch (error: unknown) {
+      alert(errorMessage(error, "ステータスの更新に失敗しました。"));
       return;
     }
 
@@ -320,9 +337,9 @@ function CustomersPanel() {
         item.id === customer.id ? { ...item, ...payload } : item
       )));
       setDirtyCustomerIds((prev) => prev.filter((id) => id !== customer.id));
-    } catch (error: any) {
+    } catch (error: unknown) {
       console.error("Error updating status:", error);
-      alert(error?.message || "ステータスの更新に失敗しました。");
+      alert(errorMessage(error, "ステータスの更新に失敗しました。"));
     }
   };
 
