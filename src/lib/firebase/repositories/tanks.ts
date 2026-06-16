@@ -20,6 +20,7 @@ import type { TankDoc, RepositoryWriter } from "./types";
  * Firestore のタンクドキュメントを TankDoc に正規化する。
  * getTank / getTanks の双方で同一変換を行うため、ここに集約する。
  * status / location / staff / type / note / logNote は String 化、
+ * customerId / customerName は missing / null / string を区別して正規化し、
  * updatedAt / latestLogId / nextMaintenanceDate はそのまま透過する。
  */
 function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
@@ -27,6 +28,8 @@ function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
   return {
     id: snap.id,
     status: String(raw.status ?? ""),
+    customerId: optionalNullableString(raw.customerId),
+    customerName: optionalNullableString(raw.customerName),
     location: raw.location != null ? String(raw.location) : undefined,
     staff: raw.staff != null ? String(raw.staff) : undefined,
     type: raw.type != null ? String(raw.type) : undefined,
@@ -36,6 +39,12 @@ function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
     latestLogId: raw.latestLogId != null ? String(raw.latestLogId) : undefined,
     nextMaintenanceDate: raw.nextMaintenanceDate,
   };
+}
+
+function optionalNullableString(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return String(value);
 }
 
 /** タンクのフィルタ条件（Phase 2 以降で拡張） */
