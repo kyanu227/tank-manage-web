@@ -193,7 +193,7 @@ export default function StaffDashboard() {
   const summary = useMemo<TankSummary>(() => {
     const counts: TankSummary = {};
     tanks.forEach((tank) => {
-      const status = tank.status || "不明";
+      const status = coerceTankStatusCode(tank.status) ?? tank.status ?? "不明";
       counts[status] = (counts[status] || 0) + 1;
     });
     return counts;
