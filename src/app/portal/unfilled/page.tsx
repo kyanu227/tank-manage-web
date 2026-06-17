@@ -5,7 +5,7 @@ import { ArrowLeft, Send, CheckCircle2, AlertCircle, X } from "lucide-react";
 import { useRouter } from "next/navigation";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
 import { createPortalUnfilledReports } from "@/lib/firebase/portal-transaction-service";
-import { tanksRepository } from "@/lib/firebase/repositories";
+import { getPortalCurrentLentTanks } from "@/lib/portal/customer-reads";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 
 interface TankItem {
@@ -34,7 +34,7 @@ export default function UnfilledReportPage() {
           return;
         }
 
-        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: "lent" });
+        const tankDocs = await getPortalCurrentLentTanks(currentIdentity);
         const tankIds: string[] = tankDocs.map((t) => t.id);
         setLentTanks(tankIds);
       } catch (e) {
