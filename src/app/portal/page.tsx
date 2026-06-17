@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import { Package, Clock, ShoppingCart, RotateCcw, AlertTriangle } from "lucide-react";
 import Link from "next/link";
-import { logsRepository, tanksRepository } from "@/lib/firebase/repositories";
+import { getPortalCurrentLentTanks, getPortalRecentLogs } from "@/lib/portal/customer-reads";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 import { getPortalHistoryActionBadgeTone } from "@/lib/tank-action-status-display";
 import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
@@ -34,12 +34,17 @@ export default function PortalPage() {
           return;
         }
 
-        const tankDocs = await tanksRepository.getTanks({ location: currentIdentity.customerName, status: "lent" });
+        const tankDocs = await getPortalCurrentLentTanks(currentIdentity);
         const tanks: string[] = tankDocs.map((t) => t.id);
         setRentedTanks(tanks.sort());
 
-        const recentLogs = await logsRepository.getActiveLogs({ location: currentIdentity.customerName, limit: 30 }) as unknown as LogEntry[];
-        setLogs(recentLogs);
+        const recentLogs = await getPortalRecentLogs(currentIdentity, 30);
+        setLogs(recentLogs.map((log) => ({
+          action: log.action ?? "",
+          timestamp: log.timestamp,
+          tankId: log.tankId ?? log.id,
+          staffName: log.staffName,
+        })));
       } catch (e) {
         console.error("Portal fetch error", e);
       } finally {

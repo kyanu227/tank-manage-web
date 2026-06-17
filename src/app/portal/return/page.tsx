@@ -7,7 +7,7 @@ import { db } from "@/lib/firebase/config";
 import { doc, getDoc } from "firebase/firestore";
 import ReturnTagSelector, { getReturnTagLabel, getReturnTagStyle, type ReturnTagValue } from "@/components/ReturnTagSelector";
 import { createPortalReturnRequests } from "@/lib/firebase/portal-transaction-service";
-import { tanksRepository } from "@/lib/firebase/repositories";
+import { getPortalCurrentLentTanks } from "@/lib/portal/customer-reads";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
 
 type Condition = ReturnTagValue;
@@ -58,7 +58,7 @@ export default function CustomerReturnPage() {
       }
 
       const [tankDocs, settingsDoc] = await Promise.all([
-        tanksRepository.getTanks({ location: currentIdentity.customerName, status: "lent" }),
+        getPortalCurrentLentTanks(currentIdentity),
         getDoc(doc(db, "settings", "portal")),
       ]);
 
