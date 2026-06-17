@@ -20,6 +20,7 @@ import type { TankDoc, RepositoryWriter } from "./types";
  * Firestore のタンクドキュメントを TankDoc に正規化する。
  * getTank / getTanks の双方で同一変換を行うため、ここに集約する。
  * status / location / staff / type / note / logNote は String 化、
+ * customerId / customerName は missing / null / string を区別して正規化し、
  * updatedAt / latestLogId / nextMaintenanceDate はそのまま透過する。
  */
 function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
@@ -27,6 +28,8 @@ function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
   return {
     id: snap.id,
     status: String(raw.status ?? ""),
+    customerId: optionalNullableString(raw.customerId),
+    customerName: optionalNullableString(raw.customerName),
     location: raw.location != null ? String(raw.location) : undefined,
     staff: raw.staff != null ? String(raw.staff) : undefined,
     type: raw.type != null ? String(raw.type) : undefined,
@@ -38,12 +41,21 @@ function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
   };
 }
 
+function optionalNullableString(value: unknown): string | null | undefined {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  return String(value);
+}
+
 /** タンクのフィルタ条件（Phase 2 以降で拡張） */
 export interface GetTanksOptions {
   status?: TankStatusCode;
   /** 複数ステータスのいずれかに合致するタンクを取得（例: 一括返却対象 [LENT, UNRETURNED]）。
    *  Firestore の `in` 句は最大10件。10件超は呼び出し側責任とし、ここでは分割しない。 */
   statusIn?: TankStatusCode[];
+  /** customers/{customerId} の document ID による現在貸出先 query。customerName/location は identity として扱わない。 */
+  customerId?: string;
+  /** 既存互換の場所/表示名 query。顧客 identity の正本ではない。 */
   location?: string;
   /** タンクIDの先頭アルファベット。Firestore でクエリしづらいため取得後にメモリでフィルタする。 */
   prefix?: string;
@@ -67,18 +79,27 @@ export async function getTank(tankId: string): Promise<TankDoc | null> {
 /**
  * 全件または条件つき取得。
  * - options 未指定 → tanks 全件取得
- * - status / statusIn / location が指定されたら where 句で AND 絞り込み
+ * - status / statusIn / location / customerId が指定されたら where 句で AND 絞り込み
+ * - location は既存互換の表示名 query であり、顧客 identity の正本ではない
  * - prefix は Firestore で表現しづらいため、取得後にクライアント側でフィルタする
  * - 戻り値は id 昇順（localeCompare）でソート済み
  */
 export async function getTanks(options?: GetTanksOptions): Promise<TankDoc[]> {
   const tanksCol = collection(db, "tanks");
   const constraints: QueryConstraint[] = [];
+  const customerId = options?.customerId?.trim();
+  if (options?.customerId !== undefined && !customerId) {
+    return [];
+  }
+
   if (options?.status !== undefined) {
     constraints.push(where("status", "==", options.status));
   }
   if (options?.statusIn !== undefined && options.statusIn.length > 0) {
     constraints.push(where("status", "in", options.statusIn));
+  }
+  if (customerId) {
+    constraints.push(where("customerId", "==", customerId));
   }
   if (options?.location !== undefined) {
     constraints.push(where("location", "==", options.location));

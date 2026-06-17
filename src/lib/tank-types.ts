@@ -6,13 +6,18 @@
 export interface TankDoc {
   id: string;
   status: string;
+  /** 現在貸出先の customers/{customerId} 参照。未導入 document は undefined、非貸出中の明示値は null。 */
+  customerId?: string | null;
+  /** 現在貸出先の表示 snapshot。顧客 identity の正本ではない。 */
+  customerName?: string | null;
+  /** 現在場所・表示名。顧客 identity の正本ではない。 */
   location?: string;
   staff?: string;
   type?: string;
   note?: string;
   logNote?: string;
-  updatedAt?: any;
+  updatedAt?: unknown;
   latestLogId?: string | null;
   /** 次回耐圧検査期限（旧GAS互換で "YYYY/MM/DD" 文字列。Timestamp/Date も可） */
-  nextMaintenanceDate?: any;
+  nextMaintenanceDate?: unknown;
 }
