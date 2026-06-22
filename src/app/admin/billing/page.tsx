@@ -3,26 +3,28 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Printer } from "lucide-react";
 import { collection, getDocs } from "firebase/firestore";
-import { calculateBillingLineBreakdown, type BillingLineBreakdown } from "@/lib/billing/calculate";
+import {
+  buildInvoiceCandidates,
+  type BillingCustomerMaster,
+  type InvoiceCandidate,
+} from "@/lib/billing/invoice-candidate";
 import {
   DEFAULT_BILLING_INVOICE_SETTINGS,
   normalizeBillingInvoiceSettings,
   type BillingInvoiceSettings,
+  type CarryOverBillingMode,
+  type InvoiceDateMode,
+  type ReturnBillingMode,
   type BillingRoundingMode,
   type BillingTaxMode,
 } from "@/lib/billing/settings";
-import {
-  buildCustomerIdentityGroup,
-  normalizeCustomerIdentityText,
-  type CustomerIdentityGroup,
-} from "@/lib/customer-identity-read";
+import { normalizeCustomerIdentityText } from "@/lib/customer-identity-read";
 import { db } from "@/lib/firebase/config";
 import { logsRepository } from "@/lib/firebase/repositories";
 import {
   getBillingInvoiceSettings,
   saveBillingInvoiceSettings,
 } from "@/lib/firebase/billing-settings-service";
-import { isLendTankLogAction } from "@/lib/tank-action-status-codes";
 
 type BillingTab = "list" | "settings";
 
@@ -31,48 +33,10 @@ type PrintMode =
   | { type: "all" }
   | null;
 
-type CustomerMaster = {
-  customerId: string;
-  customerName: string;
-  formalName: string;
-  price10: number;
-  price12: number;
-  priceAluminum: number;
-};
-
-interface BillItem {
-  key: string;
-  customerId?: string;
-  customerName: string;
-  recipientName: string;
-  count: number;
-  isLegacy: boolean;
-  pricingResolved: boolean;
-  breakdown: BillingLineBreakdown;
-}
-
-type BillingGroup = CustomerIdentityGroup & {
-  count: number;
-  pricing?: CustomerMaster;
-  pricingResolved: boolean;
-};
-
-function addCustomerNameIndex(
-  index: Map<string, CustomerMaster[]>,
-  name: unknown,
-  customer: CustomerMaster,
-) {
-  const normalized = normalizeCustomerIdentityText(name);
-  if (!normalized) return;
-  const current = index.get(normalized) ?? [];
-  if (!current.some((item) => item.customerId === customer.customerId)) {
-    current.push(customer);
-  }
-  index.set(normalized, current);
-}
-
 function money(value: number): string {
-  return `¥${Math.round(value).toLocaleString()}`;
+  const rounded = Math.round(value);
+  if (rounded < 0) return `-¥${Math.abs(rounded).toLocaleString()}`;
+  return `¥${rounded.toLocaleString()}`;
 }
 
 function percentLabel(taxRate: number): string {
@@ -81,6 +45,21 @@ function percentLabel(taxRate: number): string {
 
 function formatIssueDate(date: Date): string {
   return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function invoiceDisplayDate(
+  period: string,
+  issueDate: string,
+  mode: InvoiceDateMode,
+): string {
+  if (mode === "period_end") {
+    const [year, month] = period.split("-").map(Number);
+    if (year && month) {
+      const lastDay = new Date(year, month, 0).getDate();
+      return `${year}年${month}月${lastDay}日`;
+    }
+  }
+  return issueDate;
 }
 
 function formatPeriod(period: string): string {
@@ -115,7 +94,7 @@ function labelStyle(): CSSProperties {
 }
 
 export default function BillingPage() {
-  const [bills, setBills] = useState<BillItem[]>([]);
+  const [bills, setBills] = useState<InvoiceCandidate[]>([]);
   const [selectedBillKey, setSelectedBillKey] = useState<string | null>(null);
   const [settings, setSettings] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
   const [settingsDraft, setSettingsDraft] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
@@ -146,8 +125,7 @@ export default function BillingPage() {
         setSettings(normalizedSettings);
         setSettingsDraft(normalizedSettings);
 
-        const customerById = new Map<string, CustomerMaster>();
-        const customersByName = new Map<string, CustomerMaster[]>();
+        const customers: BillingCustomerMaster[] = [];
         custSnap.forEach((d) => {
           const data = d.data();
           const customerName =
@@ -155,81 +133,22 @@ export default function BillingPage() {
             ?? normalizeCustomerIdentityText(data.companyName)
             ?? d.id;
           const formalName = normalizeCustomerIdentityText(data.formalName) ?? "";
-          const customer: CustomerMaster = {
+          customers.push({
             customerId: d.id,
             customerName,
             formalName,
             price10: Number(data.price10) || 0,
             price12: Number(data.price12) || 0,
             priceAluminum: Number(data.priceAluminum) || 0,
-          };
-          customerById.set(customer.customerId, customer);
-          addCustomerNameIndex(customersByName, data.name, customer);
-          addCustomerNameIndex(customersByName, data.companyName, customer);
-          addCustomerNameIndex(customersByName, data.formalName, customer);
-          addCustomerNameIndex(customersByName, customer.customerName, customer);
-        });
-
-        const [y, m] = period.split("-").map(Number);
-        const groups = new Map<string, BillingGroup>();
-        logs.forEach((log) => {
-          if (!isLendTankLogAction(log.action, log.transitionAction) || !log.timestamp?.toDate) return;
-          const dt = log.timestamp.toDate();
-          if (dt.getFullYear() !== y || dt.getMonth() + 1 !== m) return;
-          const customerId = normalizeCustomerIdentityText(log.customerId);
-          const customerMaster = customerId ? customerById.get(customerId) : undefined;
-          const group = buildCustomerIdentityGroup(
-            {
-              customerId: log.customerId,
-              customerName: log.customerName,
-              location: log.location,
-            },
-            { currentCustomerName: customerMaster?.customerName },
-          );
-          const existing = groups.get(group.key);
-          if (existing) {
-            existing.count += 1;
-            return;
-          }
-
-          let pricing: CustomerMaster | undefined;
-          if (group.customerId) {
-            pricing = customerById.get(group.customerId);
-          } else {
-            const candidates = customersByName.get(group.displayName) ?? [];
-            pricing = candidates.length === 1 ? candidates[0] : undefined;
-          }
-
-          groups.set(group.key, {
-            ...group,
-            count: 1,
-            pricing,
-            pricingResolved: Boolean(pricing),
           });
         });
 
-        const items: BillItem[] = Array.from(groups.values()).map((group) => {
-          const p = group.pricing;
-          const breakdown = calculateBillingLineBreakdown(
-            {
-              count: group.count,
-              unitPrice10: p?.price10 ?? 0,
-              unitPrice12: p?.price12 ?? 0,
-              unitPriceAluminum: p?.priceAluminum ?? 0,
-            },
-            normalizedSettings,
-          );
-          return {
-            key: group.key,
-            customerId: group.customerId,
-            customerName: group.displayName,
-            recipientName: p?.formalName || p?.customerName || group.displayName,
-            count: group.count,
-            breakdown,
-            isLegacy: group.isLegacy,
-            pricingResolved: group.pricingResolved,
-          };
-        }).sort((a, b) => b.breakdown.total - a.breakdown.total || a.recipientName.localeCompare(b.recipientName));
+        const items = buildInvoiceCandidates({
+          logs,
+          customers,
+          period,
+          settings: normalizedSettings,
+        });
         setBills(items);
         setSelectedBillKey((current) => {
           if (current && items.some((item) => item.key === current)) return current;
@@ -257,7 +176,7 @@ export default function BillingPage() {
       : selectedBill
         ? [selectedBill]
         : [];
-  const grandTotal = bills.reduce((s, b) => s + b.breakdown.total, 0);
+  const grandTotal = bills.reduce((s, b) => s + b.total, 0);
 
   const updateDraft = <K extends keyof BillingInvoiceSettings>(
     key: K,
@@ -371,14 +290,18 @@ export default function BillingPage() {
                     type="button"
                     className={`billing-list-item ${bill.key === selectedBill?.key ? "is-selected" : ""}`}
                     onClick={() => setSelectedBillKey(bill.key)}
-                  >
+                    >
                     <span className="billing-list-name">{bill.recipientName}</span>
                     <span className="billing-list-meta">
-                      {bill.count}本 / {money(bill.breakdown.total)}
+                      合計 {money(bill.total)} / 小計 {money(bill.subtotal)} / 消費税 {money(bill.tax)}
+                    </span>
+                    <span className="billing-list-meta">
+                      貸出 {bill.lendCount}件 / 警告 {bill.warnings.length}件
                     </span>
                     <span className="billing-list-badges">
                       {bill.isLegacy && settings.showLegacyWarning && <span>旧形式</span>}
                       {!bill.pricingResolved && <span>単価未設定</span>}
+                      {bill.warnings.length > 0 && <span>要確認</span>}
                     </span>
                   </button>
                 ))}
@@ -456,7 +379,7 @@ function InvoiceDocument({
   settings,
   printOnly = false,
 }: {
-  bill: BillItem;
+  bill: InvoiceCandidate;
   period: string;
   issueDate: string;
   settings: BillingInvoiceSettings;
@@ -469,6 +392,12 @@ function InvoiceDocument({
     settings.bankAccountNumber,
     settings.bankAccountHolder,
   ].filter(Boolean);
+  const displayDate = invoiceDisplayDate(period, issueDate, settings.invoiceDateMode);
+  const registrationWarning =
+    settings.showRegistrationNumberWarning && !settings.issuerRegistrationNumber.trim();
+  const visibleWarnings = bill.warnings.filter((warning) => (
+    settings.showLegacyWarning || !warning.startsWith("旧形式データ")
+  ));
 
   return (
     <article className={`invoice-paper ${printOnly ? "is-print" : ""}`}>
@@ -480,12 +409,13 @@ function InvoiceDocument({
         </div>
         <div className="invoice-issuer">
           <h1>{settings.invoiceTitle}</h1>
-          <p>発行日: {issueDate}</p>
+          <p>{settings.invoiceDateMode === "period_end" ? "取引年月日" : "発行日"}: {displayDate}</p>
           <strong>{settings.issuerName || "発行者名未設定"}</strong>
           {settings.issuerPostalCode && <span>〒{settings.issuerPostalCode}</span>}
           {settings.issuerAddress && <span>{settings.issuerAddress}</span>}
           {settings.issuerPhone && <span>TEL: {settings.issuerPhone}</span>}
           {settings.issuerRegistrationNumber && <span>登録番号: {settings.issuerRegistrationNumber}</span>}
+          {registrationWarning && <span className="invoice-registration-warning">登録番号が未設定です</span>}
         </div>
       </header>
 
@@ -495,25 +425,30 @@ function InvoiceDocument({
 
       <section className="invoice-total-box">
         <span>ご請求金額</span>
-        <strong>{money(bill.breakdown.total)}</strong>
+        <strong>{money(bill.total)}</strong>
       </section>
 
       <section className="invoice-table-wrap">
         <table className="invoice-table">
           <thead>
             <tr>
-              <th>品目</th>
+              <th>内容</th>
               <th>数量</th>
               {settings.showUnitPrice && <th>単価</th>}
+              <th>割引</th>
               <th>金額</th>
             </tr>
           </thead>
           <tbody>
-            {bill.breakdown.lineItems.map((line) => (
-              <tr key={line.label}>
-                <td>{line.label}</td>
+            {bill.lineItems.map((line, index) => (
+              <tr key={`${line.label}-${index}`}>
+                <td>
+                  <strong>{line.label}</strong>
+                  {line.note && <span className="invoice-line-note">{line.note}</span>}
+                </td>
                 <td className="number-cell">{line.quantity}</td>
                 {settings.showUnitPrice && <td className="number-cell">{money(line.unitPrice)}</td>}
+                <td className="number-cell">{line.discountAmount > 0 ? `-${money(line.discountAmount)}` : "-"}</td>
                 <td className="number-cell">{money(line.amount)}</td>
               </tr>
             ))}
@@ -522,14 +457,29 @@ function InvoiceDocument({
       </section>
 
       <section className="invoice-summary">
-        <AmountRow label="小計" value={bill.breakdown.subtotal} />
-        {settings.showTaxBreakdown && settings.taxMode !== "none" && (
-          <AmountRow
-            label={`消費税（${settings.taxMode === "inclusive" ? "内税" : "外税"} ${percentLabel(settings.taxRate)}）`}
-            value={bill.breakdown.tax}
-          />
+        <AmountRow label="小計" value={bill.subtotal} />
+        {bill.discountTotal > 0 && (
+          <AmountRow label="割引額" value={-bill.discountTotal} />
         )}
-        <AmountRow label="合計" value={bill.breakdown.total} emphasis />
+        {settings.showTaxBreakdown && settings.taxMode !== "none" && (
+          bill.taxBreakdown.map((row) => (
+            <AmountRow
+              key={row.taxRate}
+              label={`${percentLabel(row.taxRate)}対象 ${settings.taxMode === "inclusive" ? "内税" : "外税"} 小計`}
+              value={row.taxableSubtotal}
+            />
+          ))
+        )}
+        {settings.showTaxBreakdown && settings.taxMode !== "none" && (
+          bill.taxBreakdown.map((row) => (
+            <AmountRow
+              key={`${row.taxRate}-tax`}
+              label={`消費税額（${percentLabel(row.taxRate)}）`}
+              value={row.tax}
+            />
+          ))
+        )}
+        <AmountRow label="合計" value={bill.total} emphasis />
       </section>
 
       <section className="invoice-detail-grid">
@@ -545,14 +495,18 @@ function InvoiceDocument({
         </div>
       </section>
 
-      {(bill.isLegacy || !bill.pricingResolved) && (
+      {settings.showInvoiceComplianceNotes && (
+        <section className="invoice-compliance-note">
+          <p>税率ごとの対価額・消費税額は上記内訳を参照してください。</p>
+        </section>
+      )}
+
+      {(visibleWarnings.length > 0 || registrationWarning) && (
         <section className="invoice-warnings">
-          {bill.isLegacy && settings.showLegacyWarning && (
-            <p>旧形式データのため、顧客IDではなく過去の貸出先名で集計しています。</p>
-          )}
-          {!bill.pricingResolved && (
-            <p>単価が解決できないため、金額が0円になっています。顧客管理の単価設定を確認してください。</p>
-          )}
+          {registrationWarning && <p>登録番号が未設定です。必要に応じて請求書設定で登録番号を入力してください。</p>}
+          {visibleWarnings.map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
         </section>
       )}
     </article>
@@ -594,22 +548,32 @@ function BillingSettingsForm({
           発行者名が未設定です。請求書には「発行者名未設定」と表示されます。
         </div>
       )}
-      <SettingsSection title="基本文言">
+      {settings.showRegistrationNumberWarning && !settings.issuerRegistrationNumber.trim() && (
+        <div className="billing-warning">
+          登録番号が未設定です。インボイス対応が必要な場合は登録番号/T番号を入力してください。
+        </div>
+      )}
+      <div className="billing-note">
+        この設定は請求候補に反映されます。確定済み請求書には将来 snapshot を保存する予定です。
+        顧客別単価は顧客管理の price10 / price12 / priceAluminum を使用します。
+      </div>
+
+      <SettingsSection title="基本情報">
         <TextField label="請求書タイトル" value={settings.invoiceTitle} onChange={(value) => onChange("invoiceTitle", value)} />
         <TextField label="宛名敬称" value={settings.recipientSuffix} onChange={(value) => onChange("recipientSuffix", value)} />
-        <TextField label="明細品目名" value={settings.invoiceItemLabel} onChange={(value) => onChange("invoiceItemLabel", value)} />
-        <TextField label="支払期限文言" value={settings.paymentDueText} onChange={(value) => onChange("paymentDueText", value)} />
-        <TextField label="挨拶文" value={settings.greetingText} onChange={(value) => onChange("greetingText", value)} multiline />
-        <TextField label="備考" value={settings.notes} onChange={(value) => onChange("notes", value)} multiline />
-        <TextField label="フッター文言" value={settings.footerText} onChange={(value) => onChange("footerText", value)} multiline />
+        <TextField label="明細名 10L" value={settings.invoiceItemLabel10} onChange={(value) => onChange("invoiceItemLabel10", value)} />
+        <TextField label="明細名 12L" value={settings.invoiceItemLabel12} onChange={(value) => onChange("invoiceItemLabel12", value)} />
+        <TextField label="明細名 アルミ" value={settings.invoiceItemLabelAluminum} onChange={(value) => onChange("invoiceItemLabelAluminum", value)} />
       </SettingsSection>
 
-      <SettingsSection title="発行者情報">
+      <SettingsSection title="発行者・インボイス">
         <TextField label="発行者名" value={settings.issuerName} onChange={(value) => onChange("issuerName", value)} />
         <TextField label="郵便番号" value={settings.issuerPostalCode} onChange={(value) => onChange("issuerPostalCode", value)} />
         <TextField label="住所" value={settings.issuerAddress} onChange={(value) => onChange("issuerAddress", value)} />
         <TextField label="電話番号" value={settings.issuerPhone} onChange={(value) => onChange("issuerPhone", value)} />
-        <TextField label="登録番号" value={settings.issuerRegistrationNumber} onChange={(value) => onChange("issuerRegistrationNumber", value)} />
+        <TextField label="登録番号/T番号" value={settings.issuerRegistrationNumber} onChange={(value) => onChange("issuerRegistrationNumber", value)} />
+        <CheckField label="登録番号未設定warning表示" checked={settings.showRegistrationNumberWarning} onChange={(value) => onChange("showRegistrationNumberWarning", value)} />
+        <CheckField label="インボイス記載事項メモを表示" checked={settings.showInvoiceComplianceNotes} onChange={(value) => onChange("showInvoiceComplianceNotes", value)} />
       </SettingsSection>
 
       <SettingsSection title="振込先">
@@ -620,7 +584,14 @@ function BillingSettingsForm({
         <TextField label="口座名義" value={settings.bankAccountHolder} onChange={(value) => onChange("bankAccountHolder", value)} />
       </SettingsSection>
 
-      <SettingsSection title="税・表示">
+      <SettingsSection title="文言">
+        <TextField label="支払期限" value={settings.paymentDueText} onChange={(value) => onChange("paymentDueText", value)} />
+        <TextField label="挨拶文" value={settings.greetingText} onChange={(value) => onChange("greetingText", value)} multiline />
+        <TextField label="備考" value={settings.notes} onChange={(value) => onChange("notes", value)} multiline />
+        <TextField label="フッター" value={settings.footerText} onChange={(value) => onChange("footerText", value)} multiline />
+      </SettingsSection>
+
+      <SettingsSection title="税・端数">
         <NumberField
           label="税率（%）"
           value={String(Math.round(settings.taxRate * 1000) / 10)}
@@ -646,9 +617,75 @@ function BillingSettingsForm({
           ]}
           onChange={(value) => onChange("roundingMode", value)}
         />
+        <SelectField<InvoiceDateMode>
+          label="請求書日付"
+          value={settings.invoiceDateMode}
+          options={[
+            { value: "issue_date", label: "発行日" },
+            { value: "period_end", label: "対象月末日" },
+          ]}
+          onChange={(value) => onChange("invoiceDateMode", value)}
+        />
         <CheckField label="税内訳を表示" checked={settings.showTaxBreakdown} onChange={(value) => onChange("showTaxBreakdown", value)} />
         <CheckField label="単価を表示" checked={settings.showUnitPrice} onChange={(value) => onChange("showUnitPrice", value)} />
         <CheckField label="旧形式データ警告を表示" checked={settings.showLegacyWarning} onChange={(value) => onChange("showLegacyWarning", value)} />
+      </SettingsSection>
+
+      <SettingsSection title="返却タグ請求ルール">
+        <SelectField<ReturnBillingMode>
+          label="未使用返却の請求"
+          value={settings.unusedReturnBillingMode}
+          options={[
+            { value: "charge", label: "通常請求" },
+            { value: "free", label: "無料" },
+            { value: "discount", label: "割引" },
+          ]}
+          onChange={(value) => onChange("unusedReturnBillingMode", value)}
+        />
+        <NumberField
+          label="未使用返却割引率（%）"
+          value={String(Math.round(settings.unusedReturnDiscountRate * 1000) / 10)}
+          onChange={(value) => onChange("unusedReturnDiscountRate", Math.min(1, Math.max(0, Number(value) / 100 || 0)))}
+        />
+        <SelectField<ReturnBillingMode>
+          label="未充填返却の請求"
+          value={settings.unchargedReturnBillingMode}
+          options={[
+            { value: "charge", label: "通常請求" },
+            { value: "free", label: "無料" },
+            { value: "discount", label: "割引" },
+          ]}
+          onChange={(value) => onChange("unchargedReturnBillingMode", value)}
+        />
+        <NumberField
+          label="未充填返却割引率（%）"
+          value={String(Math.round(settings.unchargedReturnDiscountRate * 1000) / 10)}
+          onChange={(value) => onChange("unchargedReturnDiscountRate", Math.min(1, Math.max(0, Number(value) / 100 || 0)))}
+        />
+        <SelectField<CarryOverBillingMode>
+          label="持ち越し追加請求"
+          value={settings.carryOverBillingMode}
+          options={[
+            { value: "no_extra", label: "追加なし" },
+            { value: "monthly_extra", label: "月額追加" },
+            { value: "daily_extra", label: "日額追加" },
+          ]}
+          onChange={(value) => onChange("carryOverBillingMode", value)}
+        />
+        <NumberField
+          label="持ち越し月額追加料金"
+          value={String(settings.carryOverMonthlyExtraPrice)}
+          max={undefined}
+          step={1}
+          onChange={(value) => onChange("carryOverMonthlyExtraPrice", Math.max(0, Number(value) || 0))}
+        />
+        <NumberField
+          label="持ち越し日額追加料金"
+          value={String(settings.carryOverDailyExtraPrice)}
+          max={undefined}
+          step={1}
+          onChange={(value) => onChange("carryOverDailyExtraPrice", Math.max(0, Number(value) || 0))}
+        />
       </SettingsSection>
 
       <div className="billing-settings-actions">
@@ -708,16 +745,20 @@ function TextField({
 function NumberField({
   label,
   value,
+  max = 100,
+  step = 0.1,
   onChange,
 }: {
   label: string;
   value: string;
+  max?: number;
+  step?: number;
   onChange: (value: string) => void;
 }) {
   return (
     <label>
       <span style={labelStyle()}>{label}</span>
-      <input type="number" min={0} max={100} step={0.1} value={value} onChange={(e) => onChange(e.target.value)} style={fieldStyle()} />
+      <input type="number" min={0} max={max} step={step} value={value} onChange={(e) => onChange(e.target.value)} style={fieldStyle()} />
     </label>
   );
 }
@@ -996,6 +1037,10 @@ const PRINT_STYLES = `
   .invoice-issuer strong {
     margin: 0;
   }
+  .invoice-registration-warning {
+    color: #b45309;
+    font-weight: 900;
+  }
   .invoice-greeting {
     color: #334155;
     font-size: 13px;
@@ -1048,6 +1093,13 @@ const PRINT_STYLES = `
     font-family: monospace;
     text-align: right;
   }
+  .invoice-line-note {
+    color: #64748b;
+    display: block;
+    font-size: 10px;
+    font-weight: 750;
+    margin-top: 3px;
+  }
   .invoice-summary {
     display: grid;
     gap: 6px;
@@ -1092,6 +1144,16 @@ const PRINT_STYLES = `
   .invoice-strong {
     color: #0f172a;
     font-weight: 900;
+  }
+  .invoice-compliance-note {
+    color: #64748b;
+    font-size: 11px;
+    font-weight: 750;
+    line-height: 1.6;
+    margin-top: 12px;
+  }
+  .invoice-compliance-note p {
+    margin: 0;
   }
   .invoice-warnings {
     background: #fff7ed;
