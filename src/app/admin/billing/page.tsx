@@ -1,15 +1,8 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Printer } from "lucide-react";
-import { db } from "@/lib/firebase/config";
 import { collection, getDocs } from "firebase/firestore";
-import { logsRepository } from "@/lib/firebase/repositories";
-import {
-  buildCustomerIdentityGroup,
-  normalizeCustomerIdentityText,
-  type CustomerIdentityGroup,
-} from "@/lib/customer-identity-read";
 import { calculateBillingLineBreakdown, type BillingLineBreakdown } from "@/lib/billing/calculate";
 import {
   DEFAULT_BILLING_INVOICE_SETTINGS,
@@ -19,12 +12,24 @@ import {
   type BillingTaxMode,
 } from "@/lib/billing/settings";
 import {
+  buildCustomerIdentityGroup,
+  normalizeCustomerIdentityText,
+  type CustomerIdentityGroup,
+} from "@/lib/customer-identity-read";
+import { db } from "@/lib/firebase/config";
+import { logsRepository } from "@/lib/firebase/repositories";
+import {
   getBillingInvoiceSettings,
   saveBillingInvoiceSettings,
 } from "@/lib/firebase/billing-settings-service";
 import { isLendTankLogAction } from "@/lib/tank-action-status-codes";
 
 type BillingTab = "list" | "settings";
+
+type PrintMode =
+  | { type: "single"; billKey: string }
+  | { type: "all" }
+  | null;
 
 type CustomerMaster = {
   customerId: string;
@@ -74,13 +79,22 @@ function percentLabel(taxRate: number): string {
   return `${Math.round(taxRate * 1000) / 10}%`;
 }
 
+function formatIssueDate(date: Date): string {
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日`;
+}
+
+function formatPeriod(period: string): string {
+  const [year, month] = period.split("-");
+  return year && month ? `${year}年${Number(month)}月分` : period;
+}
+
 function fieldStyle(multiline = false): CSSProperties {
   return {
     width: "100%",
     minHeight: multiline ? 86 : undefined,
     padding: "9px 11px",
-    borderRadius: 9,
-    border: "1px solid #e2e8f0",
+    borderRadius: 8,
+    border: "1px solid #dbe3ee",
     fontSize: 13,
     color: "#334155",
     outline: "none",
@@ -102,15 +116,19 @@ function labelStyle(): CSSProperties {
 
 export default function BillingPage() {
   const [bills, setBills] = useState<BillItem[]>([]);
+  const [selectedBillKey, setSelectedBillKey] = useState<string | null>(null);
   const [settings, setSettings] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
   const [settingsDraft, setSettingsDraft] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
   const [activeTab, setActiveTab] = useState<BillingTab>("list");
   const [loading, setLoading] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
+  const [printMode, setPrintMode] = useState<PrintMode>(null);
   const [period, setPeriod] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
+
+  const issueDate = useMemo(() => formatIssueDate(new Date()), []);
 
   useEffect(() => {
     (async () => {
@@ -211,8 +229,12 @@ export default function BillingPage() {
             isLegacy: group.isLegacy,
             pricingResolved: group.pricingResolved,
           };
-        }).sort((a, b) => b.count - a.count || a.recipientName.localeCompare(b.recipientName));
+        }).sort((a, b) => b.breakdown.total - a.breakdown.total || a.recipientName.localeCompare(b.recipientName));
         setBills(items);
+        setSelectedBillKey((current) => {
+          if (current && items.some((item) => item.key === current)) return current;
+          return items[0]?.key ?? null;
+        });
       } catch (e) {
         console.error(e);
       } finally {
@@ -221,8 +243,20 @@ export default function BillingPage() {
     })();
   }, [period]);
 
-  const grandSubtotal = bills.reduce((s, b) => s + b.breakdown.subtotal, 0);
-  const grandTax = bills.reduce((s, b) => s + b.breakdown.tax, 0);
+  useEffect(() => {
+    const handleAfterPrint = () => setPrintMode(null);
+    window.addEventListener("afterprint", handleAfterPrint);
+    return () => window.removeEventListener("afterprint", handleAfterPrint);
+  }, []);
+
+  const selectedBill = bills.find((bill) => bill.key === selectedBillKey) ?? bills[0];
+  const printBills = printMode?.type === "all"
+    ? bills
+    : printMode?.type === "single"
+      ? bills.filter((bill) => bill.key === printMode.billKey)
+      : selectedBill
+        ? [selectedBill]
+        : [];
   const grandTotal = bills.reduce((s, b) => s + b.breakdown.total, 0);
 
   const updateDraft = <K extends keyof BillingInvoiceSettings>(
@@ -255,75 +289,143 @@ export default function BillingPage() {
     }
   };
 
+  const requestPrint = (mode: Exclude<PrintMode, null>) => {
+    setPrintMode(mode);
+    window.setTimeout(() => window.print(), 50);
+  };
+
   return (
-    <div>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 18, flexWrap: "wrap", gap: 12 }}>
-        <div>
-          <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", marginBottom: 4 }}>請求書発行</h1>
-          <p style={{ fontSize: 14, color: "#94a3b8" }}>月次の貸出先別請求データ / 請求書設定</p>
-        </div>
-        <input
-          type="month"
-          value={period}
-          onChange={(e) => setPeriod(e.target.value)}
-          style={{ padding: "8px 14px", borderRadius: 10, border: "1px solid #e2e8f0", fontSize: 14, fontWeight: 600, color: "#334155", outline: "none" }}
-        />
-      </div>
-
-      <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
-        <TabButton active={activeTab === "list"} onClick={() => setActiveTab("list")}>
-          請求一覧
-        </TabButton>
-        <TabButton active={activeTab === "settings"} onClick={() => setActiveTab("settings")}>
-          請求書設定
-        </TabButton>
-      </div>
-
-      <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 12, padding: "10px 12px", marginBottom: 16, color: "#475569", fontSize: 12, fontWeight: 700, lineHeight: 1.5 }}>
-        顧客別単価は「顧客管理」の price10 / price12 / priceAluminum を使用します。
-        請求書文言・税率・振込先はこの画面の設定から変更できます。
-      </div>
-
-      {activeTab === "settings" ? (
-        <BillingSettingsForm
-          settings={settingsDraft}
-          saving={savingSettings}
-          onChange={updateDraft}
-          onSave={saveSettings}
-        />
-      ) : loading ? (
-        <div style={{ padding: 60, textAlign: "center", color: "#94a3b8" }}>読み込み中…</div>
-      ) : bills.length === 0 ? (
-        <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 40, textAlign: "center", color: "#cbd5e1", fontSize: 14 }}>
-          {period} の貸出データがありません
-        </div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-          {bills.map((b) => (
-            <InvoicePreviewCard
-              key={b.key}
-              bill={b}
-              period={period}
-              settings={settings}
+    <>
+      <style>{PRINT_STYLES}</style>
+      <div className="billing-admin-shell">
+        <div className="billing-header">
+          <div>
+            <h1 className="billing-title">請求書発行</h1>
+            <p className="billing-subtitle">月次の貸出先別請求データ / 請求書設定</p>
+          </div>
+          <div className="billing-actions">
+            <input
+              type="month"
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              className="billing-month"
             />
-          ))}
-
-          <div style={{ background: "linear-gradient(135deg, #6366f1, #8b5cf6)", borderRadius: 14, padding: "20px 20px", color: "#fff", display: "grid", gap: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 14, fontWeight: 700 }}>合計請求額</span>
-              <span style={{ fontSize: 26, fontWeight: 800, fontFamily: "monospace" }}>{money(grandTotal)}</span>
-            </div>
-            {settings.showTaxBreakdown && (
-              <div style={{ display: "flex", gap: 16, fontSize: 12, fontWeight: 700, opacity: 0.9, flexWrap: "wrap" }}>
-                <span>小計 {money(grandSubtotal)}</span>
-                <span>税額 {money(grandTax)}</span>
-                <span>{settings.taxMode === "inclusive" ? "税込" : settings.taxMode === "exclusive" ? "税抜" : "非課税"}</span>
-              </div>
-            )}
+            <button
+              type="button"
+              className="billing-secondary-button"
+              onClick={() => setActiveTab("settings")}
+            >
+              設定を開く
+            </button>
+            <button
+              type="button"
+              className="billing-primary-button"
+              onClick={() => requestPrint({ type: "all" })}
+              disabled={bills.length === 0}
+            >
+              <Printer size={15} /> 全請求書をPDF保存
+            </button>
           </div>
         </div>
-      )}
-    </div>
+
+        <div className="billing-tabs">
+          <TabButton active={activeTab === "list"} onClick={() => setActiveTab("list")}>
+            請求書一覧
+          </TabButton>
+          <TabButton active={activeTab === "settings"} onClick={() => setActiveTab("settings")}>
+            請求書設定
+          </TabButton>
+        </div>
+
+        <div className="billing-note">
+          顧客別単価は「顧客管理」の price10 / price12 / priceAluminum を使用します。
+          請求書文言・税率・振込先はこの画面の設定から変更できます。
+          PDF保存は印刷画面で「PDFとして保存」を選択してください。
+        </div>
+
+        {activeTab === "settings" ? (
+          <BillingSettingsForm
+            settings={settingsDraft}
+            saving={savingSettings}
+            onChange={updateDraft}
+            onSave={saveSettings}
+          />
+        ) : loading ? (
+          <div className="billing-empty">読み込み中…</div>
+        ) : bills.length === 0 ? (
+          <div className="billing-empty">{period} の貸出データがありません</div>
+        ) : (
+          <div className="billing-workspace">
+            <aside className="billing-list">
+              <div className="billing-list-header">
+                <div>
+                  <p className="billing-list-label">請求対象</p>
+                  <strong>{bills.length}件</strong>
+                </div>
+                <div className="billing-list-total">{money(grandTotal)}</div>
+              </div>
+              <div className="billing-list-body">
+                {bills.map((bill) => (
+                  <button
+                    key={bill.key}
+                    type="button"
+                    className={`billing-list-item ${bill.key === selectedBill?.key ? "is-selected" : ""}`}
+                    onClick={() => setSelectedBillKey(bill.key)}
+                  >
+                    <span className="billing-list-name">{bill.recipientName}</span>
+                    <span className="billing-list-meta">
+                      {bill.count}本 / {money(bill.breakdown.total)}
+                    </span>
+                    <span className="billing-list-badges">
+                      {bill.isLegacy && settings.showLegacyWarning && <span>旧形式</span>}
+                      {!bill.pricingResolved && <span>単価未設定</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </aside>
+
+            <section className="billing-preview-column">
+              <div className="billing-preview-toolbar">
+                <div>
+                  <p className="billing-list-label">請求書プレビュー</p>
+                  <strong>{selectedBill?.recipientName ?? "-"}</strong>
+                </div>
+                <button
+                  type="button"
+                  className="billing-primary-button"
+                  onClick={() => selectedBill && requestPrint({ type: "single", billKey: selectedBill.key })}
+                  disabled={!selectedBill}
+                >
+                  <Printer size={15} /> この請求書をPDF保存
+                </button>
+              </div>
+              {selectedBill && (
+                <InvoiceDocument
+                  bill={selectedBill}
+                  period={period}
+                  issueDate={issueDate}
+                  settings={settings}
+                />
+              )}
+            </section>
+          </div>
+        )}
+      </div>
+
+      <div className="billing-print-root" aria-hidden={printMode === null}>
+        {printBills.map((bill) => (
+          <InvoiceDocument
+            key={bill.key}
+            bill={bill}
+            period={period}
+            issueDate={issueDate}
+            settings={settings}
+            printOnly
+          />
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -340,30 +442,25 @@ function TabButton({
     <button
       type="button"
       onClick={onClick}
-      style={{
-        padding: "9px 14px",
-        borderRadius: 999,
-        border: active ? "1px solid #6366f1" : "1px solid #e2e8f0",
-        background: active ? "#eef2ff" : "#fff",
-        color: active ? "#4338ca" : "#64748b",
-        fontSize: 13,
-        fontWeight: 800,
-        cursor: "pointer",
-      }}
+      className={`billing-tab ${active ? "is-active" : ""}`}
     >
       {children}
     </button>
   );
 }
 
-function InvoicePreviewCard({
+function InvoiceDocument({
   bill,
   period,
+  issueDate,
   settings,
+  printOnly = false,
 }: {
   bill: BillItem;
   period: string;
+  issueDate: string;
   settings: BillingInvoiceSettings;
+  printOnly?: boolean;
 }) {
   const bankLines = [
     settings.bankName,
@@ -374,71 +471,59 @@ function InvoicePreviewCard({
   ].filter(Boolean);
 
   return (
-    <article style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "22px 22px" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: 16, alignItems: "flex-start", marginBottom: 16 }}>
-        <div>
-          <h2 style={{ fontSize: 22, fontWeight: 900, color: "#0f172a", margin: 0 }}>{settings.invoiceTitle}</h2>
-          <p style={{ color: "#64748b", fontSize: 13, fontWeight: 700, marginTop: 4 }}>対象月: {period}</p>
+    <article className={`invoice-paper ${printOnly ? "is-print" : ""}`}>
+      <header className="invoice-header">
+        <div className="invoice-recipient">
+          <p className="invoice-kicker">ご請求先</p>
+          <h2>{bill.recipientName} {settings.recipientSuffix}</h2>
+          <p className="invoice-period">{formatPeriod(period)}</p>
         </div>
-        <button
-          type="button"
-          onClick={() => window.print()}
-          style={{ display: "flex", alignItems: "center", gap: 4, padding: "7px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
-        >
-          <Printer size={14} /> 印刷
-        </button>
-      </div>
-
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(220px, 0.8fr)", gap: 18, marginBottom: 18 }}>
-        <div>
-          <p style={{ fontSize: 11, color: "#94a3b8", fontWeight: 800, marginBottom: 4 }}>宛先</p>
-          <h3 style={{ fontSize: 18, color: "#0f172a", fontWeight: 800, margin: 0 }}>{bill.recipientName}</h3>
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 8 }}>
-            {bill.isLegacy && settings.showLegacyWarning && (
-              <span style={{ fontSize: 10, fontWeight: 800, color: "#64748b", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 999, padding: "3px 7px" }}>
-                旧形式データ
-              </span>
-            )}
-            {!bill.pricingResolved && (
-              <span style={{ fontSize: 10, fontWeight: 800, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 999, padding: "3px 7px" }}>
-                単価未設定
-              </span>
-            )}
-          </div>
+        <div className="invoice-issuer">
+          <h1>{settings.invoiceTitle}</h1>
+          <p>発行日: {issueDate}</p>
+          <strong>{settings.issuerName || "発行者名未設定"}</strong>
+          {settings.issuerPostalCode && <span>〒{settings.issuerPostalCode}</span>}
+          {settings.issuerAddress && <span>{settings.issuerAddress}</span>}
+          {settings.issuerPhone && <span>TEL: {settings.issuerPhone}</span>}
+          {settings.issuerRegistrationNumber && <span>登録番号: {settings.issuerRegistrationNumber}</span>}
         </div>
-
-        <div style={{ color: "#475569", fontSize: 12, lineHeight: 1.6 }}>
-          <p style={{ fontWeight: 900, color: "#0f172a", margin: 0 }}>{settings.issuerName || "発行者名未設定"}</p>
-          {settings.issuerPostalCode && <p style={{ margin: 0 }}>〒{settings.issuerPostalCode}</p>}
-          {settings.issuerAddress && <p style={{ margin: 0 }}>{settings.issuerAddress}</p>}
-          {settings.issuerPhone && <p style={{ margin: 0 }}>TEL: {settings.issuerPhone}</p>}
-          {settings.issuerRegistrationNumber && <p style={{ margin: 0 }}>登録番号: {settings.issuerRegistrationNumber}</p>}
-        </div>
-      </div>
+      </header>
 
       {settings.greetingText && (
-        <p style={{ color: "#334155", fontSize: 13, lineHeight: 1.7, margin: "0 0 16px" }}>
-          {settings.greetingText}
-        </p>
+        <p className="invoice-greeting">{settings.greetingText}</p>
       )}
 
-      <div style={{ border: "1px solid #e2e8f0", borderRadius: 10, overflow: "hidden", marginBottom: 14 }}>
-        <div style={{ display: "grid", gridTemplateColumns: settings.showUnitPrice ? "1.4fr 0.6fr 0.8fr 0.8fr" : "1.6fr 0.7fr 0.9fr", background: "#f8fafc", color: "#64748b", fontSize: 11, fontWeight: 900 }}>
-          <span style={{ padding: "9px 10px" }}>明細</span>
-          <span style={{ padding: "9px 10px", textAlign: "right" }}>数量</span>
-          {settings.showUnitPrice && <span style={{ padding: "9px 10px", textAlign: "right" }}>単価</span>}
-          <span style={{ padding: "9px 10px", textAlign: "right" }}>小計</span>
-        </div>
-        <InvoiceLine
-          label="10L貸出"
-          quantity={bill.breakdown.quantity10}
-          unitPrice={bill.breakdown.unitPrice10}
-          subtotal={bill.breakdown.subtotal10}
-          showUnitPrice={settings.showUnitPrice}
-        />
-      </div>
+      <section className="invoice-total-box">
+        <span>ご請求金額</span>
+        <strong>{money(bill.breakdown.total)}</strong>
+      </section>
 
-      <div style={{ display: "grid", gap: 6, justifyContent: "end", marginBottom: 14, color: "#334155", fontSize: 13 }}>
+      <section className="invoice-table-wrap">
+        <table className="invoice-table">
+          <thead>
+            <tr>
+              <th>品目</th>
+              <th>数量</th>
+              <th>単位</th>
+              {settings.showUnitPrice && <th>単価</th>}
+              <th>金額</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bill.breakdown.lineItems.map((line) => (
+              <tr key={line.label}>
+                <td>{line.label}</td>
+                <td className="number-cell">{line.quantity}</td>
+                <td className="center-cell">{line.unit}</td>
+                {settings.showUnitPrice && <td className="number-cell">{money(line.unitPrice)}</td>}
+                <td className="number-cell">{money(line.amount)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </section>
+
+      <section className="invoice-summary">
         <AmountRow label="小計" value={bill.breakdown.subtotal} />
         {settings.showTaxBreakdown && settings.taxMode !== "none" && (
           <AmountRow
@@ -447,46 +532,32 @@ function InvoicePreviewCard({
           />
         )}
         <AmountRow label="合計" value={bill.breakdown.total} emphasis />
-      </div>
+      </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)", gap: 14, color: "#475569", fontSize: 12, lineHeight: 1.6 }}>
+      <section className="invoice-detail-grid">
         <div>
-          {settings.paymentDueText && <p style={{ margin: "0 0 6px", fontWeight: 800 }}>{settings.paymentDueText}</p>}
+          {settings.paymentDueText && <p className="invoice-strong">{settings.paymentDueText}</p>}
           {bankLines.length > 0 && (
-            <p style={{ margin: 0 }}>
-              振込先: {bankLines.join(" / ")}
-            </p>
+            <p>振込先: {bankLines.join(" / ")}</p>
           )}
         </div>
         <div>
-          {settings.notes && <p style={{ margin: "0 0 6px" }}>{settings.notes}</p>}
-          {settings.footerText && <p style={{ margin: 0 }}>{settings.footerText}</p>}
+          {settings.notes && <p>{settings.notes}</p>}
+          {settings.footerText && <p>{settings.footerText}</p>}
         </div>
-      </div>
-    </article>
-  );
-}
+      </section>
 
-function InvoiceLine({
-  label,
-  quantity,
-  unitPrice,
-  subtotal,
-  showUnitPrice,
-}: {
-  label: string;
-  quantity: number;
-  unitPrice: number;
-  subtotal: number;
-  showUnitPrice: boolean;
-}) {
-  return (
-    <div style={{ display: "grid", gridTemplateColumns: showUnitPrice ? "1.4fr 0.6fr 0.8fr 0.8fr" : "1.6fr 0.7fr 0.9fr", color: "#0f172a", fontSize: 13, borderTop: "1px solid #e2e8f0" }}>
-      <span style={{ padding: "10px 10px", fontWeight: 700 }}>{label}</span>
-      <span style={{ padding: "10px 10px", textAlign: "right", fontFamily: "monospace" }}>{quantity}</span>
-      {showUnitPrice && <span style={{ padding: "10px 10px", textAlign: "right", fontFamily: "monospace" }}>{money(unitPrice)}</span>}
-      <span style={{ padding: "10px 10px", textAlign: "right", fontFamily: "monospace", fontWeight: 800 }}>{money(subtotal)}</span>
-    </div>
+      {(bill.isLegacy || !bill.pricingResolved) && (
+        <section className="invoice-warnings">
+          {bill.isLegacy && settings.showLegacyWarning && (
+            <p>旧形式データのため、顧客IDではなく過去の貸出先名で集計しています。</p>
+          )}
+          {!bill.pricingResolved && (
+            <p>単価が解決できないため、金額が0円になっています。顧客管理の単価設定を確認してください。</p>
+          )}
+        </section>
+      )}
+    </article>
   );
 }
 
@@ -500,9 +571,9 @@ function AmountRow({
   emphasis?: boolean;
 }) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "140px 120px", gap: 12, alignItems: "baseline", fontWeight: emphasis ? 900 : 700, fontSize: emphasis ? 17 : 13 }}>
-      <span style={{ textAlign: "right", color: emphasis ? "#0f172a" : "#64748b" }}>{label}</span>
-      <span style={{ textAlign: "right", fontFamily: "monospace", color: "#0f172a" }}>{money(value)}</span>
+    <div className={`invoice-amount-row ${emphasis ? "is-emphasis" : ""}`}>
+      <span>{label}</span>
+      <strong>{money(value)}</strong>
     </div>
   );
 }
@@ -519,14 +590,16 @@ function BillingSettingsForm({
   onSave: () => Promise<void>;
 }) {
   return (
-    <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: 18 }}>
+    <div className="billing-settings-panel">
       {!settings.issuerName.trim() && (
-        <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", color: "#9a3412", borderRadius: 10, padding: "9px 11px", fontSize: 12, fontWeight: 800, marginBottom: 14 }}>
+        <div className="billing-warning">
           発行者名が未設定です。請求書には「発行者名未設定」と表示されます。
         </div>
       )}
       <SettingsSection title="基本文言">
         <TextField label="請求書タイトル" value={settings.invoiceTitle} onChange={(value) => onChange("invoiceTitle", value)} />
+        <TextField label="宛名敬称" value={settings.recipientSuffix} onChange={(value) => onChange("recipientSuffix", value)} />
+        <TextField label="明細品目名" value={settings.invoiceItemLabel} onChange={(value) => onChange("invoiceItemLabel", value)} />
         <TextField label="支払期限文言" value={settings.paymentDueText} onChange={(value) => onChange("paymentDueText", value)} />
         <TextField label="挨拶文" value={settings.greetingText} onChange={(value) => onChange("greetingText", value)} multiline />
         <TextField label="備考" value={settings.notes} onChange={(value) => onChange("notes", value)} multiline />
@@ -580,21 +653,12 @@ function BillingSettingsForm({
         <CheckField label="旧形式データ警告を表示" checked={settings.showLegacyWarning} onChange={(value) => onChange("showLegacyWarning", value)} />
       </SettingsSection>
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 16 }}>
+      <div className="billing-settings-actions">
         <button
           type="button"
           onClick={onSave}
           disabled={saving}
-          style={{
-            padding: "10px 18px",
-            borderRadius: 10,
-            border: "none",
-            background: saving ? "#94a3b8" : "#0f172a",
-            color: "#fff",
-            fontSize: 13,
-            fontWeight: 800,
-            cursor: saving ? "not-allowed" : "pointer",
-          }}
+          className="billing-primary-button"
         >
           {saving ? "保存中..." : "請求書設定を保存"}
         </button>
@@ -611,9 +675,9 @@ function SettingsSection({
   children: ReactNode;
 }) {
   return (
-    <section style={{ borderTop: "1px solid #f1f5f9", paddingTop: 14, marginTop: 14 }}>
-      <h3 style={{ fontSize: 14, fontWeight: 900, color: "#0f172a", margin: "0 0 12px" }}>{title}</h3>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: 12 }}>
+    <section className="billing-settings-section">
+      <h3>{title}</h3>
+      <div className="billing-settings-grid">
         {children}
       </div>
     </section>
@@ -693,7 +757,7 @@ function CheckField({
   onChange: (value: boolean) => void;
 }) {
   return (
-    <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, fontWeight: 800, color: "#334155", padding: "9px 11px", border: "1px solid #e2e8f0", borderRadius: 9 }}>
+    <label className="billing-check-field">
       <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} />
       {label}
     </label>
@@ -703,3 +767,447 @@ function CheckField({
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : "不明なエラー";
 }
+
+const PRINT_STYLES = `
+  .billing-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 16px;
+    margin-bottom: 18px;
+    flex-wrap: wrap;
+  }
+  .billing-title {
+    font-size: 24px;
+    font-weight: 900;
+    color: #0f172a;
+    margin: 0 0 4px;
+  }
+  .billing-subtitle {
+    font-size: 14px;
+    color: #94a3b8;
+    margin: 0;
+  }
+  .billing-actions,
+  .billing-tabs,
+  .billing-preview-toolbar,
+  .billing-list-header,
+  .billing-list-badges {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .billing-month {
+    padding: 8px 12px;
+    border-radius: 8px;
+    border: 1px solid #dbe3ee;
+    font-size: 14px;
+    font-weight: 700;
+    color: #334155;
+    outline: none;
+  }
+  .billing-primary-button,
+  .billing-secondary-button,
+  .billing-tab {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    border-radius: 9px;
+    font-size: 13px;
+    font-weight: 850;
+    cursor: pointer;
+    border: 1px solid transparent;
+    min-height: 36px;
+    padding: 8px 13px;
+  }
+  .billing-primary-button {
+    background: #0f172a;
+    color: #fff;
+  }
+  .billing-primary-button:disabled {
+    background: #94a3b8;
+    cursor: not-allowed;
+  }
+  .billing-secondary-button {
+    background: #fff;
+    color: #475569;
+    border-color: #dbe3ee;
+  }
+  .billing-tabs {
+    margin-bottom: 14px;
+  }
+  .billing-tab {
+    border-color: #dbe3ee;
+    background: #fff;
+    color: #64748b;
+    border-radius: 999px;
+  }
+  .billing-tab.is-active {
+    background: #eef2ff;
+    color: #4338ca;
+    border-color: #6366f1;
+  }
+  .billing-note {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 10px;
+    color: #475569;
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.6;
+    margin-bottom: 16px;
+    padding: 10px 12px;
+  }
+  .billing-empty,
+  .billing-settings-panel {
+    background: #fff;
+    border: 1px solid #e8eaed;
+    border-radius: 14px;
+    padding: 18px;
+  }
+  .billing-empty {
+    color: #94a3b8;
+    font-size: 14px;
+    padding: 44px;
+    text-align: center;
+  }
+  .billing-workspace {
+    display: grid;
+    grid-template-columns: minmax(250px, 320px) minmax(0, 1fr);
+    gap: 18px;
+    align-items: start;
+  }
+  .billing-list,
+  .billing-preview-column {
+    min-width: 0;
+  }
+  .billing-list {
+    background: #fff;
+    border: 1px solid #e8eaed;
+    border-radius: 14px;
+    overflow: hidden;
+    position: sticky;
+    top: 16px;
+  }
+  .billing-list-header {
+    justify-content: space-between;
+    border-bottom: 1px solid #eef2f7;
+    padding: 14px;
+  }
+  .billing-list-label {
+    color: #94a3b8;
+    font-size: 11px;
+    font-weight: 900;
+    margin: 0 0 3px;
+  }
+  .billing-list-total {
+    color: #0f172a;
+    font-family: monospace;
+    font-size: 17px;
+    font-weight: 900;
+  }
+  .billing-list-body {
+    display: grid;
+    gap: 0;
+  }
+  .billing-list-item {
+    background: #fff;
+    border: 0;
+    border-bottom: 1px solid #f1f5f9;
+    color: #0f172a;
+    cursor: pointer;
+    display: grid;
+    gap: 5px;
+    padding: 13px 14px;
+    text-align: left;
+    width: 100%;
+  }
+  .billing-list-item.is-selected {
+    background: #eef2ff;
+  }
+  .billing-list-name {
+    font-size: 14px;
+    font-weight: 900;
+  }
+  .billing-list-meta {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 750;
+  }
+  .billing-list-badges span {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 999px;
+    color: #64748b;
+    font-size: 10px;
+    font-weight: 850;
+    padding: 2px 7px;
+  }
+  .billing-preview-toolbar {
+    justify-content: space-between;
+    margin-bottom: 14px;
+  }
+  .invoice-paper {
+    background: #fff;
+    border: 1px solid #e2e8f0;
+    box-shadow: 0 18px 45px rgba(15, 23, 42, 0.08);
+    color: #0f172a;
+    margin: 0 auto;
+    max-width: 794px;
+    min-height: 1080px;
+    padding: 48px;
+    width: 100%;
+  }
+  .invoice-header {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(260px, 0.8fr);
+    gap: 28px;
+    margin-bottom: 28px;
+  }
+  .invoice-kicker,
+  .invoice-period {
+    color: #64748b;
+    font-size: 12px;
+    font-weight: 800;
+    margin: 0 0 7px;
+  }
+  .invoice-recipient h2 {
+    border-bottom: 1px solid #0f172a;
+    font-size: 24px;
+    font-weight: 900;
+    margin: 0 0 12px;
+    padding-bottom: 8px;
+  }
+  .invoice-issuer {
+    display: grid;
+    justify-items: end;
+    text-align: right;
+    color: #334155;
+    font-size: 12px;
+    line-height: 1.6;
+  }
+  .invoice-issuer h1 {
+    font-size: 31px;
+    font-weight: 950;
+    letter-spacing: 0.02em;
+    margin: 0 0 8px;
+  }
+  .invoice-issuer p,
+  .invoice-issuer strong {
+    margin: 0;
+  }
+  .invoice-greeting {
+    color: #334155;
+    font-size: 13px;
+    line-height: 1.8;
+    margin: 0 0 18px;
+  }
+  .invoice-total-box {
+    align-items: baseline;
+    background: #f8fafc;
+    border: 2px solid #0f172a;
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 24px;
+    padding: 15px 18px;
+  }
+  .invoice-total-box span {
+    font-size: 14px;
+    font-weight: 900;
+  }
+  .invoice-total-box strong {
+    font-family: monospace;
+    font-size: 30px;
+    font-weight: 950;
+  }
+  .invoice-table-wrap {
+    margin-bottom: 18px;
+  }
+  .invoice-table {
+    border-collapse: collapse;
+    font-size: 12px;
+    width: 100%;
+  }
+  .invoice-table th,
+  .invoice-table td {
+    border: 1px solid #cbd5e1;
+    padding: 9px 10px;
+  }
+  .invoice-table th {
+    background: #f1f5f9;
+    color: #475569;
+    font-weight: 900;
+  }
+  .number-cell {
+    font-family: monospace;
+    text-align: right;
+  }
+  .center-cell {
+    text-align: center;
+  }
+  .invoice-summary {
+    display: grid;
+    gap: 6px;
+    justify-content: end;
+    margin-bottom: 22px;
+  }
+  .invoice-amount-row {
+    display: grid;
+    grid-template-columns: 150px 130px;
+    gap: 14px;
+    align-items: baseline;
+    color: #334155;
+    font-size: 13px;
+    font-weight: 800;
+  }
+  .invoice-amount-row span {
+    text-align: right;
+  }
+  .invoice-amount-row strong {
+    color: #0f172a;
+    font-family: monospace;
+    text-align: right;
+  }
+  .invoice-amount-row.is-emphasis {
+    border-top: 2px solid #0f172a;
+    font-size: 17px;
+    padding-top: 7px;
+  }
+  .invoice-detail-grid {
+    border-top: 1px solid #e2e8f0;
+    color: #475569;
+    display: grid;
+    font-size: 12px;
+    gap: 18px;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    line-height: 1.7;
+    padding-top: 16px;
+  }
+  .invoice-detail-grid p {
+    margin: 0 0 6px;
+  }
+  .invoice-strong {
+    color: #0f172a;
+    font-weight: 900;
+  }
+  .invoice-warnings {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    color: #9a3412;
+    font-size: 11px;
+    font-weight: 750;
+    line-height: 1.6;
+    margin-top: 18px;
+    padding: 10px 12px;
+  }
+  .invoice-warnings p {
+    margin: 0;
+  }
+  .billing-settings-section {
+    border-top: 1px solid #f1f5f9;
+    margin-top: 14px;
+    padding-top: 14px;
+  }
+  .billing-settings-section:first-of-type {
+    border-top: 0;
+    margin-top: 0;
+    padding-top: 0;
+  }
+  .billing-settings-section h3 {
+    color: #0f172a;
+    font-size: 14px;
+    font-weight: 900;
+    margin: 0 0 12px;
+  }
+  .billing-settings-grid {
+    display: grid;
+    gap: 12px;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  }
+  .billing-warning {
+    background: #fff7ed;
+    border: 1px solid #fed7aa;
+    border-radius: 9px;
+    color: #9a3412;
+    font-size: 12px;
+    font-weight: 800;
+    margin-bottom: 14px;
+    padding: 9px 11px;
+  }
+  .billing-settings-actions {
+    display: flex;
+    justify-content: flex-end;
+    margin-top: 16px;
+  }
+  .billing-check-field {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    font-weight: 800;
+    color: #334155;
+    padding: 9px 11px;
+    border: 1px solid #dbe3ee;
+    border-radius: 8px;
+  }
+  .billing-print-root {
+    display: none;
+  }
+  @media (max-width: 920px) {
+    .billing-workspace {
+      grid-template-columns: 1fr;
+    }
+    .billing-list {
+      position: static;
+    }
+    .invoice-paper {
+      min-height: auto;
+      padding: 28px;
+    }
+    .invoice-header,
+    .invoice-detail-grid {
+      grid-template-columns: 1fr;
+    }
+    .invoice-issuer {
+      justify-items: start;
+      text-align: left;
+    }
+  }
+  @media print {
+    @page {
+      size: A4;
+      margin: 12mm;
+    }
+    html,
+    body {
+      background: #fff !important;
+    }
+    .billing-admin-shell {
+      display: none !important;
+    }
+    .billing-print-root {
+      display: block !important;
+    }
+    .invoice-paper {
+      border: 0;
+      box-shadow: none;
+      box-sizing: border-box;
+      margin: 0;
+      max-width: none;
+      min-height: auto;
+      padding: 0;
+      page-break-after: always;
+      width: 100%;
+    }
+    .invoice-paper:last-child {
+      page-break-after: auto;
+    }
+    .invoice-warnings {
+      background: #fff;
+      border-color: #f3d6a1;
+      color: #7c2d12;
+    }
+  }
+`;

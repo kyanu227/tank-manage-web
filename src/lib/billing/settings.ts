@@ -17,6 +17,8 @@ export type BillingInvoiceSettings = {
   greetingText: string;
   notes: string;
   footerText: string;
+  recipientSuffix: string;
+  invoiceItemLabel: string;
   taxRate: number;
   taxMode: BillingTaxMode;
   roundingMode: BillingRoundingMode;
@@ -41,6 +43,8 @@ export const DEFAULT_BILLING_INVOICE_SETTINGS: BillingInvoiceSettings = {
   greetingText: "下記の通りご請求申し上げます。",
   notes: "",
   footerText: "",
+  recipientSuffix: "御中",
+  invoiceItemLabel: "タンク貸出料（10L換算）",
   taxRate: 0.1,
   taxMode: "exclusive",
   roundingMode: "floor",
@@ -102,6 +106,9 @@ export function normalizeBillingInvoiceSettings(
     greetingText: trimString(source.greetingText, defaults.greetingText),
     notes: trimString(source.notes, defaults.notes),
     footerText: trimString(source.footerText, defaults.footerText),
+    recipientSuffix: trimString(source.recipientSuffix, defaults.recipientSuffix),
+    invoiceItemLabel: trimString(source.invoiceItemLabel, defaults.invoiceItemLabel)
+      || defaults.invoiceItemLabel,
     taxRate: taxRateValue(source.taxRate, defaults.taxRate),
     taxMode: enumValue(source.taxMode, TAX_MODES, defaults.taxMode),
     roundingMode: enumValue(source.roundingMode, ROUNDING_MODES, defaults.roundingMode),

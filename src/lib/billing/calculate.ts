@@ -11,6 +11,7 @@ export type BillingLineInput = {
 };
 
 export type BillingLineBreakdown = {
+  lineItems: BillingInvoiceLineItem[];
   quantity10: number;
   quantity12: number;
   quantityAluminum: number;
@@ -23,6 +24,14 @@ export type BillingLineBreakdown = {
   subtotal: number;
   tax: number;
   total: number;
+};
+
+export type BillingInvoiceLineItem = {
+  label: string;
+  quantity: number;
+  unit: string;
+  unitPrice: number;
+  amount: number;
 };
 
 function safeNumber(value: number): number {
@@ -54,9 +63,19 @@ export function calculateBillingLineBreakdown(
   const subtotalAluminum = quantityAluminum * unitPriceAluminum;
   const subtotal = subtotal10 + subtotal12 + subtotalAluminum;
   const taxRate = Math.min(1, Math.max(0, safeNumber(settings.taxRate)));
+  const lineItems: BillingInvoiceLineItem[] = [
+    {
+      label: settings.invoiceItemLabel,
+      quantity: quantity10,
+      unit: "本",
+      unitPrice: unitPrice10,
+      amount: subtotal10,
+    },
+  ];
 
   if (settings.taxMode === "none" || taxRate === 0) {
     return {
+      lineItems,
       quantity10,
       quantity12,
       quantityAluminum,
@@ -78,6 +97,7 @@ export function calculateBillingLineBreakdown(
       settings.roundingMode,
     );
     return {
+      lineItems,
       quantity10,
       quantity12,
       quantityAluminum,
@@ -95,6 +115,7 @@ export function calculateBillingLineBreakdown(
 
   const tax = roundBillingAmount(subtotal * taxRate, settings.roundingMode);
   return {
+    lineItems,
     quantity10,
     quantity12,
     quantityAluminum,
