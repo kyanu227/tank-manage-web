@@ -504,7 +504,6 @@ function InvoiceDocument({
             <tr>
               <th>品目</th>
               <th>数量</th>
-              <th>単位</th>
               {settings.showUnitPrice && <th>単価</th>}
               <th>金額</th>
             </tr>
@@ -514,7 +513,6 @@ function InvoiceDocument({
               <tr key={line.label}>
                 <td>{line.label}</td>
                 <td className="number-cell">{line.quantity}</td>
-                <td className="center-cell">{line.unit}</td>
                 {settings.showUnitPrice && <td className="number-cell">{money(line.unitPrice)}</td>}
                 <td className="number-cell">{money(line.amount)}</td>
               </tr>
@@ -1006,21 +1004,24 @@ const PRINT_STYLES = `
   }
   .invoice-total-box {
     align-items: baseline;
-    background: #f8fafc;
-    border: 2px solid #0f172a;
     display: flex;
     justify-content: space-between;
-    margin-bottom: 24px;
-    padding: 15px 18px;
+    margin: 0 0 28px;
+    padding: 0 0 8px;
   }
   .invoice-total-box span {
     font-size: 14px;
     font-weight: 900;
   }
   .invoice-total-box strong {
+    border-bottom: 2px solid #0f172a;
     font-family: monospace;
     font-size: 30px;
     font-weight: 950;
+    line-height: 1.15;
+    min-width: 220px;
+    padding-bottom: 4px;
+    text-align: right;
   }
   .invoice-table-wrap {
     margin-bottom: 18px;
@@ -1032,20 +1033,20 @@ const PRINT_STYLES = `
   }
   .invoice-table th,
   .invoice-table td {
-    border: 1px solid #cbd5e1;
-    padding: 9px 10px;
+    border: 0;
+    border-bottom: 1px solid #cbd5e1;
+    padding: 10px 8px;
   }
   .invoice-table th {
-    background: #f1f5f9;
+    background: transparent;
+    border-bottom: 1.5px solid #0f172a;
     color: #475569;
     font-weight: 900;
+    text-align: left;
   }
   .number-cell {
     font-family: monospace;
     text-align: right;
-  }
-  .center-cell {
-    text-align: center;
   }
   .invoice-summary {
     display: grid;
@@ -1184,11 +1185,22 @@ const PRINT_STYLES = `
     body {
       background: #fff !important;
     }
+    body * {
+      visibility: hidden !important;
+    }
     .billing-admin-shell {
       display: none !important;
     }
     .billing-print-root {
       display: block !important;
+      left: 0;
+      position: absolute;
+      top: 0;
+      width: 100%;
+    }
+    .billing-print-root,
+    .billing-print-root * {
+      visibility: visible !important;
     }
     .invoice-paper {
       border: 0;
