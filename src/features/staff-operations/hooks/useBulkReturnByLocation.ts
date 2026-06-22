@@ -152,6 +152,24 @@ function compareGroupKeys(a: string, b: string, groupMeta: Record<string, BulkRe
   return metaA.location.localeCompare(metaB.location);
 }
 
+async function getBulkReturnCandidateTanks() {
+  const [codeMatchedTanks, allTanks] = await Promise.all([
+    tanksRepository.getTanks({
+      statusIn: ["lent", "unreturned"],
+    }),
+    tanksRepository.getTanks(),
+  ]);
+  const tanksById = new Map(codeMatchedTanks.map((tank) => [tank.id, tank]));
+
+  allTanks.forEach((tank) => {
+    const status = coerceTankStatusCode(tank.status);
+    if (status !== "lent" && status !== "unreturned") return;
+    if (!tanksById.has(tank.id)) tanksById.set(tank.id, tank);
+  });
+
+  return Array.from(tanksById.values()).sort((a, b) => a.id.localeCompare(b.id));
+}
+
 export interface UseBulkReturnByLocationResult {
   bulkLoading: boolean;
   groupedTanks: Record<string, BulkTankWithTag[]>;
@@ -175,9 +193,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   const fetchBulkTanks = useCallback(async () => {
     setBulkLoading(true);
     try {
-      const tanks = await tanksRepository.getTanks({
-        statusIn: ["lent", "unreturned"],
-      });
+      const tanks = await getBulkReturnCandidateTanks();
       const groups: Record<string, BulkTankWithTag[]> = {};
       const metas: Record<string, BulkReturnGroupMeta> = {};
       const nowMillis = Date.now();
