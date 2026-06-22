@@ -47,6 +47,8 @@ export interface ReturnGroup {
 export interface BulkTankDoc {
   id: string;
   status: string;
+  customerId?: string | null;
+  customerName?: string | null;
   location: string;
   staff: string;
   updatedAt: unknown;
@@ -56,6 +58,8 @@ export interface BulkTankDoc {
 export interface BulkReturnGroupMeta {
   key: string;
   location: string;
+  customerId?: string;
+  isLegacyCustomerIdentity?: boolean;
   pool: BulkReturnDatePool;
   poolLabel: string;
   dateLabel: string;

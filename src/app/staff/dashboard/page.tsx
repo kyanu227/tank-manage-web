@@ -30,6 +30,10 @@ import PrefixNumberPicker from "@/components/PrefixNumberPicker";
 import { requireStaffIdentity, useStaffLocale, useStaffSession } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import {
+  buildCustomerIdentityGroup,
+  normalizeCustomerIdentityText,
+} from "@/lib/customer-identity-read";
+import {
   applyLogCorrection,
   voidLog,
   type LogCorrectionPatch,
@@ -102,6 +106,16 @@ type BulkLocationOption = {
   customer: CustomerSnapshot | null;
 };
 type BulkLocationMode = "lend" | "inhouse" | null;
+
+type CustomerIdentitySummary = {
+  key: string;
+  customerId?: string;
+  displayName: string;
+  lent: number;
+  unreturned: number;
+  total: number;
+  isLegacy: boolean;
+};
 
 const LIMIT_MS = 72 * 60 * 60 * 1000;
 const IN_HOUSE_LOCATION_VALUE = "__inhouse__";
@@ -201,6 +215,14 @@ export default function StaffDashboard() {
 
   const totalTanks = tanks.length;
 
+  const customerNameById = useMemo(() => {
+    const map = new Map<string, string>();
+    customerOptions.forEach((customer) => {
+      map.set(customer.customerId, customer.customerName);
+    });
+    return map;
+  }, [customerOptions]);
+
   const sortedLogs = useMemo(() => {
     const copy = [...logs];
     copy.sort((a, b) => {
@@ -212,24 +234,41 @@ export default function StaffDashboard() {
   }, [logs, logSortOrder]);
 
   const byLocation = useMemo(() => {
-    const map: Record<string, { lent: number; unreturned: number }> = {};
+    const map = new Map<string, CustomerIdentitySummary>();
     tanks.forEach((tank) => {
       const statusCode = coerceTankStatusCode(tank.status);
       if (statusCode !== "lent" && statusCode !== "unreturned") return;
-      const location = (tank.location || "未設定").trim() || "未設定";
-      if (!map[location]) map[location] = { lent: 0, unreturned: 0 };
-      if (statusCode === "lent") map[location].lent += 1;
-      else map[location].unreturned += 1;
+
+      const customerId = normalizeCustomerIdentityText(tank.customerId);
+      const identity = buildCustomerIdentityGroup(
+        {
+          customerId: tank.customerId,
+          customerName: tank.customerName,
+          location: tank.location,
+        },
+        {
+          currentCustomerName: customerId ? customerNameById.get(customerId) : undefined,
+          legacyUnknownLabel: "未設定",
+        },
+      );
+      const current = map.get(identity.key) ?? {
+        key: identity.key,
+        customerId: identity.customerId,
+        displayName: identity.displayName,
+        lent: 0,
+        unreturned: 0,
+        total: 0,
+        isLegacy: identity.isLegacy,
+      };
+      if (statusCode === "lent") current.lent += 1;
+      else current.unreturned += 1;
+      current.total = current.lent + current.unreturned;
+      map.set(identity.key, current);
     });
 
-    return Object.entries(map)
-      .map(([location, value]) => ({
-        location,
-        ...value,
-        total: value.lent + value.unreturned,
-      }))
-      .sort((a, b) => b.total - a.total || a.location.localeCompare(b.location));
-  }, [tanks]);
+    return Array.from(map.values())
+      .sort((a, b) => b.total - a.total || a.displayName.localeCompare(b.displayName));
+  }, [customerNameById, tanks]);
 
   const todayStats = useMemo(() => {
     const now = new Date();
@@ -612,7 +651,7 @@ export default function StaffDashboard() {
               >
                 {byLocation.map((row) => (
                   <div
-                    key={row.location}
+                    key={row.key}
                     style={{
                       display: "grid",
                       gridTemplateColumns: "1fr auto auto",
@@ -625,7 +664,7 @@ export default function StaffDashboard() {
                     }}
                   >
                     <span
-                      title={row.location}
+                      title={row.displayName}
                       style={{
                         fontSize: 13,
                         fontWeight: 700,
@@ -635,7 +674,7 @@ export default function StaffDashboard() {
                         whiteSpace: "nowrap",
                       }}
                     >
-                      {row.location}
+                      {row.displayName}
                     </span>
                     <span style={{ fontSize: 11, fontWeight: 800, color: "#3b82f6", background: "#eff6ff", padding: "2px 8px", borderRadius: 6 }}>
                       貸出 {row.lent}

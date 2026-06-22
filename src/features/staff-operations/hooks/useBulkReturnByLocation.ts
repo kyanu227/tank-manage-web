@@ -4,6 +4,11 @@ import { useCallback, useMemo, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
 import { tanksRepository } from "@/lib/firebase/repositories";
+import {
+  buildCustomerIdentityGroup,
+  normalizeCustomerIdentityText,
+  type CustomerIdentityGroup,
+} from "@/lib/customer-identity-read";
 import { storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { coerceTankStatusCode, type TankStatusCode } from "@/lib/tank-action-status-codes";
@@ -65,49 +70,66 @@ function mergeSortMillis(pool: BulkReturnDatePool, current: number | null, next:
 
 function createGroupMeta(
   key: string,
-  location: string,
+  identity: CustomerIdentityGroup,
   pool: BulkReturnDatePool,
   sortMillis: number | null,
   nowMillis: number
 ): BulkReturnGroupMeta {
+  const baseMeta = {
+    key,
+    location: identity.displayName,
+    ...(identity.customerId ? { customerId: identity.customerId } : {}),
+    isLegacyCustomerIdentity: identity.isLegacy,
+    pool,
+    sortMillis,
+  };
+
   if (pool === "today_lent") {
     return {
-      key,
-      location,
-      pool,
+      ...baseMeta,
       poolLabel: "本日貸出",
       dateLabel: `${formatJstMonthDay(nowMillis)} 貸出分`,
-      sortMillis,
     };
   }
   if (pool === "past_lent") {
     return {
-      key,
-      location,
-      pool,
+      ...baseMeta,
       poolLabel: "前日以前",
       dateLabel: sortMillis != null ? `${formatJstMonthDay(sortMillis)} 以前` : "前日以前の貸出中",
-      sortMillis,
     };
   }
   if (pool === "long_term") {
     return {
-      key,
-      location,
-      pool,
+      ...baseMeta,
       poolLabel: "長期貸出",
       dateLabel: sortMillis != null ? `${formatJstMonthDay(sortMillis)} から未返却` : "未返却",
-      sortMillis,
     };
   }
   return {
-    key,
-    location,
-    pool,
+    ...baseMeta,
     poolLabel: "日付不明",
     dateLabel: "貸出日不明",
-    sortMillis,
   };
+}
+
+function resolveBulkCustomerIdentity(tank: BulkTankDoc): CustomerIdentityGroup {
+  return buildCustomerIdentityGroup({
+    customerId: tank.customerId,
+    customerName: tank.customerName,
+    location: tank.location,
+  });
+}
+
+function chooseStableDisplayName(current: string, next: string): string {
+  const normalizedCurrent = normalizeCustomerIdentityText(current);
+  const normalizedNext = normalizeCustomerIdentityText(next);
+  if (!normalizedCurrent) return normalizedNext ?? "不明な顧客";
+  if (!normalizedNext) return normalizedCurrent;
+  if (normalizedCurrent === "不明な顧客") return normalizedNext;
+  if (normalizedNext === "不明な顧客") return normalizedCurrent;
+  return normalizedCurrent.localeCompare(normalizedNext) <= 0
+    ? normalizedCurrent
+    : normalizedNext;
 }
 
 function compareGroupKeys(a: string, b: string, groupMeta: Record<string, BulkReturnGroupMeta>): number {
@@ -160,17 +182,20 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       const metas: Record<string, BulkReturnGroupMeta> = {};
       const nowMillis = Date.now();
       tanks.forEach((tank) => {
-        const loc = tank.location || "不明";
+        const identity = resolveBulkCustomerIdentity(tank as BulkTankDoc);
         const status = requireBulkTankStatusCode(tank.status, tank.id);
         const pool = resolveDatePool(status, tank.updatedAt, nowMillis);
-        const groupKey = `${pool}::${loc}`;
+        const groupKey = `${pool}::${identity.key}`;
         const sortMillis = toMillis(tank.updatedAt);
         if (!groups[groupKey]) groups[groupKey] = [];
         const tag = storedMarkerToReturnTag(tank.logNote, { allowKeep: status === "lent" });
         groups[groupKey].push({ ...tank, tag } as unknown as BulkTankWithTag);
         const currentSortMillis = metas[groupKey]?.sortMillis ?? null;
         const mergedSortMillis = mergeSortMillis(pool, currentSortMillis, sortMillis);
-        metas[groupKey] = createGroupMeta(groupKey, loc, pool, mergedSortMillis, nowMillis);
+        const metaIdentity = metas[groupKey]
+          ? { ...identity, displayName: chooseStableDisplayName(metas[groupKey].location, identity.displayName) }
+          : identity;
+        metas[groupKey] = createGroupMeta(groupKey, metaIdentity, pool, mergedSortMillis, nowMillis);
       });
       Object.keys(groups).forEach(groupKey => {
         groups[groupKey].sort((a, b) => a.id.localeCompare(b.id));
@@ -215,7 +240,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     const tanksToReturn = groupedTanks[groupKey];
     if (!tanksToReturn || tanksToReturn.length === 0) return;
     const meta = groupMeta[groupKey];
-    const loc = meta?.location ?? tanksToReturn[0]?.location ?? "不明";
+    const loc = meta?.location ?? tanksToReturn[0]?.customerName ?? tanksToReturn[0]?.location ?? "不明";
     const groupLabel = meta ? `${loc}（${meta.poolLabel}）` : loc;
     const invalidKeepTanks = tanksToReturn.filter((tank) => tank.tag === RETURN_TAG.KEEP && coerceTankStatusCode(tank.status) !== "lent");
     if (invalidKeepTanks.length > 0) {
