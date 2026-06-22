@@ -178,7 +178,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     stats.customer_requests.tankCount = returnTagWaitingTankCount;
     stats.customer_requests.taggedCount = returnTagWaitingTankCount;
 
-    const locationsBySegment: Record<Extract<ReturnSegmentKey, "normal" | "long_term">, Set<string>> = {
+    const customerGroupsBySegment: Record<Extract<ReturnSegmentKey, "normal" | "long_term">, Set<string>> = {
       long_term: new Set(),
       normal: new Set(),
     };
@@ -189,13 +189,13 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
       const segment: Extract<ReturnSegmentKey, "normal" | "long_term"> = meta?.pool === "long_term"
         ? "long_term"
         : "normal";
-      if (meta) locationsBySegment[segment].add(meta.location);
+      if (meta) customerGroupsBySegment[segment].add(meta.key);
       stats[segment].customerCount += 1;
       stats[segment].tankCount += tanks.length;
       stats[segment].taggedCount += tanks.filter((tank) => tank.tag !== "normal").length;
     });
-    stats.normal.customerCount = locationsBySegment.normal.size;
-    stats.long_term.customerCount = locationsBySegment.long_term.size;
+    stats.normal.customerCount = customerGroupsBySegment.normal.size;
+    stats.long_term.customerCount = customerGroupsBySegment.long_term.size;
 
     return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
   }, [bulk.groupMeta, bulk.groupKeys, bulk.groupedTanks, returnTagProcessing.returnGroups, staffLocale]);

@@ -1,13 +1,56 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { FileText, Printer, Calendar } from "lucide-react";
+import { Printer } from "lucide-react";
 import { db } from "@/lib/firebase/config";
 import { collection, getDocs } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
+import {
+  buildCustomerIdentityGroup,
+  normalizeCustomerIdentityText,
+  type CustomerIdentityGroup,
+} from "@/lib/customer-identity-read";
 import { isLendTankLogAction } from "@/lib/tank-action-status-codes";
 
-interface BillItem { customer: string; count: number; total10: number; total12: number; totalPrice: number; }
+type CustomerMaster = {
+  customerId: string;
+  customerName: string;
+  price10: number;
+  price12: number;
+  priceAluminum: number;
+};
+
+interface BillItem {
+  key: string;
+  customerId?: string;
+  customerName: string;
+  count: number;
+  total10: number;
+  total12: number;
+  totalPrice: number;
+  isLegacy: boolean;
+  pricingResolved: boolean;
+}
+
+type BillingGroup = CustomerIdentityGroup & {
+  count: number;
+  pricing?: CustomerMaster;
+  pricingResolved: boolean;
+};
+
+function addCustomerNameIndex(
+  index: Map<string, CustomerMaster[]>,
+  name: unknown,
+  customer: CustomerMaster,
+) {
+  const normalized = normalizeCustomerIdentityText(name);
+  if (!normalized) return;
+  const current = index.get(normalized) ?? [];
+  if (!current.some((item) => item.customerId === customer.customerId)) {
+    current.push(customer);
+  }
+  index.set(normalized, current);
+}
 
 export default function BillingPage() {
   const [bills, setBills] = useState<BillItem[]>([]);
@@ -24,29 +67,77 @@ export default function BillingPage() {
         const logs = await logsRepository.getActiveLogs();
         // Get customer pricing
         const custSnap = await getDocs(collection(db, "customers"));
-        const priceMap: Record<string, { price10: number; price12: number }> = {};
+        const customerById = new Map<string, CustomerMaster>();
+        const customersByName = new Map<string, CustomerMaster[]>();
         custSnap.forEach((d) => {
           const data = d.data();
-          priceMap[data.name] = { price10: Number(data.price10) || 0, price12: Number(data.price12) || 0 };
+          const customerName =
+            normalizeCustomerIdentityText(data.name)
+            ?? normalizeCustomerIdentityText(data.companyName)
+            ?? d.id;
+          const customer: CustomerMaster = {
+            customerId: d.id,
+            customerName,
+            price10: Number(data.price10) || 0,
+            price12: Number(data.price12) || 0,
+            priceAluminum: Number(data.priceAluminum) || 0,
+          };
+          customerById.set(customer.customerId, customer);
+          addCustomerNameIndex(customersByName, data.name, customer);
+          addCustomerNameIndex(customersByName, data.companyName, customer);
+          addCustomerNameIndex(customersByName, customer.customerName, customer);
         });
 
         const [y, m] = period.split("-").map(Number);
-        const custMap: Record<string, { count: number }> = {};
+        const groups = new Map<string, BillingGroup>();
         logs.forEach((log) => {
           if (!isLendTankLogAction(log.action, log.transitionAction) || !log.timestamp?.toDate) return;
           const dt = log.timestamp.toDate();
           if (dt.getFullYear() !== y || dt.getMonth() + 1 !== m) return;
-          const loc = log.location || "不明";
-          if (!custMap[loc]) custMap[loc] = { count: 0 };
-          custMap[loc].count++;
+          const customerId = normalizeCustomerIdentityText(log.customerId);
+          const customerMaster = customerId ? customerById.get(customerId) : undefined;
+          const group = buildCustomerIdentityGroup(
+            {
+              customerId: log.customerId,
+              customerName: log.customerName,
+              location: log.location,
+            },
+            { currentCustomerName: customerMaster?.customerName },
+          );
+          const existing = groups.get(group.key);
+          if (existing) {
+            existing.count += 1;
+            return;
+          }
+
+          let pricing: CustomerMaster | undefined;
+          if (group.customerId) {
+            pricing = customerById.get(group.customerId);
+          } else {
+            const candidates = customersByName.get(group.displayName) ?? [];
+            pricing = candidates.length === 1 ? candidates[0] : undefined;
+          }
+
+          groups.set(group.key, {
+            ...group,
+            count: 1,
+            pricing,
+            pricingResolved: Boolean(pricing),
+          });
         });
 
-        const items: BillItem[] = Object.entries(custMap).map(([customer, v]) => {
-          const p = priceMap[customer] || { price10: 0, price12: 0 };
+        const items: BillItem[] = Array.from(groups.values()).map((group) => {
+          const p = group.pricing || { price10: 0, price12: 0 };
           return {
-            customer, count: v.count,
-            total10: v.count, total12: 0,
-            totalPrice: v.count * p.price10,
+            key: group.key,
+            customerId: group.customerId,
+            customerName: group.displayName,
+            count: group.count,
+            total10: group.count,
+            total12: 0,
+            totalPrice: group.count * p.price10,
+            isLegacy: group.isLegacy,
+            pricingResolved: group.pricingResolved,
           };
         }).sort((a, b) => b.count - a.count);
         setBills(items);
@@ -77,9 +168,21 @@ export default function BillingPage() {
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {bills.map((b) => (
-            <div key={b.customer} style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "20px 20px" }}>
+            <div key={b.key} style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "20px 20px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>{b.customer}</h3>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                  <h3 style={{ fontSize: 16, fontWeight: 700, color: "#0f172a" }}>{b.customerName}</h3>
+                  {b.isLegacy && (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "#64748b", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 999, padding: "3px 7px" }}>
+                      旧形式データ
+                    </span>
+                  )}
+                  {!b.pricingResolved && (
+                    <span style={{ fontSize: 10, fontWeight: 800, color: "#b45309", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 999, padding: "3px 7px" }}>
+                      単価未設定
+                    </span>
+                  )}
+                </div>
                 <button onClick={() => window.print()}
                   style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
                   <Printer size={14} /> 印刷

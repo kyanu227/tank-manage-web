@@ -262,13 +262,13 @@ export default function BulkReturnByLocationPanel({
     ? getSegmentConfig(activeSegment, staffLocale)
     : null;
   const totalStat = useMemo<ReturnSegmentStat>(() => {
-    const locations = new Set<string>();
+    const customerGroups = new Set<string>();
     let tankCount = 0;
     let taggedCount = 0;
     visibleGroupKeys.forEach((groupKey) => {
       const meta = groupMeta[groupKey];
       const tanks = groupedTanks[groupKey] ?? [];
-      if (meta) locations.add(meta.location);
+      if (meta) customerGroups.add(meta.key);
       tankCount += tanks.length;
       taggedCount += tanks.filter((tank) => tank.tag !== "normal").length;
     });
@@ -278,7 +278,7 @@ export default function BulkReturnByLocationPanel({
       shortLabel: "全体",
       color: "#64748b",
       background: "#f8fafc",
-      customerCount: locations.size,
+      customerCount: customerGroups.size,
       tankCount,
       taggedCount,
     };
@@ -326,7 +326,7 @@ export default function BulkReturnByLocationPanel({
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {visibleSections.map((section) => {
             const sectionTankCount = section.groupKeys.reduce((sum, groupKey) => sum + (groupedTanks[groupKey]?.length ?? 0), 0);
-            const sectionLocationCount = new Set(section.groupKeys.map((groupKey) => groupMeta[groupKey]?.location).filter(Boolean)).size;
+            const sectionLocationCount = new Set(section.groupKeys.map((groupKey) => groupMeta[groupKey]?.key).filter(Boolean)).size;
 
             return (
               <section key={section.pool} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
