@@ -1,5 +1,8 @@
 export type BillingTaxMode = "exclusive" | "inclusive" | "none";
 export type BillingRoundingMode = "floor" | "round" | "ceil";
+export type ReturnBillingMode = "charge" | "free" | "discount";
+export type CarryOverBillingMode = "no_extra" | "monthly_extra" | "daily_extra";
+export type InvoiceDateMode = "issue_date" | "period_end";
 
 export type BillingInvoiceSettings = {
   invoiceTitle: string;
@@ -18,13 +21,27 @@ export type BillingInvoiceSettings = {
   notes: string;
   footerText: string;
   recipientSuffix: string;
+  /** 旧設定との読み取り互換用。新規表示は category 別 label を使う。 */
   invoiceItemLabel: string;
+  invoiceItemLabel10: string;
+  invoiceItemLabel12: string;
+  invoiceItemLabelAluminum: string;
   taxRate: number;
   taxMode: BillingTaxMode;
   roundingMode: BillingRoundingMode;
   showTaxBreakdown: boolean;
   showUnitPrice: boolean;
   showLegacyWarning: boolean;
+  showRegistrationNumberWarning: boolean;
+  showInvoiceComplianceNotes: boolean;
+  unusedReturnBillingMode: ReturnBillingMode;
+  unusedReturnDiscountRate: number;
+  unchargedReturnBillingMode: ReturnBillingMode;
+  unchargedReturnDiscountRate: number;
+  carryOverBillingMode: CarryOverBillingMode;
+  carryOverMonthlyExtraPrice: number;
+  carryOverDailyExtraPrice: number;
+  invoiceDateMode: InvoiceDateMode;
 };
 
 export const DEFAULT_BILLING_INVOICE_SETTINGS: BillingInvoiceSettings = {
@@ -45,16 +62,36 @@ export const DEFAULT_BILLING_INVOICE_SETTINGS: BillingInvoiceSettings = {
   footerText: "",
   recipientSuffix: "御中",
   invoiceItemLabel: "タンク貸出料（10L換算）",
+  invoiceItemLabel10: "タンク貸出料（10L）",
+  invoiceItemLabel12: "タンク貸出料（12L）",
+  invoiceItemLabelAluminum: "タンク貸出料（アルミ）",
   taxRate: 0.1,
   taxMode: "exclusive",
   roundingMode: "floor",
   showTaxBreakdown: true,
   showUnitPrice: true,
   showLegacyWarning: true,
+  showRegistrationNumberWarning: true,
+  showInvoiceComplianceNotes: true,
+  unusedReturnBillingMode: "charge",
+  unusedReturnDiscountRate: 0,
+  unchargedReturnBillingMode: "charge",
+  unchargedReturnDiscountRate: 0,
+  carryOverBillingMode: "no_extra",
+  carryOverMonthlyExtraPrice: 0,
+  carryOverDailyExtraPrice: 0,
+  invoiceDateMode: "issue_date",
 };
 
 const TAX_MODES: readonly BillingTaxMode[] = ["exclusive", "inclusive", "none"];
 const ROUNDING_MODES: readonly BillingRoundingMode[] = ["floor", "round", "ceil"];
+const RETURN_BILLING_MODES: readonly ReturnBillingMode[] = ["charge", "free", "discount"];
+const CARRY_OVER_BILLING_MODES: readonly CarryOverBillingMode[] = [
+  "no_extra",
+  "monthly_extra",
+  "daily_extra",
+];
+const INVOICE_DATE_MODES: readonly InvoiceDateMode[] = ["issue_date", "period_end"];
 
 function trimString(value: unknown, fallback: string): string {
   if (typeof value !== "string") return fallback;
@@ -69,6 +106,12 @@ function taxRateValue(value: unknown, fallback: number): number {
   const numeric = typeof value === "number" ? value : Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(1, Math.max(0, numeric));
+}
+
+function nonNegativeNumber(value: unknown, fallback: number): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return fallback;
+  return Math.max(0, numeric);
 }
 
 function enumValue<T extends string>(
@@ -86,6 +129,8 @@ export function normalizeBillingInvoiceSettings(
 ): BillingInvoiceSettings {
   const defaults = DEFAULT_BILLING_INVOICE_SETTINGS;
   const source = input ?? {};
+  const legacyItemLabel = trimString(source.invoiceItemLabel, defaults.invoiceItemLabel)
+    || defaults.invoiceItemLabel;
 
   return {
     invoiceTitle: trimString(source.invoiceTitle, defaults.invoiceTitle) || defaults.invoiceTitle,
@@ -107,13 +152,64 @@ export function normalizeBillingInvoiceSettings(
     notes: trimString(source.notes, defaults.notes),
     footerText: trimString(source.footerText, defaults.footerText),
     recipientSuffix: trimString(source.recipientSuffix, defaults.recipientSuffix),
-    invoiceItemLabel: trimString(source.invoiceItemLabel, defaults.invoiceItemLabel)
-      || defaults.invoiceItemLabel,
+    invoiceItemLabel: legacyItemLabel,
+    invoiceItemLabel10: trimString(source.invoiceItemLabel10, legacyItemLabel)
+      || defaults.invoiceItemLabel10,
+    invoiceItemLabel12: trimString(source.invoiceItemLabel12, defaults.invoiceItemLabel12)
+      || defaults.invoiceItemLabel12,
+    invoiceItemLabelAluminum: trimString(
+      source.invoiceItemLabelAluminum,
+      defaults.invoiceItemLabelAluminum,
+    ) || defaults.invoiceItemLabelAluminum,
     taxRate: taxRateValue(source.taxRate, defaults.taxRate),
     taxMode: enumValue(source.taxMode, TAX_MODES, defaults.taxMode),
     roundingMode: enumValue(source.roundingMode, ROUNDING_MODES, defaults.roundingMode),
     showTaxBreakdown: booleanValue(source.showTaxBreakdown, defaults.showTaxBreakdown),
     showUnitPrice: booleanValue(source.showUnitPrice, defaults.showUnitPrice),
     showLegacyWarning: booleanValue(source.showLegacyWarning, defaults.showLegacyWarning),
+    showRegistrationNumberWarning: booleanValue(
+      source.showRegistrationNumberWarning,
+      defaults.showRegistrationNumberWarning,
+    ),
+    showInvoiceComplianceNotes: booleanValue(
+      source.showInvoiceComplianceNotes,
+      defaults.showInvoiceComplianceNotes,
+    ),
+    unusedReturnBillingMode: enumValue(
+      source.unusedReturnBillingMode,
+      RETURN_BILLING_MODES,
+      defaults.unusedReturnBillingMode,
+    ),
+    unusedReturnDiscountRate: taxRateValue(
+      source.unusedReturnDiscountRate,
+      defaults.unusedReturnDiscountRate,
+    ),
+    unchargedReturnBillingMode: enumValue(
+      source.unchargedReturnBillingMode,
+      RETURN_BILLING_MODES,
+      defaults.unchargedReturnBillingMode,
+    ),
+    unchargedReturnDiscountRate: taxRateValue(
+      source.unchargedReturnDiscountRate,
+      defaults.unchargedReturnDiscountRate,
+    ),
+    carryOverBillingMode: enumValue(
+      source.carryOverBillingMode,
+      CARRY_OVER_BILLING_MODES,
+      defaults.carryOverBillingMode,
+    ),
+    carryOverMonthlyExtraPrice: nonNegativeNumber(
+      source.carryOverMonthlyExtraPrice,
+      defaults.carryOverMonthlyExtraPrice,
+    ),
+    carryOverDailyExtraPrice: nonNegativeNumber(
+      source.carryOverDailyExtraPrice,
+      defaults.carryOverDailyExtraPrice,
+    ),
+    invoiceDateMode: enumValue(
+      source.invoiceDateMode,
+      INVOICE_DATE_MODES,
+      defaults.invoiceDateMode,
+    ),
   };
 }

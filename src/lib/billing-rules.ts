@@ -9,6 +9,7 @@
 
 import {
   coerceTankActionCode,
+  coerceTankLogActionCode,
   isLendActionCode,
   isReturnActionCode,
   type TankActionCode,
@@ -59,6 +60,17 @@ export function isBillable(action: string): boolean | null {
     return null;
   }
   return null;
+}
+
+/**
+ * 月次請求候補の source になる操作かどうか判定する。
+ * 請求書画面は貸出ログを請求単位とし、返却ログは無料/割引などの補助情報に使う。
+ */
+export function isBillingSourceAction(
+  action: string | null | undefined,
+  transitionAction?: string | null,
+): boolean {
+  return isLendActionCode(coerceTankLogActionCode(action, transitionAction));
 }
 
 /* ════════════════════════════════════════════
