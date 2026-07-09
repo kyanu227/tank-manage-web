@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Wallet, Plus, Trash2, Save, Loader2 } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
 import { isNewDocId } from "@/lib/firebase/diff-write";
-import { saveAdminMoneySettings } from "@/lib/firebase/admin-money-settings";
+import {
+  loadAdminMoneySettings,
+  saveAdminMoneySettings,
+} from "@/lib/firebase/admin-money-settings";
 
 interface PriceRow { uid: string; action: string; base: number | string; score: number | string; }
 interface RankRow { uid: string; name: string; minScore: number | string; }
@@ -22,17 +23,11 @@ export default function MoneySettingsPage() {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const pSnap = await getDocs(collection(db, "priceMaster"));
-      const pList: PriceRow[] = [];
-      pSnap.forEach((d) => pList.push({ uid: d.id, ...d.data() } as PriceRow));
-      setPrices(pList);
+      const settings = await loadAdminMoneySettings();
+      setPrices(settings.prices);
       setDirtyPriceIds([]);
       setDeletedPriceIds([]);
-
-      const rSnap = await getDocs(collection(db, "rankMaster"));
-      const rList: RankRow[] = [];
-      rSnap.forEach((d) => rList.push({ uid: d.id, ...d.data() } as RankRow));
-      setRanks(rList.sort((a, b) => Number(b.minScore) - Number(a.minScore)));
+      setRanks(settings.ranks);
       setDirtyRankIds([]);
       setDeletedRankIds([]);
     } catch (e) { console.error(e); }

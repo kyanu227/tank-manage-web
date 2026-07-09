@@ -1,26 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { Award } from "lucide-react";
-import { logsRepository } from "@/lib/firebase/repositories";
-import {
-  buildStaffOperationStats,
-  type StaffOperationStat,
-} from "@/lib/analytics/operation-stats";
+import { useStaffAnalyticsStats } from "@/hooks/useStaffAnalyticsStats";
 
 export default function StaffAnalyticsPage() {
-  const [stats, setStats] = useState<StaffOperationStat[]>([]);
-  const [loading, setLoading] = useState(true);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const logs = await logsRepository.getActiveLogs();
-        setStats(buildStaffOperationStats(logs));
-      } catch (e) { console.error(e); }
-      finally { setLoading(false); }
-    })();
-  }, []);
+  const { stats, loading } = useStaffAnalyticsStats();
 
   return (
     <div>

@@ -24,6 +24,33 @@ export interface SaveAdminMoneySettingsInput {
   deletedRankIds: string[];
 }
 
+export interface AdminMoneySettings {
+  prices: AdminPriceRow[];
+  ranks: AdminRankRow[];
+}
+
+export async function loadAdminMoneySettings(): Promise<AdminMoneySettings> {
+  const [priceSnap, rankSnap] = await Promise.all([
+    getDocs(collection(db, "priceMaster")),
+    getDocs(collection(db, "rankMaster")),
+  ]);
+
+  const prices: AdminPriceRow[] = [];
+  priceSnap.forEach((docSnap) => {
+    prices.push({ uid: docSnap.id, ...docSnap.data() } as AdminPriceRow);
+  });
+
+  const ranks: AdminRankRow[] = [];
+  rankSnap.forEach((docSnap) => {
+    ranks.push({ uid: docSnap.id, ...docSnap.data() } as AdminRankRow);
+  });
+
+  return {
+    prices,
+    ranks: ranks.sort((a, b) => Number(b.minScore) - Number(a.minScore)),
+  };
+}
+
 export async function saveAdminMoneySettings({
   prices,
   ranks,

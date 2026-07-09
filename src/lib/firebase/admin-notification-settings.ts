@@ -19,6 +19,47 @@ export interface SaveAdminNotificationSettingsInput {
   deletedLineConfigIds: string[];
 }
 
+export interface AdminNotificationSettings {
+  emails: string[];
+  alertMonths: number;
+  validityYears: number;
+  lineConfigs: AdminLineConfig[];
+}
+
+const DEFAULT_NOTIFICATION_SETTINGS: Omit<AdminNotificationSettings, "lineConfigs"> = {
+  emails: [],
+  alertMonths: 6,
+  validityYears: 3,
+};
+
+export async function loadAdminNotificationSettings(): Promise<AdminNotificationSettings> {
+  const [notifySnap, lineSnap] = await Promise.all([
+    getDocs(collection(db, "notifySettings")),
+    getDocs(collection(db, "lineConfigs")),
+  ]);
+
+  let systemSettings = DEFAULT_NOTIFICATION_SETTINGS;
+  notifySnap.forEach((docSnap) => {
+    if (docSnap.id !== "config") return;
+    const data = docSnap.data();
+    systemSettings = {
+      emails: (data.emails || []) as string[],
+      alertMonths: data.alertMonths || DEFAULT_NOTIFICATION_SETTINGS.alertMonths,
+      validityYears: data.validityYears || DEFAULT_NOTIFICATION_SETTINGS.validityYears,
+    };
+  });
+
+  const lineConfigs: AdminLineConfig[] = [];
+  lineSnap.forEach((docSnap) => {
+    lineConfigs.push({ uid: docSnap.id, ...docSnap.data() } as AdminLineConfig);
+  });
+
+  return {
+    ...systemSettings,
+    lineConfigs,
+  };
+}
+
 export async function saveAdminNotificationSettings({
   emails,
   alertMonths,

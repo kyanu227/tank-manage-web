@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Bell, Plus, Trash2, Save, Loader2, Mail, MessageSquare } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
 import { isNewDocId } from "@/lib/firebase/diff-write";
-import { saveAdminNotificationSettings } from "@/lib/firebase/admin-notification-settings";
+import {
+  loadAdminNotificationSettings,
+  saveAdminNotificationSettings,
+} from "@/lib/firebase/admin-notification-settings";
 
 interface LineConfig {
   uid: string;
@@ -33,19 +34,11 @@ export default function NotificationsPage() {
 
   const fetchSettings = useCallback(async () => {
     try {
-      const snap = await getDocs(collection(db, "notifySettings"));
-      snap.forEach((d) => {
-        const data = d.data();
-        if (d.id === "config") {
-          setEmails(data.emails || []);
-          setAlertMonths(data.alertMonths || 6);
-          setValidityYears(data.validityYears || 3);
-        }
-      });
-      const lineSnap = await getDocs(collection(db, "lineConfigs"));
-      const configs: LineConfig[] = [];
-      lineSnap.forEach((d) => configs.push({ uid: d.id, ...d.data() } as LineConfig));
-      setLineConfigs(configs);
+      const settings = await loadAdminNotificationSettings();
+      setEmails(settings.emails);
+      setAlertMonths(settings.alertMonths);
+      setValidityYears(settings.validityYears);
+      setLineConfigs(settings.lineConfigs);
       setDirtyLineConfigIds([]);
       setDeletedLineConfigIds([]);
     } catch (e) { console.error(e); }

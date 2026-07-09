@@ -2,10 +2,11 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Shield, Save, RefreshCw, Check } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { doc, getDoc } from "firebase/firestore";
 import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
-import { savePermissions } from "@/lib/firebase/admin-permissions-service";
+import {
+  getAdminPermissions,
+  savePermissions,
+} from "@/lib/firebase/admin-permissions-service";
 
 const PERMISSION_CONTROLLED_ADMIN_PAGES = ADMIN_PAGES.filter(
   (page) => !page.adminOnly && !page.devOnly && !page.hidden
@@ -24,19 +25,10 @@ export default function PermissionsPage() {
   const fetchPermissions = useCallback(async () => {
     setLoading(true);
     try {
-      const snap = await getDoc(doc(db, "settings", "adminPermissions"));
-      if (snap.exists()) {
-        setPermissions(snap.data().pages as PermMap);
-      } else {
-        // Initialize with defaults: 管理者 gets everything, 準管理者 gets dashboard only
-        const defaults: PermMap = {};
-        PERMISSION_CONTROLLED_ADMIN_PAGES.forEach((p) => {
-          defaults[p.path] = ["管理者"];
-        });
-        // Default: give 準管理者 access to dashboard
-        defaults["/admin"] = ["管理者", "準管理者"];
-        setPermissions(defaults);
-      }
+      const permissions = await getAdminPermissions(
+        PERMISSION_CONTROLLED_ADMIN_PAGES.map((page) => page.path),
+      );
+      setPermissions(permissions as PermMap);
     } catch (e) {
       console.error("Failed to fetch permissions:", e);
     } finally {
@@ -70,8 +62,8 @@ export default function PermissionsPage() {
       await savePermissions(permissions);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
-    } catch (e: any) {
-      alert("保存エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("保存エラー: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSaving(false);
     }

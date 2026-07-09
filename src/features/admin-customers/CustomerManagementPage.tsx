@@ -3,22 +3,11 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Building2, Plus, Save, Search, X, RefreshCw, ToggleLeft, ToggleRight, Users } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
 import * as customersService from "@/lib/firebase/customers-service";
+import type { CustomerManagementRow } from "@/lib/firebase/customers-service";
 import PortalUsersPanel from "./PortalUsersPanel";
 
-interface Customer {
-  id: string;
-  name: string;
-  companyName: string;
-  formalName: string;
-  price10: number;
-  price12: number;
-  priceAluminum: number;
-  isActive: boolean;
-  createdAt?: unknown;
-}
+type Customer = CustomerManagementRow;
 
 interface CustomerForm {
   name: string;
@@ -69,46 +58,6 @@ const btnOutline: React.CSSProperties = {
 const toNumber = (value: unknown) => {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
-};
-
-const toText = (value: unknown) => (typeof value === "string" ? value : "");
-
-const createdAtMillis = (value: unknown): number => {
-  if (value instanceof Date) {
-    const millis = value.getTime();
-    return Number.isFinite(millis) ? millis : 0;
-  }
-
-  if (value && typeof value === "object" && "toMillis" in value) {
-    const timestamp = value as { toMillis?: unknown };
-    if (typeof timestamp.toMillis === "function") {
-      try {
-        const millis = timestamp.toMillis();
-        return Number.isFinite(millis) ? millis : 0;
-      } catch {
-        return 0;
-      }
-    }
-  }
-
-  return 0;
-};
-
-const normalizeCustomer = (id: string, data: Record<string, unknown>): Customer => {
-  const name = toText(data.name).trim() || toText(data.companyName).trim();
-  const companyName = toText(data.companyName).trim() || name;
-
-  return {
-    id,
-    name,
-    companyName,
-    formalName: toText(data.formalName).trim(),
-    price10: toNumber(data.price10),
-    price12: toNumber(data.price12),
-    priceAluminum: toNumber(data.priceAluminum),
-    isActive: data.isActive !== false,
-    createdAt: data.createdAt,
-  };
 };
 
 const buildCustomerPayload = (customer: Customer) => {
@@ -207,13 +156,7 @@ function CustomersPanel() {
   const fetchCustomers = async () => {
     setLoading(true);
     try {
-      const querySnapshot = await getDocs(collection(db, "customers"));
-      const data: Customer[] = [];
-      querySnapshot.forEach((customerDoc) => {
-        data.push(normalizeCustomer(customerDoc.id, customerDoc.data()));
-      });
-      data.sort((a, b) => createdAtMillis(b.createdAt) - createdAtMillis(a.createdAt));
-      setCustomers(data);
+      setCustomers(await customersService.listCustomersForManagement());
       setDirtyCustomerIds([]);
     } catch (error) {
       console.error("Error fetching customers: ", error);
