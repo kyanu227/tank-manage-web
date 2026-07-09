@@ -50,11 +50,5 @@ function getDashboardActionBadgeKind(action: string | null | undefined): ActionB
   if (isInHouseActionCode(code)) return "inhouse";
   if (code === "inspection" || code === "repaired") return "maintenance";
 
-  if (action.includes("破損") || action.includes("破棄")) return "danger";
-  if (action.includes("返却")) return "return";
-  if (action.includes("貸出")) return "lend";
-  if (action.includes("充填")) return "fill";
-  if (action.includes("自社")) return "inhouse";
-  if (action.includes("耐圧") || action.includes("修理")) return "maintenance";
   return "default";
 }

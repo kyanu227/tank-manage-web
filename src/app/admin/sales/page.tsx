@@ -2,33 +2,20 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { BarChart3, Calendar, Archive } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
 import {
-  isFillTankLogAction,
-  isLendTankLogAction,
-  isReturnTankLogAction,
-} from "@/lib/tank-action-status-codes";
-
-interface DailyStat { date: string; lend: number; return_: number; fill: number; total: number; }
-interface MonthlyStat { id: string; month: string; location: string; lends: number; returns: number; unused: number; defaults: number; }
-
-function toLocalDateKey(date: Date): string {
-  return `${date.getFullYear()}/${String(date.getMonth() + 1).padStart(2, "0")}/${String(date.getDate()).padStart(2, "0")}`;
-}
-
-function addLocalDays(date: Date, days: number): Date {
-  const next = new Date(date);
-  next.setDate(next.getDate() + days);
-  return next;
-}
+  addLocalDays,
+  buildDailyOperationStats,
+  toLocalDateKey,
+  type DailyOperationStat,
+} from "@/lib/analytics/operation-stats";
+import { getMonthlyStats, type MonthlyStat } from "@/lib/firebase/monthly-stats-service";
 
 export default function SalesPage() {
   const [tab, setTab] = useState<"daily" | "monthly">("daily");
   
   // Daily Stats State
-  const [dailyStats, setDailyStats] = useState<DailyStat[]>([]);
+  const [dailyStats, setDailyStats] = useState<DailyOperationStat[]>([]);
   const [loadingDaily, setLoadingDaily] = useState(true);
 
   // Monthly Stats State
@@ -41,19 +28,7 @@ export default function SalesPage() {
       try {
         // Only fetch a reasonable amount of recent logs for daily stats
         const logs = await logsRepository.getActiveLogs({ limit: 3000 });
-        const dateMap: Record<string, { lend: number; return_: number; fill: number }> = {};
-        logs.forEach((log) => {
-          if (!log.timestamp?.toDate) return;
-          const dt = log.timestamp.toDate();
-          const key = toLocalDateKey(dt);
-          if (!dateMap[key]) dateMap[key] = { lend: 0, return_: 0, fill: 0 };
-          if (isLendTankLogAction(log.action, log.transitionAction)) dateMap[key].lend++;
-          else if (isReturnTankLogAction(log.action, log.transitionAction)) dateMap[key].return_++;
-          else if (isFillTankLogAction(log.action, log.transitionAction)) dateMap[key].fill++;
-        });
-        const sorted = Object.entries(dateMap).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 30)
-          .map(([date, v]) => ({ date, ...v, total: v.lend + v.return_ + v.fill }));
-        setDailyStats(sorted);
+        setDailyStats(buildDailyOperationStats(logs, { limit: 30 }));
       } catch (e) { console.error(e); }
       finally { setLoadingDaily(false); }
     })();
@@ -63,12 +38,7 @@ export default function SalesPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(query(collection(db, "monthly_stats"), orderBy("month", "desc")));
-        const list: MonthlyStat[] = [];
-        snap.forEach(d => {
-          list.push({ id: d.id, ...d.data() } as MonthlyStat);
-        });
-        setMonthlyStats(list);
+        setMonthlyStats(await getMonthlyStats());
       } catch (e) { console.error("Failed to load monthly stats", e); }
       finally { setLoadingMonthly(false); }
     })();

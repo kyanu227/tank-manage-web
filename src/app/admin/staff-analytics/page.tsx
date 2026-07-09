@@ -1,36 +1,22 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Users, Award, TrendingUp } from "lucide-react";
+import { Award } from "lucide-react";
 import { logsRepository } from "@/lib/firebase/repositories";
 import {
-  isFillTankLogAction,
-  isLendTankLogAction,
-  isReturnTankLogAction,
-} from "@/lib/tank-action-status-codes";
-
-interface StaffStat { key: string; name: string; lend: number; return_: number; fill: number; total: number; }
+  buildStaffOperationStats,
+  type StaffOperationStat,
+} from "@/lib/analytics/operation-stats";
 
 export default function StaffAnalyticsPage() {
-  const [stats, setStats] = useState<StaffStat[]>([]);
+  const [stats, setStats] = useState<StaffOperationStat[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     (async () => {
       try {
         const logs = await logsRepository.getActiveLogs();
-        const staffMap: Record<string, { name: string; lend: number; return_: number; fill: number }> = {};
-        logs.forEach((log) => {
-          const key = log.staffId || "不明";
-          if (!staffMap[key]) staffMap[key] = { name: log.staffName || "不明", lend: 0, return_: 0, fill: 0 };
-          if (isLendTankLogAction(log.action, log.transitionAction)) staffMap[key].lend++;
-          else if (isReturnTankLogAction(log.action, log.transitionAction)) staffMap[key].return_++;
-          else if (isFillTankLogAction(log.action, log.transitionAction)) staffMap[key].fill++;
-        });
-        const sorted = Object.entries(staffMap)
-          .map(([key, v]) => ({ name: v.name, key, lend: v.lend, return_: v.return_, fill: v.fill, total: v.lend + v.return_ + v.fill }))
-          .sort((a, b) => b.total - a.total);
-        setStats(sorted);
+        setStats(buildStaffOperationStats(logs));
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();

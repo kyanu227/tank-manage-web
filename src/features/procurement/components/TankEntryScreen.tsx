@@ -8,17 +8,13 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import {
-  collection,
-  getDocs,
-} from "firebase/firestore";
 import ProcurementTabs from "@/components/ProcurementTabs";
-import { db } from "@/lib/firebase/config";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import type { TankStatusCode } from "@/lib/tank-action-status-codes";
 import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
 import { tryParseTankId } from "@/lib/tank-id";
+import { listOrderItems } from "@/lib/firebase/order-master-settings";
 import {
   submitTankEntryBatch,
   type TankEntryMode,
@@ -66,12 +62,11 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
     (async () => {
       setMasterLoading(true);
       try {
-        const snap = await getDocs(collection(db, "orderMaster"));
         const fromMaster = new Set<string>();
-        snap.forEach((d) => {
-          const data = d.data() as Record<string, unknown>;
-          if (String(data.category || "") !== "tank") return;
-          const name = `${String(data.colA || "").trim()} ${String(data.colB || "").trim()}`.trim();
+        const items = await listOrderItems();
+        items.forEach((item) => {
+          if (item.category !== "tank") return;
+          const name = `${String(item.colA || "").trim()} ${String(item.colB || "").trim()}`.trim();
           if (name) fromMaster.add(name);
         });
         if (mounted) setMasterTankTypes(Array.from(fromMaster));

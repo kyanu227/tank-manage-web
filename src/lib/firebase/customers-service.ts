@@ -1,4 +1,5 @@
-import { addDoc, collection, doc, serverTimestamp, updateDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDocs, serverTimestamp, updateDoc } from "firebase/firestore";
+import type { CustomerSnapshot } from "@/lib/operation-context";
 import { db } from "@/lib/firebase/config";
 
 export interface CustomerWriteInput {
@@ -28,4 +29,21 @@ export async function updateCustomer(
     ...input,
     updatedAt: serverTimestamp(),
   });
+}
+
+export async function listActiveCustomerSnapshots(): Promise<CustomerSnapshot[]> {
+  const snap = await getDocs(collection(db, "customers"));
+  const customers: CustomerSnapshot[] = [];
+
+  snap.forEach((docSnap) => {
+    const data = docSnap.data();
+    if (data.isActive === false) return;
+    const customerName = String(data.name || data.companyName || "").trim();
+    if (customerName) {
+      customers.push({ customerId: docSnap.id, customerName });
+    }
+  });
+
+  customers.sort((a, b) => a.customerName.localeCompare(b.customerName));
+  return customers;
 }

@@ -20,10 +20,6 @@ import {
   Users,
   X,
 } from "lucide-react";
-import {
-  collection,
-  getDocs,
-} from "firebase/firestore";
 import { logsRepository, transactionsRepository } from "@/lib/firebase/repositories";
 import type { TransactionDoc } from "@/lib/firebase/repositories/types";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
@@ -41,7 +37,7 @@ import {
   type TankSnapshot,
 } from "@/lib/tank-operation";
 import type { CustomerSnapshot } from "@/lib/operation-context";
-import { db } from "@/lib/firebase/config";
+import { listActiveCustomerSnapshots } from "@/lib/firebase/customers-service";
 import { STATUS_COLORS } from "@/lib/tank-rules";
 import {
   coerceTankActionCode,
@@ -162,12 +158,12 @@ export default function StaffDashboard() {
   const fetchData = useCallback(async () => {
     setDashboardLoading(true);
     try {
-      const [logs, customerSnap, unfilledReports] = await Promise.all([
+      const [logs, customers, unfilledReports] = await Promise.all([
         // orderBy: null は Firestore 側で timestamp desc を付けない指定。
         // dashboard はクライアントで originalAt ?? timestamp で再ソートするため、
         // timestamp フィールドを持たない revision ログ等の取りこぼしを防ぐ。
         logsRepository.getActiveLogs({ orderBy: null }),
-        getDocs(collection(db, "customers")),
+        listActiveCustomerSnapshots(),
         // 顧客未充填報告は品質報告として read-only 表示する。tank/logs の状態はここでは動かさない。
         transactionsRepository.getUnchargedReports(),
       ]);
@@ -180,14 +176,6 @@ export default function StaffDashboard() {
       );
       setUnfilledReports(sortedReports.slice(0, 10));
 
-      const customers: CustomerSnapshot[] = [];
-      customerSnap.forEach((d) => {
-        const data = d.data();
-        if (data.isActive === false) return;
-        const name = String(data.name || data.companyName || "").trim();
-        if (name) customers.push({ customerId: d.id, customerName: name });
-      });
-      customers.sort((a, b) => a.customerName.localeCompare(b.customerName));
       setCustomerOptions(customers);
     } catch (e) {
       console.error(e);

@@ -2,14 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { ShoppingCart, Plus, Send, Loader2, CheckCircle2 } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
 import ProcurementTabs from "@/components/ProcurementTabs";
 import { useProcurementSwipe } from "@/features/procurement/hooks/useProcurementSwipe";
 import { submitSupplyOrder } from "@/lib/firebase/supply-order";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { listOrderItems, type OrderMasterItem } from "@/lib/firebase/order-master-settings";
 
-interface OrderMasterItem { colA: string; colB: string; price: number; category: string; }
 interface CartItem { uid: string; name: string; count: number; price: number; }
 
 export default function SupplyOrderPage() {
@@ -23,10 +21,7 @@ export default function SupplyOrderPage() {
   useEffect(() => {
     (async () => {
       try {
-        const snap = await getDocs(collection(db, "orderMaster"));
-        const items: OrderMasterItem[] = [];
-        snap.forEach((d) => items.push(d.data() as OrderMasterItem));
-        setMaster(items);
+        setMaster(await listOrderItems());
       } catch (e) { console.error(e); }
       finally { setLoading(false); }
     })();
