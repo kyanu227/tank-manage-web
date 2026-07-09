@@ -111,6 +111,130 @@ src/
 - **分割発注は原則しない**: 型や定数が絡む連鎖リファクタは途中状態で tsc/build が壊れるため、1本発注が原則
   - 例外: 独立機能が複数ある場合のみ、機能境界で分ける
 
+## Claude / Codex shared workflow
+
+Claude と Codex が並行作業する場合は、作業境界を先に固定する。Claude は UI/design の見た目と表示構造を担当し、Codex は domain logic、data model、Firestore integration、billing calculation、validation、deploy を担当する。
+
+Claude UI PR は、全業務ロジックを毎回再監査しなくてもよいように、changed-file boundary と props contract でレビュー可能な差分にする。
+
+### Codex owns
+
+Codex が担当するもの:
+
+- Firestore read/write
+- repositories / services
+- tank operation
+- transaction update
+- customerId / staffId identity
+- billing calculation
+- billing settings schema
+- invoice candidate generation
+- tax / rounding logic
+- status/action code semantics
+- Firestore Rules / indexes
+- package / firebase.json
+- validation / build / deploy
+- smoke test
+
+### Claude owns
+
+Claude が担当してよいもの:
+
+- visual layout
+- presentational components
+- CSS
+- print CSS
+- spacing / typography
+- invoice visual design
+- button placement
+- responsive layout
+- wording presentation
+- visual hierarchy
+
+### Claude UI-only allowed files
+
+Claude may edit:
+
+- `src/features/**/components/**/*.tsx`
+- `src/features/**/styles/**/*.css`
+- component-local presentational code
+- CSS inside presentational components
+- docs only when documenting UI behavior
+
+Claude may edit with caution:
+
+- `src/app/**/page.tsx`
+  - only if the page is already a thin wrapper and no Firestore/query/calculation/stateful business logic is changed
+
+### Claude must not edit
+
+Claude must not edit unless the task explicitly says otherwise:
+
+- `src/lib/firebase/**`
+- `src/lib/billing/calculate.ts`
+- `src/lib/billing/settings.ts`
+- `src/lib/billing/source-logs.ts`
+- `src/lib/billing/invoice-candidate.ts`
+- `src/lib/customer-identity-read.ts`
+- `src/lib/tank-operation.ts`
+- `src/lib/firebase/repositories/**`
+- `firestore.rules`
+- `firestore.indexes.json`
+- `firebase.json`
+- `package.json`
+- `package-lock.json`
+- action/status code definitions
+- operation context / identity types
+- any file that changes billing amount, tax, rounding, customer grouping, or Firestore behavior
+
+### UI-only PR requirements
+
+A Claude UI-only PR must state:
+
+- changed files
+- visual summary
+- no business logic changed
+- no Firestore read/write changed
+- no billing calculation changed
+- no settings schema changed
+- no customerId/staffId identity behavior changed
+- no package/rules/index/firebase.json changed
+
+Validation:
+
+- `git diff --check`
+- `npx tsc --noEmit --pretty false`
+- changed files eslint
+- `npm run build`
+- `npm run lint` may fail only on known baseline errors
+
+### Codex review policy for Claude UI PR
+
+Codex should check:
+
+1. changed files are inside allowed UI boundaries
+2. no forbidden files changed
+3. props contract is preserved
+4. TypeScript/build pass
+5. print CSS does not leak globally or hide unrelated app
+6. no raw internal code appears in UI
+7. no Firestore query/write was added
+8. no billing/tax/customer identity logic was changed
+
+Codex should not rework visual preference, exact spacing, color choice, or aesthetic direction unless it breaks usability, printing, accessibility, or business meaning.
+
+### Billing-specific rule
+
+For billing UI/design work:
+
+- Claude may edit invoice presentation components and print CSS.
+- Claude must not recalculate totals.
+- Claude must not change `InvoiceCandidate`.
+- Claude must not change tax/rounding.
+- Claude must not change customerId grouping.
+- Claude must render `candidate.lineItems`, `candidate.total`, `candidate.tax`, and `settings` as provided.
+- Any change to invoice amount, return-tag billing, T番号 logic, or settings schema belongs to Codex.
+
 ## ディレクトリ階層の方針
 - `src/components/` は汎用部品のみ（`AuthPanel`, `DrumRoll`, `QuickSelect` 等）
 - 業務フロー単位の塊は `src/features/<feature-name>/` に閉じる

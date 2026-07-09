@@ -90,6 +90,85 @@ src/
        └── (秘書が必要に応じて新エージェント作成)
 ```
 
+## Claude / Codex shared workflow
+
+Claude と Codex が並行作業する場合は、作業境界を先に固定する。Codex は domain logic、data model、Firestore integration、billing calculation、validation、deploy の owner とする。Claude は UI/design、visual layout、presentational components、CSS、print CSS、spacing、typography、copy presentation の owner とする。
+
+Claude UI-only PR は、changed-file boundary と props contract でレビュー可能な差分にする。Codex は毎回 UI 美観を再設計せず、禁止ファイル・props契約・build/validation・business logic 非変更を確認する。
+
+### Claude UI-only allowed scope
+
+Claude may edit:
+
+- `src/features/**/components/**/*.tsx`
+- `src/features/**/styles/**/*.css`
+- component-local presentational code
+- CSS inside presentational components
+- docs only when documenting UI behavior
+
+Claude may edit `src/app/**/page.tsx` only when the page is already a thin wrapper and no Firestore/query/calculation/stateful business logic is changed.
+
+### Claude must not edit
+
+Claude must not edit unless the task explicitly says otherwise:
+
+- `src/lib/firebase/**`
+- `src/lib/billing/calculate.ts`
+- `src/lib/billing/settings.ts`
+- `src/lib/billing/source-logs.ts`
+- `src/lib/billing/invoice-candidate.ts`
+- `src/lib/customer-identity-read.ts`
+- `src/lib/tank-operation.ts`
+- `src/lib/firebase/repositories/**`
+- `firestore.rules`
+- `firestore.indexes.json`
+- `firebase.json`
+- `package.json`
+- `package-lock.json`
+- action/status code definitions
+- operation context / identity types
+- any file that changes billing amount, tax, rounding, customer grouping, or Firestore behavior
+
+### UI-only PR requirements
+
+A Claude UI-only PR must state:
+
+- changed files
+- visual summary
+- no business logic changed
+- no Firestore read/write changed
+- no billing calculation changed
+- no settings schema changed
+- no customerId/staffId identity behavior changed
+- no package/rules/index/firebase.json changed
+
+Validation:
+
+- `git diff --check`
+- `npx tsc --noEmit --pretty false`
+- changed files eslint
+- `npm run build`
+- `npm run lint` may fail only on known baseline errors
+
+### Codex review policy for Claude UI PR
+
+Codex should check:
+
+1. changed files are inside allowed UI boundaries
+2. no forbidden files changed
+3. props contract is preserved
+4. TypeScript/build pass
+5. print CSS does not leak globally or hide unrelated app
+6. no raw internal code appears in UI
+7. no Firestore query/write was added
+8. no billing/tax/customer identity logic was changed
+
+Codex should not rework visual preference, exact spacing, color choice, or aesthetic direction unless it breaks usability, printing, accessibility, or business meaning.
+
+### Billing-specific rule
+
+For billing UI/design work, Claude may edit invoice presentation components and print CSS, but must render `candidate.lineItems`, `candidate.total`, `candidate.tax`, and `settings` as provided. Claude must not recalculate totals, change `InvoiceCandidate`, change tax/rounding, change customerId grouping, or change settings schema. Any change to invoice amount, return-tag billing, T番号 logic, or settings schema belongs to Codex.
+
 ## コード規約
 
 - コンポーネント: PascalCase (`AdminAuthGuard`)
