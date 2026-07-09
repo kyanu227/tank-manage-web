@@ -2,10 +2,8 @@
 
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Printer } from "lucide-react";
-import { collection, getDocs } from "firebase/firestore";
 import {
   buildInvoiceCandidates,
-  type BillingCustomerMaster,
   type InvoiceCandidate,
 } from "@/lib/billing/invoice-candidate";
 import {
@@ -18,13 +16,12 @@ import {
   type BillingRoundingMode,
   type BillingTaxMode,
 } from "@/lib/billing/settings";
-import { normalizeCustomerIdentityText } from "@/lib/customer-identity-read";
-import { db } from "@/lib/firebase/config";
 import { logsRepository } from "@/lib/firebase/repositories";
 import {
   getBillingInvoiceSettings,
   saveBillingInvoiceSettings,
 } from "@/lib/firebase/billing-settings-service";
+import { getBillingCustomerMasters } from "@/lib/firebase/billing-customers-service";
 
 type BillingTab = "list" | "settings";
 
@@ -113,9 +110,9 @@ export default function BillingPage() {
     (async () => {
       setLoading(true);
       try {
-        const [logs, custSnap, invoiceSettings] = await Promise.all([
+        const [logs, customers, invoiceSettings] = await Promise.all([
           logsRepository.getActiveLogs(),
-          getDocs(collection(db, "customers")),
+          getBillingCustomerMasters(),
           getBillingInvoiceSettings().catch((error) => {
             console.error("Fetch billing invoice settings error:", error);
             return DEFAULT_BILLING_INVOICE_SETTINGS;
@@ -124,24 +121,6 @@ export default function BillingPage() {
         const normalizedSettings = normalizeBillingInvoiceSettings(invoiceSettings);
         setSettings(normalizedSettings);
         setSettingsDraft(normalizedSettings);
-
-        const customers: BillingCustomerMaster[] = [];
-        custSnap.forEach((d) => {
-          const data = d.data();
-          const customerName =
-            normalizeCustomerIdentityText(data.name)
-            ?? normalizeCustomerIdentityText(data.companyName)
-            ?? d.id;
-          const formalName = normalizeCustomerIdentityText(data.formalName) ?? "";
-          customers.push({
-            customerId: d.id,
-            customerName,
-            formalName,
-            price10: Number(data.price10) || 0,
-            price12: Number(data.price12) || 0,
-            priceAluminum: Number(data.priceAluminum) || 0,
-          });
-        });
 
         const items = buildInvoiceCandidates({
           logs,
