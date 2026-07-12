@@ -1,6 +1,15 @@
 import { collection, doc, getDocs, serverTimestamp, writeBatch, type DocumentData } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { assertNotChangedSinceLoad, createDocId, hasFieldChanges, isNewDocId } from "@/lib/firebase/diff-write";
+import {
+  normalizeAdminSystemNotificationSettings,
+  type NormalizedAdminSystemNotificationSettings,
+} from "@/lib/firebase/admin-notification-settings-load-state";
+import {
+  assertSettingsSectionsLoaded,
+  loadIndependentSettingsSections,
+  type SettingsSectionLoadResult,
+} from "@/lib/settings-section-load";
 
 export interface AdminLineConfig {
   uid: string;
@@ -17,47 +26,41 @@ export interface SaveAdminNotificationSettingsInput {
   lineConfigs: AdminLineConfig[];
   dirtyLineConfigIds: string[];
   deletedLineConfigIds: string[];
+  notifySettingsLoaded: boolean;
+  lineConfigsLoaded: boolean;
 }
 
-export interface AdminNotificationSettings {
-  emails: string[];
-  alertMonths: number;
-  validityYears: number;
-  lineConfigs: AdminLineConfig[];
+export interface AdminNotificationSettingsLoadResult {
+  notifySettings: SettingsSectionLoadResult<NormalizedAdminSystemNotificationSettings>;
+  lineConfigs: SettingsSectionLoadResult<AdminLineConfig[]>;
 }
 
-const DEFAULT_NOTIFICATION_SETTINGS: Omit<AdminNotificationSettings, "lineConfigs"> = {
-  emails: [],
-  alertMonths: 6,
-  validityYears: 3,
-};
+export async function loadAdminNotificationSettings(): Promise<AdminNotificationSettingsLoadResult> {
+  const [notifySettings, lineConfigs] = await loadIndependentSettingsSections(
+    loadAdminSystemNotificationSettings,
+    loadAdminLineConfigs,
+  );
 
-export async function loadAdminNotificationSettings(): Promise<AdminNotificationSettings> {
-  const [notifySnap, lineSnap] = await Promise.all([
-    getDocs(collection(db, "notifySettings")),
-    getDocs(collection(db, "lineConfigs")),
-  ]);
+  return { notifySettings, lineConfigs };
+}
 
-  let systemSettings = DEFAULT_NOTIFICATION_SETTINGS;
+async function loadAdminSystemNotificationSettings(): Promise<NormalizedAdminSystemNotificationSettings> {
+  const notifySnap = await getDocs(collection(db, "notifySettings"));
+  let configData: Record<string, unknown> | undefined;
   notifySnap.forEach((docSnap) => {
     if (docSnap.id !== "config") return;
-    const data = docSnap.data();
-    systemSettings = {
-      emails: (data.emails || []) as string[],
-      alertMonths: data.alertMonths || DEFAULT_NOTIFICATION_SETTINGS.alertMonths,
-      validityYears: data.validityYears || DEFAULT_NOTIFICATION_SETTINGS.validityYears,
-    };
+    configData = docSnap.data();
   });
+  return normalizeAdminSystemNotificationSettings(configData);
+}
 
+async function loadAdminLineConfigs(): Promise<AdminLineConfig[]> {
+  const lineSnap = await getDocs(collection(db, "lineConfigs"));
   const lineConfigs: AdminLineConfig[] = [];
   lineSnap.forEach((docSnap) => {
     lineConfigs.push({ uid: docSnap.id, ...docSnap.data() } as AdminLineConfig);
   });
-
-  return {
-    ...systemSettings,
-    lineConfigs,
-  };
+  return lineConfigs;
 }
 
 export async function saveAdminNotificationSettings({
@@ -67,7 +70,10 @@ export async function saveAdminNotificationSettings({
   lineConfigs,
   dirtyLineConfigIds,
   deletedLineConfigIds,
+  notifySettingsLoaded,
+  lineConfigsLoaded,
 }: SaveAdminNotificationSettingsInput): Promise<void> {
+  assertSettingsSectionsLoaded({ notifySettingsLoaded, lineConfigsLoaded });
   const batch = writeBatch(db);
 
   batch.set(doc(db, "notifySettings", "config"), {
