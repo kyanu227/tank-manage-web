@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { useTankOperationPolicy } from "@/hooks/useTankOperationPolicy";
 import type { Locale } from "@/lib/locale";
 import {
   getManualOperationConfirmMessage,
@@ -15,6 +16,7 @@ import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
 import type { CustomerSnapshot, OperationContext } from "@/lib/operation-context";
+import { planTankTransition } from "@/lib/tank-transition-policy";
 import {
   returnTagToReturnCondition,
   returnTagToStoredLogNote,
@@ -62,6 +64,10 @@ export function useManualTankOperation({
   selectedCustomer,
   fetchData,
 }: UseManualTankOperationParams): UseManualTankOperationResult {
+  const {
+    runtimeTransitionEnforcement,
+    loading: policyLoading,
+  } = useTankOperationPolicy();
   const [returnTag, setReturnTag] = useState<TagType>("normal");
   const [opQueue, setOpQueue] = useState<QueueItem[]>([]);
   const [activePrefix, setActivePrefix] = useState<string | null>(null);
@@ -89,17 +95,16 @@ export function useManualTankOperation({
     }
   }, []);
 
-  const addToQueue = useCallback((rawTankId: string) => {
+  const evaluateQueueTank = useCallback((rawTankId: string, tag: TagType) => {
     const tankIdResult = tryParseTankId(rawTankId);
     const tankId = tankIdResult.ok
       ? tankIdResult.canonicalTankId
       : tankIdResult.normalizedInput || rawTankId.trim().toUpperCase();
-    if (opQueue.some((q) => q.tankId === tankId)) return;
-
     const tank = tankIdResult.ok ? allTanks[tankId] : undefined;
     const currentStatus = tank?.status || "";
     let valid = tankIdResult.ok;
     let error = tankIdResult.ok ? "" : tankIdResult.reason;
+    let recoveryCandidate = false;
 
     if (!tankIdResult.ok) {
       valid = false;
@@ -113,17 +118,94 @@ export function useManualTankOperation({
         error = "タンク状態が不正です";
       } else {
         const actionToValidate = mode === "return"
-          ? resolveReturnActionCode(returnTag as ReturnTag, statusCode)
+          ? resolveReturnActionCode(tag as ReturnTag, statusCode)
           : mode;
         if (!validateTransitionCode(statusCode, actionToValidate)) {
-          valid = false;
-          error = `${getTankStatusLabel(statusCode, locale)} は不可`;
+          if (policyLoading) {
+            valid = false;
+            error = "操作方針を確認中です";
+          } else {
+            const previewTargetCustomer = mode === "lend"
+              ? selectedCustomer ?? {
+                  // UI preview専用。実際の顧客はsubmit時とtransaction内で再検証する。
+                  customerId: "__recovery_preview_customer__",
+                  customerName: "選択予定の貸出先",
+                }
+              : null;
+            const previewPlan = planTankTransition({
+              policyMode: runtimeTransitionEnforcement,
+              current: {
+                status: statusCode,
+                customerId: tank.customerId,
+                customerName: tank.customerName,
+                location: tank.location,
+              },
+              requestedAction: actionToValidate,
+              targetCustomer: previewTargetCustomer,
+              targetLocation: mode === "lend"
+                ? selectedCustomer?.customerName ?? "選択予定の貸出先"
+                : "倉庫",
+            });
+            if (previewPlan.ok && previewPlan.plan.kind === "recovery") {
+              valid = true;
+              recoveryCandidate = true;
+              error = "";
+            } else {
+              valid = false;
+              error = `${getTankStatusLabel(statusCode, locale)} は不可`;
+            }
+          }
         }
       }
     }
 
+    return { tankId, currentStatus, valid, recoveryCandidate, error };
+  }, [allTanks, locale, mode, policyLoading, runtimeTransitionEnforcement, selectedCustomer]);
+
+  // policy読込み完了や顧客選択後に、読込み中にscanした候補も再評価する。
+  useEffect(() => {
+    setOpQueue((previous) => {
+      let changed = false;
+      const next = previous.map((item) => {
+        const evaluated = evaluateQueueTank(item.tankId, item.tag);
+        if (
+          item.tankId === evaluated.tankId
+          && item.status === evaluated.currentStatus
+          && item.valid === evaluated.valid
+          && item.recoveryCandidate === evaluated.recoveryCandidate
+          && item.error === evaluated.error
+        ) {
+          return item;
+        }
+        changed = true;
+        return {
+          ...item,
+          tankId: evaluated.tankId,
+          status: evaluated.currentStatus,
+          valid: evaluated.valid,
+          recoveryCandidate: evaluated.recoveryCandidate,
+          error: evaluated.error,
+        };
+      });
+      return changed ? next : previous;
+    });
+  }, [evaluateQueueTank]);
+
+  const addToQueue = useCallback((rawTankId: string) => {
+    const evaluated = evaluateQueueTank(rawTankId, returnTag);
+    const tankId = evaluated.tankId;
+    if (opQueue.some((q) => q.tankId === tankId)) return;
+
     setOpQueue((prev) => [
-      { uid: `${Date.now()}_${Math.random()}`, tankId, status: currentStatus, valid, error, tag: returnTag },
+      {
+        uid: `${Date.now()}_${Math.random()}`,
+        tankId,
+        status: evaluated.currentStatus,
+        valid: evaluated.valid,
+        recoveryCandidate: evaluated.recoveryCandidate,
+        error: evaluated.error,
+        tag: returnTag,
+      },
       ...prev,
     ]);
 
@@ -132,7 +214,7 @@ export function useManualTankOperation({
     successTimeoutRef.current = setTimeout(() => {
       setLastAdded(null);
     }, 1500);
-  }, [allTanks, locale, mode, opQueue, returnTag]);
+  }, [evaluateQueueTank, opQueue, returnTag]);
 
   const handleInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/[^0-9]/g, "");

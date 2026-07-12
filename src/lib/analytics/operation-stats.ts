@@ -5,7 +5,10 @@ import {
   isReturnActionCode,
   type TankActionCode,
 } from "@/lib/tank-action-status-codes";
-import { projectOfficialAggregationEvent } from "@/lib/tank-transition-projections";
+import {
+  assertOfficialAggregationSchemaReady,
+  projectOfficialAggregationEvent,
+} from "@/lib/tank-transition-projections";
 
 export interface DailyOperationStat {
   date: string;
@@ -44,6 +47,7 @@ export function buildDailyOperationStats(
   logs: LogDoc[],
   options: { limit?: number } = {},
 ): DailyOperationStat[] {
+  assertOfficialAggregationSchemaReady(logs);
   const limit = options.limit ?? 30;
   const dateMap = new Map<string, ActionCounts>();
 
@@ -67,6 +71,7 @@ export function buildDailyOperationStats(
 }
 
 export function buildStaffOperationStats(logs: LogDoc[]): StaffOperationStat[] {
+  assertOfficialAggregationSchemaReady(logs);
   const staffMap = new Map<string, ActionCounts & { name: string }>();
 
   logs.forEach((log) => {

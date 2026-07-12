@@ -236,7 +236,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
 }
 
 function TankOperationPolicyBanner() {
-  const { policy, loading, error } = useTankOperationPolicy();
+  const { runtimeTransitionEnforcement, loading, error } = useTankOperationPolicy();
   if (loading) return null;
 
   if (error) {
@@ -262,7 +262,7 @@ function TankOperationPolicyBanner() {
     );
   }
 
-  if (policy.transitionEnforcement !== "advisory") return null;
+  if (runtimeTransitionEnforcement !== "advisory") return null;
   return (
     <div
       role="status"

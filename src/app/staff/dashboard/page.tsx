@@ -76,6 +76,8 @@ interface LogEntry {
   logNote?: string;
   logStatus?: LogStatus;
   logKind?: string;
+  transitionPlan?: { kind?: "direct" | "recovery" };
+  transitionReviewStatus?: "not_required" | "pending" | "approved" | "excluded";
   rootLogId?: string;
   revision?: number;
   editedByStaffId?: string;
@@ -301,6 +303,9 @@ export default function StaffDashboard() {
 
   const bulkLocationMode = useMemo(() => {
     if (selectedLogs.length === 0) return null;
+    if (selectedLogs.some((log) => canCorrectLogReason(log, correctionRole) != null)) {
+      return null;
+    }
     const actions = selectedLogs.map((log) => toTankActionCode(log.transitionAction ?? log.action));
     if (actions.some((action) => action == null)) return null;
     if (actions.every((action) => action === "lend")) return "lend";
@@ -308,7 +313,7 @@ export default function StaffDashboard() {
       return "inhouse";
     }
     return null;
-  }, [selectedLogs]);
+  }, [correctionRole, selectedLogs]);
 
   const bulkLocationOptions = useMemo<BulkLocationOption[]>(() => {
     if (bulkLocationMode === "lend") {
@@ -325,6 +330,7 @@ export default function StaffDashboard() {
   }, [bulkLocationMode, customerOptions]);
 
   const openEdit = (log: LogEntry) => {
+    if (canCorrectLogReason(log, correctionRole)) return;
     setEditingLog(log);
     setEditForm({
       tankId: log.tankId,
@@ -902,6 +908,8 @@ export default function StaffDashboard() {
                     const isExpanded = expandedRootId === rootId;
                     const modifyDisabledReason = canModifyLogReason(log, correctionRole);
                     const canModify = modifyDisabledReason == null;
+                    const correctionDisabledReason = canCorrectLogReason(log, correctionRole);
+                    const canCorrect = correctionDisabledReason == null;
                     const isTankLog = log.logKind === "tank";
                     const history = historyByRoot[rootId] ?? [];
                     const historyLoading = historyLoadingRoot === rootId;
@@ -992,8 +1000,8 @@ export default function StaffDashboard() {
                               <IconTextButton
                                 label="ID変更"
                                 icon={<Edit2 size={13} />}
-                                disabled={!canModify}
-                                disabledReason={modifyDisabledReason ?? undefined}
+                                disabled={!canCorrect}
+                                disabledReason={correctionDisabledReason ?? undefined}
                                 onClick={() => openEdit(log)}
                               />
                               <IconTextButton
@@ -1014,6 +1022,11 @@ export default function StaffDashboard() {
                               {modifyDisabledReason && (
                                 <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", alignSelf: "center" }}>
                                   {modifyDisabledReason}
+                                </span>
+                              )}
+                              {!modifyDisabledReason && correctionDisabledReason && (
+                                <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", alignSelf: "center" }}>
+                                  {correctionDisabledReason}
                                 </span>
                               )}
                             </div>
@@ -1460,6 +1473,21 @@ function tankStatusColor(status: string): string {
 
 function canModifyLog(log: LogEntry, role: StaffCorrectionRole): boolean {
   return canModifyLogReason(log, role) == null;
+}
+
+function canCorrectLogReason(log: LogEntry, role: StaffCorrectionRole): string | null {
+  const baseReason = canModifyLogReason(log, role);
+  if (baseReason) return baseReason;
+  if (!log.transitionPlan?.kind) {
+    return "transitionPlanを確認できないログは訂正できません";
+  }
+  if (log.transitionPlan?.kind === "recovery") {
+    return "自動補完ログは取消後に正しい操作を再実行してください";
+  }
+  if (log.transitionReviewStatus && log.transitionReviewStatus !== "not_required") {
+    return "集計レビュー対象のログは直接訂正できません";
+  }
+  return null;
 }
 
 function canModifyLogReason(log: LogEntry, role: StaffCorrectionRole): string | null {

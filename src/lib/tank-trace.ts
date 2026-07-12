@@ -20,6 +20,7 @@ import {
   type DocumentData,
   type Firestore,
 } from "firebase/firestore";
+import { normalizeTransitionPlan } from "./tank-transition-policy";
 
 /* ════════════════════════════════════════════
    1. 型定義
@@ -55,8 +56,8 @@ export interface TraceResult {
  *
  * ロジック:
  *   1. 未充填返却のログからtankIdを取得
- *   2. そのtankIdの「充填」ログを時系列降順で検索
- *   3. 未充填返却より前の直近の充填ログ = 責任者
+ *   2. そのtankIdの正式なtransitionPlanを時系列降順で検索
+ *   3. directまたは承認済みrecoveryのoperator充填を含む直近log = 責任者
  */
 export async function traceUnderfilledSource(
   db: Firestore,
@@ -67,25 +68,36 @@ export async function traceUnderfilledSource(
     logsRef,
     where("logStatus", "==", "active"),
     where("tankId", "==", triggerLog.tankId),
-    where("action", "==", "fill"),
     where("timestamp", "<", triggerLog.timestamp),
     orderBy("timestamp", "desc")
   );
 
   const snap = await getDocs(q);
-  const sourceDoc = snap.docs.find((snapshot) => {
-    const status = snapshot.data().transitionReviewStatus;
-    return status === "not_required" || status === "approved";
-  });
+  const sourceDoc = snap.docs.find((snapshot) => isOfficialFillSource(snapshot.data()));
   if (!sourceDoc) return null;
 
-  const sourceLog = tankLogFromData(sourceDoc.id, sourceDoc.data());
+  const sourceLog = {
+    ...tankLogFromData(sourceDoc.id, sourceDoc.data()),
+    action: "fill",
+  };
 
   return {
     responsibleStaff: sourceLog.staffName,
     sourceLog,
     triggerLog,
   };
+}
+
+export function isOfficialFillSource(data: DocumentData): boolean {
+  const plan = normalizeTransitionPlan(data.transitionPlan);
+  if (!plan) return false;
+  const eligible = plan.kind === "direct"
+    ? data.transitionReviewStatus === "not_required"
+    : data.transitionReviewStatus === "approved";
+  // system充填は状態整合の補完であり、担当者の報酬・責任対象にしない。
+  return eligible && plan.steps.some(
+    (step) => step.action === "fill" && step.actorType === "operator",
+  );
 }
 
 /* ════════════════════════════════════════════

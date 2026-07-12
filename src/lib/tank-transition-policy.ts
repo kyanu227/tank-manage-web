@@ -14,6 +14,10 @@ import type { OperationContext } from "@/lib/operation-context";
 export const TRANSITION_ENFORCEMENT_MODES = ["strict", "advisory"] as const;
 export type TransitionEnforcementMode = (typeof TRANSITION_ENFORCEMENT_MODES)[number];
 
+/** Rules保護とemulator smoke完了後、build時に明示的に開放するrollout gate。 */
+export const ADVISORY_ACTIVATION_ENABLED =
+  process.env.NEXT_PUBLIC_TANK_ADVISORY_ACTIVATION_ENABLED === "true";
+
 export const TRANSITION_REVIEW_STATUSES = [
   "not_required",
   "pending",
@@ -172,10 +176,25 @@ export function resolvePlannerPolicyMode(
   configuredMode: TransitionEnforcementMode,
   context: AdvisoryRecoveryContext,
   requestedAction?: TankActionCode,
+  advisoryActivationEnabled: boolean = ADVISORY_ACTIVATION_ENABLED,
 ): TransitionEnforcementMode {
-  return configuredMode === "advisory"
+  const runtimeMode = resolveRuntimeTransitionEnforcement(
+    configuredMode,
+    advisoryActivationEnabled,
+  );
+  return runtimeMode === "advisory"
     && requestedAction !== "order_lend"
     && isStaffDirectAdvisoryContext(context)
+    ? "advisory"
+    : "strict";
+}
+
+/** 保存済み設定は変えず、build gateを反映した実行時modeだけを解決する。 */
+export function resolveRuntimeTransitionEnforcement(
+  configuredMode: TransitionEnforcementMode,
+  advisoryActivationEnabled: boolean = ADVISORY_ACTIVATION_ENABLED,
+): TransitionEnforcementMode {
+  return configuredMode === "advisory" && advisoryActivationEnabled
     ? "advisory"
     : "strict";
 }
@@ -255,6 +274,14 @@ export function planTankTransition(request: TransitionPlanRequest): TransitionPl
       steps: [stepResult.step],
       requiredEvidence: [],
     });
+  }
+
+  // 顧客transactionの表示actionは、下位plannerの直接呼出しでもrecoveryしない。
+  if (request.requestedAction === "order_lend") {
+    return blocked(
+      "strict_transition_required",
+      `現在の状態「${request.current.status}」では「order_lend」を実行できません。`,
+    );
   }
 
   if (request.policyMode !== "advisory") {

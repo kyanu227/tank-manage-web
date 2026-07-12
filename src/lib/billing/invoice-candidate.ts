@@ -12,7 +12,10 @@ import {
   normalizeCustomerIdentityText,
 } from "@/lib/customer-identity-read";
 import type { LogDoc } from "@/lib/firebase/repositories/types";
-import { collectPendingTransitionReviewImpact } from "@/lib/tank-transition-projections";
+import {
+  assertOfficialAggregationSchemaReady,
+  collectPendingTransitionReviewImpact,
+} from "@/lib/tank-transition-projections";
 
 export type BillingCustomerMaster = {
   customerId: string;
@@ -75,6 +78,7 @@ export function buildInvoiceCandidates({
   period,
   settings,
 }: BuildInvoiceCandidatesInput): InvoiceCandidate[] {
+  assertOfficialAggregationSchemaReady(logs);
   const customerById = new Map(customers.map((customer) => [customer.customerId, customer]));
   const customersByName = buildCustomerNameIndex(customers);
   const groups = new Map<string, InvoiceCandidateGroup>();

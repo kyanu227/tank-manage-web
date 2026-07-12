@@ -122,7 +122,8 @@ settings/tankAggregationRevision
 
 請求・売上・スタッフ実績画面は`tankDataRevision`を購読してraw logsから再取得する。
 pending作成と`pending → excluded`では`officialAggregationRevision`を増やさない。
-`pending → approved`、direct operation、approved logのvoid/correctionでは正式集計revisionも増やす。
+`pending → approved`、direct operation、direct logのcorrection、正式集計対象logのvoidでは
+正式集計revisionも増やす。
 保存済み`monthly_stats`のstale判定には`officialAggregationRevision`だけを使用する。
 
 recovery logの直接編集は行わず、最新active logだけを取消して正しい操作を再実行する。
@@ -139,6 +140,7 @@ Firestore Emulatorで次を実測済み:
 
 ```text
 1 / 10 / 50 / 100 advisory recovery transaction: PASS
+100 three-step re-lend recovery transaction: PASS
 101 tank operation: DENIED
 order / return / uncharged_report recovery: DENIED
 order_lend / transactionId付きrecovery: DENIED
@@ -147,6 +149,8 @@ existing strict return transaction completion: PASS
 100 log review transaction: PASS
 policy write admin-only: PASS
 active revision transitionPlan mutation: DENIED
+operation/originalAt改ざん・official actor付替え: DENIED
+一般staffの72時間超過correction / void: DENIED
 ```
 
 再検証:
@@ -157,13 +161,25 @@ npm run test:transition-policy
 ```
 
 既存baseline Rulesには過去のdeploy記録があるが、今回の状態遷移Rules差分は未deployである。
-この実装作業ではdeployせず、別のRulesレビュー・本番化工程を必須とする。rollout順序:
+この実装作業ではdeployせず、別のRulesレビュー・本番化工程を必須とする。
+
+既存active tank logにはtransitionPlanがなく、既存lent tankにはcustomerId/customerNameがない場合がある。
+そのため、Data Resetより先にこのconsumer/UIをHostingへ反映してはいけない。PR mergeはdeploy許可を意味せず、
+検証可能なbackup方式が導入されてData Resetとschema verificationが完了するまでHosting反映をblockingする。
+resetとdeployの間に旧形式logが再作成されないよう、切替は操作停止を伴うmaintenance windowで実施する。
+
+rollout順序:
 
 ```text
-コード反映（runtime strict固定）
-→ strict smoke
-→ Rulesレビュー・本番化
-→ Rules smoke
+PR merge（Hosting未反映）
+→ Rules最終レビュー
+→ backup検証方式のレビュー・backup取得
+→ maintenance window開始（スタッフ操作停止）
+→ Data Reset dry-run・本実行・schema verification
+→ Rules deploy・Rules smoke
+→ runtime strict固定のHosting deploy・strict smoke
+→ maintenance window終了
+→ Firestoreの保存済みpolicyがstrictであることを再確認（advisoryならgate build前にstrictへ戻す）
 → rollout gateをtrueにしたbuild
 → 管理画面でadvisory有効化
 ```

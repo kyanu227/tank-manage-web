@@ -147,7 +147,9 @@ export default function ManualOperationPanel({
               {opQueue.map((item) => (
                 <div key={item.uid} className={!isReturn ? "queue-anim" : undefined} style={{
                   background: "#fff", padding: "12px 16px", borderRadius: 12,
-                  borderLeft: `5px solid ${item.valid ? config.color : "#ef4444"}`,
+                  borderLeft: `5px solid ${item.valid
+                    ? item.recoveryCandidate ? "#f59e0b" : config.color
+                    : "#ef4444"}`,
                   boxShadow: "0 2px 6px rgba(0,0,0,0.04)",
                   display: "flex", alignItems: "center", justifyContent: "space-between",
                   ...(!isReturn ? { animation: "slideInLeft 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)" } : {}),
@@ -172,8 +174,10 @@ export default function ManualOperationPanel({
                         </span>
                       )}
                     </div>
-                    <div style={{ fontSize: 11, color: item.valid ? "#64748b" : "#ef4444", fontWeight: 600, marginTop: 4 }}>
-                      {item.valid ? `現在: ${formatStatusLabel(item.status)} ` : item.error}
+                    <div style={{ fontSize: 11, color: item.recoveryCandidate ? "#b45309" : item.valid ? "#64748b" : "#ef4444", fontWeight: 600, marginTop: 4 }}>
+                      {item.recoveryCandidate
+                        ? `現在: ${formatStatusLabel(item.status)} ・自動補完確認が必要`
+                        : item.valid ? `現在: ${formatStatusLabel(item.status)} ` : item.error}
                     </div>
                   </div>
                   <button onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer", marginRight: isReturn ? undefined : -8 }}>

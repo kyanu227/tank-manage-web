@@ -6,6 +6,7 @@ import {
   normalizeTankOperationPolicy,
   planTankTransition,
   resolvePlannerPolicyMode,
+  resolveRuntimeTransitionEnforcement,
   type TransitionPlan,
 } from "@/lib/tank-transition-policy";
 
@@ -130,21 +131,41 @@ assert.deepEqual(normalizeTankOperationPolicy(null), {
   transitionEnforcement: "strict",
   policyRevision: 0,
 });
+assert.deepEqual(normalizeTankOperationPolicy({
+  transitionEnforcement: "advisory",
+  policyRevision: 2,
+}), {
+  transitionEnforcement: "advisory",
+  policyRevision: 2,
+});
 assert.equal(resolvePlannerPolicyMode("advisory", {
   source: "manual",
   workflow: "tank_operation",
-}), "advisory");
+}, undefined, true), "advisory");
 assert.equal(resolvePlannerPolicyMode("advisory", {
   source: "manual",
   workflow: "tank_operation",
-}, "order_lend"), "strict", "受注貸出actionはstaff-directを偽装してもstrictへ固定する");
+}, "order_lend", true), "strict", "受注貸出actionはstaff-directを偽装してもstrictへ固定する");
+assert.equal(
+  resolveRuntimeTransitionEnforcement("advisory", false),
+  "strict",
+  "保存値advisoryでもgate閉鎖時はruntime strictへ固定する",
+);
+assert.equal(
+  resolvePlannerPolicyMode("advisory", {
+    source: "manual",
+    workflow: "tank_operation",
+  }, undefined, false),
+  "strict",
+  "gate閉鎖時はstaff-directもstrictへ固定する",
+);
 for (const context of [
   { source: "order_fulfillment" as const, workflow: "order" as const, transactionId: "order-1" },
   { source: "return_tag_processing" as const, workflow: "return" as const, transactionId: "return-1" },
   { source: "portal" as const, workflow: "uncharged_report" as const, transactionId: "report-1" },
 ]) {
   assert.equal(
-    resolvePlannerPolicyMode("advisory", context),
+    resolvePlannerPolicyMode("advisory", context, undefined, true),
     "strict",
     `${context.workflow} workflowはstrictへ固定する`,
   );

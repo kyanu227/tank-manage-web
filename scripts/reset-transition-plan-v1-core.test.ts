@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   assertBackupCanBeVerified,
   assertMigrationMarkerMayStart,
+  assertResetPreviewHasNoUnknownRecords,
   classifyLogKind,
   classifyTransactionType,
   parseResetArguments,
@@ -39,6 +40,24 @@ describe("transition reset command guard", () => {
 
   it("allows a failed marker to be retried after the failure is inspected", () => {
     expect(() => assertMigrationMarkerMayStart({ status: "failed" })).not.toThrow();
+  });
+
+  it.each([{}, { status: "future" }, { status: 123 }])(
+    "fails closed for an unknown migration marker: %j",
+    (marker) => {
+      expect(() => assertMigrationMarkerMayStart(marker)).toThrow("statusを検証できない");
+    },
+  );
+
+  it("fails closed instead of guessing unknown logs or transactions", () => {
+    expect(() => assertResetPreviewHasNoUnknownRecords({
+      unknownLogIds: ["legacy-log"],
+      unknownTransactions: [],
+    })).toThrow("logKindを判定できない");
+    expect(() => assertResetPreviewHasNoUnknownRecords({
+      unknownLogIds: [],
+      unknownTransactions: [{ id: "future-tx", type: "future" }],
+    })).toThrow("未知のtransaction type");
   });
 });
 

@@ -4,8 +4,10 @@ import {
   createRecoveryConfirmationFingerprint,
   deriveAffectedCustomers,
   isStaffDirectAdvisoryContext,
+  normalizeTankOperationPolicy,
   planTankTransition,
   resolvePlannerPolicyMode,
+  resolveRuntimeTransitionEnforcement,
   type TransitionPlan,
 } from "@/lib/tank-transition-policy";
 
@@ -124,6 +126,19 @@ describe("tank transition planner", () => {
     expect(result.transitionAction).toBe("lend");
     expect(result.plan.steps.at(-1)?.action).toBe("lend");
   });
+
+  it("never creates an order_lend recovery even when advisory is passed directly", () => {
+    const result = planTankTransition({
+      policyMode: "advisory",
+      current: { status: "empty", location: "倉庫" },
+      requestedAction: "order_lend",
+      targetCustomer: customerB,
+      targetLocation: "B社",
+    });
+
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("strict_transition_required");
+  });
 });
 
 describe("advisory operation scope", () => {
@@ -132,7 +147,7 @@ describe("advisory operation scope", () => {
     { source: "bulk_return" as const, workflow: "tank_operation" as const },
   ])("allows explicit staff-direct context: $source", (context) => {
     expect(isStaffDirectAdvisoryContext(context)).toBe(true);
-    expect(resolvePlannerPolicyMode("advisory", context)).toBe("advisory");
+    expect(resolvePlannerPolicyMode("advisory", context, undefined, true)).toBe("advisory");
   });
 
   it.each([
@@ -143,21 +158,35 @@ describe("advisory operation scope", () => {
     {},
   ])("keeps customer/transaction/unspecified context strict: %#", (context) => {
     expect(isStaffDirectAdvisoryContext(context)).toBe(false);
-    expect(resolvePlannerPolicyMode("advisory", context)).toBe("strict");
+    expect(resolvePlannerPolicyMode("advisory", context, undefined, true)).toBe("strict");
   });
 
   it("keeps every context strict when the configured policy is strict", () => {
     expect(resolvePlannerPolicyMode("strict", {
       source: "manual",
       workflow: "tank_operation",
-    })).toBe("strict");
+    }, undefined, true)).toBe("strict");
   });
 
   it("keeps order_lend strict even if a caller labels it as staff-direct", () => {
     expect(resolvePlannerPolicyMode("advisory", {
       source: "manual",
       workflow: "tank_operation",
-    }, "order_lend")).toBe("strict");
+    }, "order_lend", true)).toBe("strict");
+  });
+
+  it("keeps configured advisory separate when the rollout gate forces runtime strict", () => {
+    const configured = normalizeTankOperationPolicy({
+      transitionEnforcement: "advisory",
+      policyRevision: 2,
+    });
+    expect(configured.transitionEnforcement).toBe("advisory");
+    expect(resolveRuntimeTransitionEnforcement("advisory", false)).toBe("strict");
+    expect(resolveRuntimeTransitionEnforcement("advisory", true)).toBe("advisory");
+    expect(resolvePlannerPolicyMode("advisory", {
+      source: "manual",
+      workflow: "tank_operation",
+    }, undefined, false)).toBe("strict");
   });
 });
 

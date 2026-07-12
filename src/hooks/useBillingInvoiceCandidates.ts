@@ -13,7 +13,7 @@ import {
 import { getBillingCustomerMasters } from "@/lib/firebase/billing-customers-service";
 import { getBillingInvoiceSettings } from "@/lib/firebase/billing-settings-service";
 import { logsRepository } from "@/lib/firebase/repositories";
-import { useTankDataRevision } from "@/hooks/useTankDataRevision";
+import { useTankDataRevisionState } from "@/hooks/useTankDataRevision";
 
 export interface BillingInvoiceCandidatesState {
   bills: InvoiceCandidate[];
@@ -24,29 +24,50 @@ export interface BillingInvoiceCandidatesState {
   settingsDraft: BillingInvoiceSettings;
   setSettingsDraft: Dispatch<SetStateAction<BillingInvoiceSettings>>;
   loading: boolean;
+  revisionReady: boolean;
+  revisionError: Error | null;
+  candidatesFresh: boolean;
+  candidateLoadError: Error | null;
+  printReady: boolean;
 }
 
 export function useBillingInvoiceCandidates(period: string): BillingInvoiceCandidatesState {
-  const tankDataRevision = useTankDataRevision();
+  const revisionState = useTankDataRevisionState();
   const [bills, setBills] = useState<InvoiceCandidate[]>([]);
   const [selectedBillKey, setSelectedBillKey] = useState<string | null>(null);
   const [settings, setSettings] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
   const [settingsDraft, setSettingsDraft] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
   const [loading, setLoading] = useState(true);
+  const [candidateLoadError, setCandidateLoadError] = useState<Error | null>(null);
+  const [loadedSnapshot, setLoadedSnapshot] = useState<{
+    period: string;
+    revision: number;
+  } | null>(null);
 
   useEffect(() => {
+    if (!revisionState.ready) {
+      setBills([]);
+      setSelectedBillKey(null);
+      setLoadedSnapshot(null);
+      setLoading(false);
+      return;
+    }
+
     let active = true;
+    const requestedRevision = revisionState.revision;
 
     (async () => {
+      setBills([]);
+      setSelectedBillKey(null);
+      setLoadedSnapshot(null);
       setLoading(true);
+      setCandidateLoadError(null);
       try {
         const [logs, customers, invoiceSettings] = await Promise.all([
           logsRepository.getActiveLogs(),
           getBillingCustomerMasters(),
-          getBillingInvoiceSettings().catch((error) => {
-            console.error("Fetch billing invoice settings error:", error);
-            return DEFAULT_BILLING_INVOICE_SETTINGS;
-          }),
+          // document不存在はserviceがdefault化する。read errorは印刷可能にせずthrowする。
+          getBillingInvoiceSettings(),
         ]);
         if (!active) return;
 
@@ -61,12 +82,18 @@ export function useBillingInvoiceCandidates(period: string): BillingInvoiceCandi
           settings: normalizedSettings,
         });
         setBills(items);
+        setLoadedSnapshot({ period, revision: requestedRevision });
         setSelectedBillKey((current) => {
           if (current && items.some((item) => item.key === current)) return current;
           return items[0]?.key ?? null;
         });
       } catch (error) {
         console.error(error);
+        if (active) {
+          setCandidateLoadError(
+            error instanceof Error ? error : new Error(String(error)),
+          );
+        }
       } finally {
         if (active) setLoading(false);
       }
@@ -75,7 +102,15 @@ export function useBillingInvoiceCandidates(period: string): BillingInvoiceCandi
     return () => {
       active = false;
     };
-  }, [period, tankDataRevision]);
+  }, [period, revisionState.ready, revisionState.revision]);
+
+  const candidatesFresh = revisionState.ready
+    && loadedSnapshot?.period === period
+    && loadedSnapshot.revision === revisionState.revision;
+  const printReady = candidatesFresh
+    && !loading
+    && candidateLoadError === null
+    && revisionState.error === null;
 
   return {
     bills,
@@ -86,5 +121,10 @@ export function useBillingInvoiceCandidates(period: string): BillingInvoiceCandi
     settingsDraft,
     setSettingsDraft,
     loading,
+    revisionReady: revisionState.ready,
+    revisionError: revisionState.error,
+    candidatesFresh,
+    candidateLoadError,
+    printReady,
   };
 }

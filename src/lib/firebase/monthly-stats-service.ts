@@ -17,8 +17,12 @@ export interface MonthlyStat {
   returns: number;
   unused: number;
   defaults: number;
-  /** archive生成時に反映済みだった正式集計revision。 */
-  officialAggregationRevision: number;
+  /** archive生成時に反映済みだった正式集計revision。旧形式はnull。 */
+  officialAggregationRevision: number | null;
+  /** revision fieldを持つarchiveだけを既知として扱う。 */
+  revisionStatus: "known" | "unknown";
+  /** 旧形式archiveを集計表示から除外する理由を伝える。 */
+  revisionWarning?: string;
   /** 正式集計対象の変更後に再生成が必要な保存済みcache。 */
   isStale: boolean;
 }
@@ -34,18 +38,52 @@ export async function getMonthlyStats(): Promise<MonthlyStat[]> {
   const list: MonthlyStat[] = [];
   snap.forEach((docSnap) => {
     const data = docSnap.data();
-    const officialAggregationRevision = normalizeAggregationRevision(
+    const revisionState = classifyMonthlyStatRevision(
       data.officialAggregationRevision,
+      currentRevision,
     );
     list.push({
       id: docSnap.id,
       ...data,
-      officialAggregationRevision,
-      isStale: isOfficialAggregationSnapshotStale(
-        officialAggregationRevision,
-        currentRevision,
-      ),
+      ...revisionState,
     } as MonthlyStat);
   });
   return list;
+}
+
+export function classifyMonthlyStatRevision(
+  savedRevision: unknown,
+  currentRevision: unknown,
+): Pick<
+  MonthlyStat,
+  "officialAggregationRevision" | "revisionStatus" | "revisionWarning" | "isStale"
+> {
+  if (!isAggregationRevision(savedRevision)) {
+    const revisionWarning = savedRevision == null
+      ? "旧形式の月次アーカイブのため、正式集計revisionとの一致を確認できません。"
+      : "月次アーカイブの正式集計revisionが不正なため、現在の正式集計との一致を確認できません。";
+    return {
+      officialAggregationRevision: null,
+      revisionStatus: "unknown",
+      revisionWarning,
+      isStale: false,
+    };
+  }
+
+  const officialAggregationRevision = normalizeAggregationRevision(savedRevision);
+  return {
+    officialAggregationRevision,
+    revisionStatus: "known",
+    revisionWarning: undefined,
+    isStale: isOfficialAggregationSnapshotStale(
+      officialAggregationRevision,
+      currentRevision,
+    ),
+  };
+}
+
+function isAggregationRevision(value: unknown): value is number {
+  return typeof value === "number"
+    && Number.isSafeInteger(value)
+    && value >= 0;
 }

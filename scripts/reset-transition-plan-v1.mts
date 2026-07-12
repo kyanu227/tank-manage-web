@@ -21,6 +21,7 @@ import {
   RESET_TRANSACTION_TYPES,
   assertBackupCanBeVerified,
   assertMigrationMarkerMayStart,
+  assertResetPreviewHasNoUnknownRecords,
   classifyLogKind,
   classifyTransactionType,
   parseResetArguments,
@@ -74,11 +75,7 @@ async function main(input: ResetArguments): Promise<void> {
     return;
   }
 
-  if (preview.unknownTransactions.length > 0) {
-    throw new Error(
-      `未知のtransaction typeが${preview.unknownTransactions.length}件あるため実行できません`,
-    );
-  }
+  assertResetPreviewHasNoUnknownRecords(preview);
 
   // 現時点では必ずここで停止する。検証可能なbackup正本なしにlockやデータを書かない。
   assertBackupCanBeVerified(input);

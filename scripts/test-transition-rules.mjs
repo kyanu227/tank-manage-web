@@ -40,7 +40,15 @@ const CUSTOMER = {
   customerId: "customer-1",
   customerName: "Rules顧客",
 };
+const OTHER_CUSTOMER = {
+  customerId: "customer-2",
+  customerName: "別Rules顧客",
+};
 const WAREHOUSE = "倉庫";
+const OLD_TANK_MAINTENANCE_DATE = new Date("2025-01-01T00:00:00.000Z");
+const OLD_TANK_NEXT_MAINTENANCE_DATE = new Date("2030-01-01T00:00:00.000Z");
+const NEW_TANK_MAINTENANCE_DATE = new Date("2026-02-01T00:00:00.000Z");
+const NEW_TANK_NEXT_MAINTENANCE_DATE = new Date("2031-02-01T00:00:00.000Z");
 
 const testEnvironment = await initializeTestEnvironment({
   projectId: PROJECT_ID,
@@ -55,6 +63,38 @@ try {
     await executeOperationBatch({ size: 1, kind: "direct" });
   });
 
+  await succeeds("inspection may update maintenance projection", async () => {
+    await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
+    await seedMaintenanceProjection("T001", {
+      maintenanceDate: OLD_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: OLD_TANK_NEXT_MAINTENANCE_DATE,
+    });
+    const prevTankSnapshot = tankSnapshot({
+      status: "empty",
+      maintenanceDate: OLD_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: OLD_TANK_NEXT_MAINTENANCE_DATE,
+    });
+    const nextTankSnapshot = tankSnapshot({
+      status: "empty",
+      staff: ADMIN.name,
+      maintenanceDate: NEW_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: NEW_TANK_NEXT_MAINTENANCE_DATE,
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: {
+        action: "inspection",
+        transitionAction: "inspection",
+        prevStatus: "empty",
+        newStatus: "empty",
+        transitionPlan: directPlan("inspection", "empty", "empty"),
+        prevTankSnapshot,
+        nextTankSnapshot,
+      },
+    });
+  });
+
   await succeeds("missing policy document defaults to strict revision 0", async () => {
     await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
@@ -67,12 +107,110 @@ try {
     });
   });
 
+  await succeeds("invalid policy mode normalizes to strict and preserves valid revision", async () => {
+    await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
+    await seedRawPolicy({
+      transitionEnforcement: "invalid-mode",
+      policyRevision: 7,
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      policyRevision: 7,
+    });
+  });
+
+  await succeeds("invalid policy revision normalizes to strict revision 0", async () => {
+    await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
+    await seedRawPolicy({
+      transitionEnforcement: "advisory",
+      policyRevision: "invalid-revision",
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      policyRevision: 0,
+    });
+  });
+
   for (const size of [1, 10, 50, 100]) {
-    await succeeds(`advisory recovery operation: ${size}`, async () => {
+    await succeeds(`worker advisory recovery operation: ${size}`, async () => {
       await resetAndSeed({ size, policyMode: "advisory", policyRevision: 2 });
-      await executeOperationBatch({ size, kind: "recovery" });
+      await executeOperationBatch({ size, kind: "recovery", actor: WORKER });
     });
   }
+
+  await succeeds("worker advisory three-step re-lend recovery: 100", async () => {
+    await resetAndSeed({
+      size: 100,
+      policyMode: "advisory",
+      policyRevision: 2,
+      tankState: "lent",
+      tankCustomer: CUSTOMER,
+    });
+    const prevTankSnapshot = tankSnapshot({ status: "lent", customer: CUSTOMER });
+    const nextTankSnapshot = tankSnapshot({
+      status: "lent",
+      customer: OTHER_CUSTOMER,
+      staff: WORKER.name,
+    });
+    await executeOperationBatch({
+      size: 100,
+      kind: "recovery",
+      actor: WORKER,
+      logOverrides: ({ id }) => ({
+        ...OTHER_CUSTOMER,
+        location: OTHER_CUSTOMER.customerName,
+        transitionPlan: recoveryRelendPlan(),
+        recoveryEvidence: {
+          physicalTankConfirmed: true,
+          possessionConfirmed: true,
+          previousCustomerConfirmed: true,
+          fillStateConfirmed: true,
+        },
+        affectedCustomerIds: [CUSTOMER.customerId, OTHER_CUSTOMER.customerId].sort(),
+        prevStatus: "lent",
+        newStatus: "lent",
+        prevTankSnapshot,
+        nextTankSnapshot,
+        previousLogIdOnSameTank: `previous-${id}`,
+      }),
+    });
+  });
+
+  await succeeds("worker advisory in-house close recovery", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "advisory",
+      policyRevision: 2,
+      tankState: "in_house",
+    });
+    const prevTankSnapshot = tankSnapshot({ status: "in_house" });
+    const nextTankSnapshot = tankSnapshot({
+      status: "lent",
+      customer: CUSTOMER,
+      staff: WORKER.name,
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      actor: WORKER,
+      logOverrides: {
+        transitionPlan: recoveryInHouseLendPlan(),
+        recoveryEvidence: {
+          physicalTankConfirmed: true,
+          possessionConfirmed: true,
+          fillStateConfirmed: true,
+        },
+        affectedCustomerIds: [CUSTOMER.customerId],
+        prevStatus: "in_house",
+        newStatus: "lent",
+        prevTankSnapshot,
+        nextTankSnapshot,
+        previousLogIdOnSameTank: "previous-T001",
+      },
+    });
+  });
 
   await succeeds("staff bulk-return recovery uses the same advisory boundary", async () => {
     await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
@@ -96,6 +234,12 @@ try {
     });
   }
 
+  await fails("pending review rejects 101 logs", async () => {
+    await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
+    await seedPendingRecoveries(101);
+    await executeReviewBatch({ size: 101, decision: "approved", actor: ADMIN });
+  });
+
   await succeeds("pending review excluded keeps official revision", async () => {
     await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
     await seedPendingRecoveries(1);
@@ -112,6 +256,13 @@ try {
     await updateDoc(doc(contextFor(WORKER), "tanks", "T001"), {
       logNote: "[TAG:unused]",
     });
+  });
+
+  await succeeds("known non-tank log kind remains writable without changing kind", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    const logRef = doc(contextFor(WORKER), "logs", "known-order-log");
+    await setDoc(logRef, { logKind: "order", note: "before" });
+    await updateDoc(logRef, { note: "after" });
   });
 
   await succeeds("existing strict return transaction completion remains unchanged", async () => {
@@ -148,6 +299,33 @@ try {
     await executeCorrection();
   });
 
+  await succeeds("recent worker correction remains allowed", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog({ revisionCreatedAt: new Date() });
+    await executeCorrection({}, WORKER);
+  });
+
+  await succeeds("valid cross-tank correction preserves both snapshots", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedCrossTankCorrectionFixture();
+    await executeCrossTankCorrection();
+  });
+
+  await succeeds("valid rental-close plan matches the previous holder", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "strict",
+      policyRevision: 1,
+      tankState: "lent",
+      tankCustomer: CUSTOMER,
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: directReturnOverrides(CUSTOMER),
+    });
+  });
+
   await runDenialCases();
 } finally {
   await testEnvironment.cleanup();
@@ -181,6 +359,58 @@ async function runDenialCases() {
     });
   });
 
+  await fails("initial operation timestamp cannot be backdated", async () => {
+    await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: { timestamp: new Date(1_000) },
+    });
+  });
+
+  await fails("initial operation originalAt cannot be backdated", async () => {
+    await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: { originalAt: new Date(1_000) },
+    });
+  });
+
+  await fails("direct visible action must match its normalized transition", async () => {
+    await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: { action: "return" },
+    });
+  });
+
+  await fails("non-inspection operation cannot change maintenance projection", async () => {
+    await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
+    await seedMaintenanceProjection("T001", {
+      maintenanceDate: OLD_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: OLD_TANK_NEXT_MAINTENANCE_DATE,
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: {
+        prevTankSnapshot: tankSnapshot({
+          status: "empty",
+          maintenanceDate: OLD_TANK_MAINTENANCE_DATE,
+          nextMaintenanceDate: OLD_TANK_NEXT_MAINTENANCE_DATE,
+        }),
+        nextTankSnapshot: tankSnapshot({
+          status: "filled",
+          staff: ADMIN.name,
+          maintenanceDate: NEW_TANK_MAINTENANCE_DATE,
+          nextMaintenanceDate: NEW_TANK_NEXT_MAINTENANCE_DATE,
+        }),
+      },
+    });
+  });
+
   await fails("tank-only projection update is rejected", async () => {
     await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
     await executeOperationBatch({ size: 1, kind: "direct", omitLogWrites: true });
@@ -201,6 +431,31 @@ async function runDenialCases() {
   await fails("tank.latestLogId mismatch is rejected", async () => {
     await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
     await executeOperationBatch({ size: 1, kind: "direct", mismatchedLatestLogId: true });
+  });
+
+  await fails("non-tank log cannot be promoted to a tank log", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    const logRef = doc(contextFor(WORKER), "logs", "legacy-non-tank");
+    await setDoc(logRef, {
+      logKind: "order",
+      note: "既存の非タンクログ",
+    });
+    await updateDoc(logRef, { logKind: "tank" });
+  });
+
+  await fails("unknown non-tank log kind cannot be created", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await setDoc(doc(contextFor(WORKER), "logs", "unknown-log"), {
+      logKind: "bogus",
+      logStatus: "active",
+    });
+  });
+
+  await fails("known non-tank log kind cannot be changed", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    const logRef = doc(contextFor(WORKER), "logs", "kind-change-log");
+    await setDoc(logRef, { logKind: "order", note: "before" });
+    await updateDoc(logRef, { logKind: "procurement" });
   });
 
   await fails("different staff operation actor is rejected", async () => {
@@ -224,6 +479,18 @@ async function runDenialCases() {
       decision: "approved",
       actor: ADMIN,
       savedActor: OTHER_ADMIN,
+    });
+  });
+
+  await fails("review event and log reason must match", async () => {
+    await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
+    await seedPendingRecoveries(1);
+    await executeReviewBatch({
+      size: 1,
+      decision: "approved",
+      actor: ADMIN,
+      eventReason: "Rulesイベント理由",
+      logReason: "Rulesログ別理由",
     });
   });
 
@@ -257,6 +524,55 @@ async function runDenialCases() {
     await updateRevisionOnly();
   });
 
+  await fails("aggregation revision cannot be deleted by admin", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await deleteDoc(doc(contextFor(ADMIN), "settings", "tankAggregationRevision"));
+  });
+
+  await fails("operation policy cannot be deleted by admin", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await deleteDoc(doc(contextFor(ADMIN), "settings", "tankOperationPolicy"));
+  });
+
+  await fails("tank operation log cannot be deleted by admin", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
+    await deleteDoc(doc(contextFor(ADMIN), "logs", "active-log"));
+  });
+
+  await fails("correction cannot change the original business timestamp", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
+    await executeCorrection({ originalAt: new Date(2_000) });
+  });
+
+  await fails("correction cannot change the inherited timestamp", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
+    await executeCorrection({ timestamp: new Date(2_000) });
+  });
+
+  await fails("worker cannot correct a log after 72 hours", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
+    await executeCorrection({}, WORKER);
+  });
+
+  await fails("worker cannot void a log after 72 hours", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
+    await executeVoid(WORKER);
+  });
+
+  await fails("correction cannot reassign the official actor", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
+    await executeCorrection({
+      staffId: OTHER_ADMIN.staffId,
+      staffEmail: OTHER_ADMIN.email,
+    });
+  });
+
   for (const workflow of ["order", "return", "uncharged_report"]) {
     await fails(`customer ${workflow} workflow cannot create recovery`, async () => {
       await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
@@ -285,6 +601,15 @@ async function runDenialCases() {
     });
   });
 
+  await fails("recovery visible action must match transitionAction", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { action: "fill" },
+    });
+  });
+
   await fails("transactionId cannot accompany staff-direct recovery", async () => {
     await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
     await executeOperationBatch({
@@ -309,12 +634,145 @@ async function runDenialCases() {
     });
   });
 
+  await succeeds("order_lend direct operation requires the order transaction context", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "advisory",
+      policyRevision: 2,
+      tankState: "filled",
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      policyMode: "advisory",
+      policyRevision: 2,
+      logOverrides: directOrderLendOverrides(true),
+    });
+  });
+
+  await fails("manual context cannot spoof an order_lend direct operation", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "strict",
+      policyRevision: 1,
+      tankState: "filled",
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: directOrderLendOverrides(false),
+    });
+  });
+
   await fails("recovery evidence shortage is rejected", async () => {
     await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
     await executeOperationBatch({
       size: 1,
       kind: "recovery",
       logOverrides: { recoveryEvidence: { physicalTankConfirmed: true } },
+    });
+  });
+
+  await fails("recovery step with malformed businessEffect is rejected", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    const plan = recoveryPlan();
+    plan.steps[1] = { ...plan.steps[1], businessEffect: "state_only" };
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { transitionPlan: plan },
+    });
+  });
+
+  await fails("recovery system step with malformed transition is rejected", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    const plan = recoveryPlan();
+    plan.steps[0] = { ...plan.steps[0], toStatus: "damaged" };
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { transitionPlan: plan },
+    });
+  });
+
+  await fails("recovery system step with malformed businessEffect is rejected", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    const plan = recoveryPlan();
+    plan.steps[0] = { ...plan.steps[0], businessEffect: "rental_open", ...CUSTOMER };
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { transitionPlan: plan },
+    });
+  });
+
+  await fails("recovery system step with an extra field is rejected", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    const plan = recoveryPlan();
+    plan.steps[0] = { ...plan.steps[0], unexpected: true };
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { transitionPlan: plan },
+    });
+  });
+
+  await fails("recovery step with an empty location is rejected", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    const plan = recoveryPlan();
+    plan.steps[1] = { ...plan.steps[1], location: "" };
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { transitionPlan: plan },
+    });
+  });
+
+  await fails("recovery rental-open step without a customer is rejected", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    const plan = recoveryPlan();
+    plan.steps[1] = { ...plan.steps[1], customerId: "" };
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { transitionPlan: plan },
+    });
+  });
+
+  await fails("plan final location must match the next tank snapshot", async () => {
+    await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
+    const plan = directPlan();
+    plan.steps[0] = { ...plan.steps[0], location: "別倉庫" };
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: { transitionPlan: plan },
+    });
+  });
+
+  await fails("rental-open customer must match the next tank snapshot", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    const plan = recoveryPlan();
+    plan.steps[1] = { ...plan.steps[1], ...OTHER_CUSTOMER };
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { transitionPlan: plan },
+    });
+  });
+
+  await fails("rental-close customer must match the previous tank snapshot", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "strict",
+      policyRevision: 1,
+      tankState: "lent",
+      tankCustomer: CUSTOMER,
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      logOverrides: directReturnOverrides(OTHER_CUSTOMER),
     });
   });
 
@@ -382,6 +840,23 @@ async function resetAndSeed({
   });
 }
 
+async function seedRawPolicy(policy) {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "settings", "tankOperationPolicy"), {
+      ...policy,
+      updatedAt: new Date(0),
+      updatedByStaffId: ADMIN.staffId,
+      updatedByStaffName: ADMIN.name,
+    });
+  });
+}
+
+async function seedMaintenanceProjection(tankIdValue, fields) {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    await setDoc(doc(context.firestore(), "tanks", tankIdValue), fields, { merge: true });
+  });
+}
+
 function seedStaff(firestore, staff) {
   return Promise.all([
     setDoc(doc(firestore, "staffByEmail", staff.email), {
@@ -405,7 +880,15 @@ function contextFor(actor) {
   return testEnvironment.authenticatedContext(actor.uid, { email: actor.email }).firestore();
 }
 
-function tankDocument({ status, customer = null, latestLogId = null, staff = null, logNote = "" }) {
+function tankDocument({
+  status,
+  customer = null,
+  latestLogId = null,
+  staff = null,
+  logNote = "",
+  maintenanceDate,
+  nextMaintenanceDate,
+}) {
   const location = customer?.customerName ?? WAREHOUSE;
   return {
     status,
@@ -415,10 +898,20 @@ function tankDocument({ status, customer = null, latestLogId = null, staff = nul
     ...(staff ? { staff } : {}),
     logNote,
     latestLogId,
+    ...(maintenanceDate !== undefined ? { maintenanceDate } : {}),
+    ...(nextMaintenanceDate !== undefined ? { nextMaintenanceDate } : {}),
   };
 }
 
-function tankSnapshot({ status, customer = null, staff = null, logNote = "", location }) {
+function tankSnapshot({
+  status,
+  customer = null,
+  staff = null,
+  logNote = "",
+  location,
+  maintenanceDate,
+  nextMaintenanceDate,
+}) {
   return {
     status,
     location: location ?? customer?.customerName ?? WAREHOUSE,
@@ -426,6 +919,8 @@ function tankSnapshot({ status, customer = null, staff = null, logNote = "", loc
     customerName: customer?.customerName ?? null,
     ...(staff ? { staff } : {}),
     logNote,
+    ...(maintenanceDate !== undefined ? { maintenanceDate } : {}),
+    ...(nextMaintenanceDate !== undefined ? { nextMaintenanceDate } : {}),
   };
 }
 
@@ -498,12 +993,162 @@ function recoveryPlan() {
   };
 }
 
-function buildOperationLog({ id, kind, policyMode, policyRevision, overrides = {} }) {
+function recoveryRelendPlan() {
+  return {
+    version: 1,
+    kind: "recovery",
+    steps: [
+      {
+        action: "return",
+        fromStatus: "lent",
+        toStatus: "empty",
+        actorType: "system",
+        businessEffect: "rental_close",
+        ...CUSTOMER,
+        location: WAREHOUSE,
+      },
+      {
+        action: "fill",
+        fromStatus: "empty",
+        toStatus: "filled",
+        actorType: "system",
+        businessEffect: "state_only",
+        location: WAREHOUSE,
+      },
+      {
+        action: "lend",
+        fromStatus: "filled",
+        toStatus: "lent",
+        actorType: "operator",
+        businessEffect: "rental_open",
+        ...OTHER_CUSTOMER,
+        location: OTHER_CUSTOMER.customerName,
+      },
+    ],
+    requiredEvidence: [
+      "physicalTankConfirmed",
+      "possessionConfirmed",
+      "previousCustomerConfirmed",
+      "fillStateConfirmed",
+    ],
+  };
+}
+
+function recoveryInHouseLendPlan() {
+  return {
+    version: 1,
+    kind: "recovery",
+    steps: [
+      {
+        action: "inhouse_return",
+        fromStatus: "in_house",
+        toStatus: "empty",
+        actorType: "system",
+        businessEffect: "state_only",
+        location: WAREHOUSE,
+      },
+      {
+        action: "fill",
+        fromStatus: "empty",
+        toStatus: "filled",
+        actorType: "system",
+        businessEffect: "state_only",
+        location: WAREHOUSE,
+      },
+      {
+        action: "lend",
+        fromStatus: "filled",
+        toStatus: "lent",
+        actorType: "operator",
+        businessEffect: "rental_open",
+        ...CUSTOMER,
+        location: CUSTOMER.customerName,
+      },
+    ],
+    requiredEvidence: [
+      "physicalTankConfirmed",
+      "possessionConfirmed",
+      "fillStateConfirmed",
+    ],
+  };
+}
+
+function directReturnOverrides(planCustomer) {
+  const prevTankSnapshot = tankSnapshot({ status: "lent", customer: CUSTOMER });
+  const nextTankSnapshot = tankSnapshot({ status: "empty", staff: ADMIN.name });
+  return {
+    action: "return",
+    transitionAction: "return",
+    prevStatus: "lent",
+    newStatus: "empty",
+    location: WAREHOUSE,
+    ...CUSTOMER,
+    transitionPlan: {
+      version: 1,
+      kind: "direct",
+      steps: [{
+        action: "return",
+        fromStatus: "lent",
+        toStatus: "empty",
+        actorType: "operator",
+        businessEffect: "rental_close",
+        ...planCustomer,
+        location: WAREHOUSE,
+      }],
+      requiredEvidence: [],
+    },
+    affectedCustomerIds: [CUSTOMER.customerId],
+    prevTankSnapshot,
+    nextTankSnapshot,
+    previousLogIdOnSameTank: "previous-T001",
+  };
+}
+
+function directOrderLendOverrides(withOrderContext) {
+  const prevTankSnapshot = tankSnapshot({ status: "filled" });
+  const nextTankSnapshot = tankSnapshot({
+    status: "lent",
+    customer: CUSTOMER,
+    staff: ADMIN.name,
+  });
+  return {
+    action: "order_lend",
+    transitionAction: "lend",
+    prevStatus: "filled",
+    newStatus: "lent",
+    location: CUSTOMER.customerName,
+    ...CUSTOMER,
+    transitionPlan: directPlan("lend", "filled", "lent"),
+    affectedCustomerIds: [CUSTOMER.customerId],
+    prevTankSnapshot,
+    nextTankSnapshot,
+    previousLogIdOnSameTank: "previous-T001",
+    ...(withOrderContext
+      ? {
+          source: "order_fulfillment",
+          workflow: "order",
+          transactionId: "order-transaction",
+        }
+      : {
+          source: "manual",
+          workflow: "tank_operation",
+        }),
+  };
+}
+
+function buildOperationLog({
+  id,
+  kind,
+  policyMode,
+  policyRevision,
+  actor = ADMIN,
+  overrides = {},
+}) {
   const direct = kind === "direct";
   const prevTankSnapshot = tankSnapshot({ status: "empty" });
   const nextTankSnapshot = direct
-    ? tankSnapshot({ status: "filled", staff: ADMIN.name })
-    : tankSnapshot({ status: "lent", customer: CUSTOMER, staff: ADMIN.name });
+    ? tankSnapshot({ status: "filled", staff: actor.name })
+    : tankSnapshot({ status: "lent", customer: CUSTOMER, staff: actor.name });
   return {
     tankId: id,
     action: direct ? "fill" : "lend",
@@ -511,9 +1156,9 @@ function buildOperationLog({ id, kind, policyMode, policyRevision, overrides = {
     prevStatus: "empty",
     newStatus: direct ? "filled" : "lent",
     location: nextTankSnapshot.location,
-    staffId: ADMIN.staffId,
-    staffName: ADMIN.name,
-    staffEmail: ADMIN.email,
+    staffId: actor.staffId,
+    staffName: actor.name,
+    staffEmail: actor.email,
     ...(direct ? {} : CUSTOMER),
     note: "",
     logNote: "",
@@ -552,12 +1197,13 @@ function executeOperationBatch({
   kind,
   policyMode = kind === "direct" ? "strict" : "advisory",
   policyRevision = kind === "direct" ? 1 : 2,
+  actor = ADMIN,
   logOverrides = {},
   omitLogWrites = false,
   omitTankWrites = false,
   mismatchedLatestLogId = false,
 }) {
-  const firestore = contextFor(ADMIN);
+  const firestore = contextFor(actor);
   const direct = kind === "direct";
   return runTransaction(firestore, async (transaction) => {
     const policyRef = doc(firestore, "settings", "tankOperationPolicy");
@@ -582,12 +1228,16 @@ function executeOperationBatch({
     tankRefs.forEach((tankRef, index) => {
       const id = tankId(index);
       const logRef = logRefs[index];
+      const resolvedLogOverrides = typeof logOverrides === "function"
+        ? logOverrides({ id, index, actor })
+        : logOverrides;
       const log = buildOperationLog({
         id,
         kind,
         policyMode,
         policyRevision,
-        overrides: logOverrides,
+        actor,
+        overrides: resolvedLogOverrides,
       });
       if (!omitLogWrites) transaction.set(logRef, log);
       if (!omitTankWrites) {
@@ -623,7 +1273,14 @@ async function seedPendingRecoveries(size) {
   });
 }
 
-function executeReviewBatch({ size, decision, actor, savedActor = actor }) {
+function executeReviewBatch({
+  size,
+  decision,
+  actor,
+  savedActor = actor,
+  eventReason = "Rules一括レビュー確認",
+  logReason = eventReason,
+}) {
   const firestore = contextFor(actor);
   const eventRef = doc(firestore, "operationReviewEvents", "review-event");
   const revisionRef = doc(firestore, "settings", "tankAggregationRevision");
@@ -652,7 +1309,7 @@ function executeReviewBatch({ size, decision, actor, savedActor = actor }) {
       eventKind: "transition_aggregation_review_batch",
       logIds,
       decision,
-      reason: "Rules一括レビュー確認",
+      reason: eventReason,
       reviewedAt: serverTimestamp(),
       reviewedByStaffId: savedActor.staffId,
       reviewedByStaffName: savedActor.name,
@@ -671,14 +1328,14 @@ function executeReviewBatch({ size, decision, actor, savedActor = actor }) {
         reviewedByStaffName: savedActor.name,
         reviewedByUid: savedActor.uid,
         reviewedByEmail: savedActor.email,
-        reviewReason: "Rules一括レビュー確認",
+        reviewReason: logReason,
         reviewEventId: eventRef.id,
       });
     });
   });
 }
 
-async function seedActiveDirectLog() {
+async function seedActiveDirectLog({ revisionCreatedAt = new Date(1_000) } = {}) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore();
     const id = "T001";
@@ -695,7 +1352,7 @@ async function seedActiveDirectLog() {
         rootLogId: "active-log",
         timestamp: new Date(1_000),
         originalAt: new Date(1_000),
-        revisionCreatedAt: new Date(1_000),
+        revisionCreatedAt,
         prevTankSnapshot,
         nextTankSnapshot,
       }),
@@ -707,8 +1364,54 @@ async function seedActiveDirectLog() {
   });
 }
 
-function executeVoid() {
-  const firestore = contextFor(ADMIN);
+async function seedCrossTankCorrectionFixture() {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    const oldPrevTankSnapshot = tankSnapshot({
+      status: "empty",
+      maintenanceDate: OLD_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: OLD_TANK_NEXT_MAINTENANCE_DATE,
+    });
+    const oldNextTankSnapshot = tankSnapshot({
+      status: "filled",
+      staff: ADMIN.name,
+      maintenanceDate: OLD_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: OLD_TANK_NEXT_MAINTENANCE_DATE,
+    });
+    const newPrevTankSnapshot = tankSnapshot({
+      status: "empty",
+      maintenanceDate: NEW_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: NEW_TANK_NEXT_MAINTENANCE_DATE,
+    });
+    await Promise.all([
+      setDoc(doc(firestore, "logs", "active-log"), {
+        ...buildOperationLog({
+          id: "T001",
+          kind: "direct",
+          policyMode: "strict",
+          policyRevision: 1,
+        }),
+        rootLogId: "active-log",
+        timestamp: new Date(1_000),
+        originalAt: new Date(1_000),
+        revisionCreatedAt: new Date(1_000),
+        prevTankSnapshot: oldPrevTankSnapshot,
+        nextTankSnapshot: oldNextTankSnapshot,
+      }),
+      setDoc(doc(firestore, "tanks", "T001"), {
+        ...oldNextTankSnapshot,
+        latestLogId: "active-log",
+      }),
+      setDoc(doc(firestore, "tanks", "T002"), {
+        ...newPrevTankSnapshot,
+        latestLogId: null,
+      }),
+    ]);
+  });
+}
+
+function executeVoid(actor = ADMIN) {
+  const firestore = contextFor(actor);
   return runTransaction(firestore, async (transaction) => {
     const logRef = doc(firestore, "logs", "active-log");
     const tankRef = doc(firestore, "tanks", "T001");
@@ -722,9 +1425,9 @@ function executeVoid() {
       logStatus: "voided",
       voidReason: "Rules取消操作確認",
       voidedAt: serverTimestamp(),
-      voidedByStaffId: ADMIN.staffId,
-      voidedByStaffName: ADMIN.name,
-      voidedByStaffEmail: ADMIN.email,
+      voidedByStaffId: actor.staffId,
+      voidedByStaffName: actor.name,
+      voidedByStaffEmail: actor.email,
     });
     transaction.update(tankRef, {
       ...logSnapshot.data().prevTankSnapshot,
@@ -743,8 +1446,8 @@ function executeVoid() {
   });
 }
 
-function executeCorrection() {
-  const firestore = contextFor(ADMIN);
+function executeCorrection(newLogOverrides = {}, actor = ADMIN) {
+  const firestore = contextFor(actor);
   return runTransaction(firestore, async (transaction) => {
     const oldLogRef = doc(firestore, "logs", "active-log");
     const newLogRef = doc(firestore, "logs", "corrected-log");
@@ -769,13 +1472,88 @@ function executeCorrection() {
       revision: 2,
       supersedesLogId: oldLogRef.id,
       revisionCreatedAt: serverTimestamp(),
-      editedByStaffId: ADMIN.staffId,
-      editedByStaffName: ADMIN.name,
-      editedByStaffEmail: ADMIN.email,
+      editedByStaffId: actor.staffId,
+      editedByStaffName: actor.name,
+      editedByStaffEmail: actor.email,
       editReason: "Rules訂正操作確認",
+      ...newLogOverrides,
     });
     transaction.update(tankRef, {
       ...oldLog.nextTankSnapshot,
+      latestLogId: newLogRef.id,
+      updatedAt: serverTimestamp(),
+    });
+    transaction.set(revisionRef, revisionDocument({
+      tankDataRevision: 6,
+      officialAggregationRevision: 4,
+      revisionChangeKind: "correction",
+      changedLogIds: [newLogRef.id, oldLogRef.id],
+      officialAggregationLogIds: [newLogRef.id, oldLogRef.id],
+      timestamp: serverTimestamp(),
+    }));
+  });
+}
+
+function executeCrossTankCorrection() {
+  const firestore = contextFor(ADMIN);
+  return runTransaction(firestore, async (transaction) => {
+    const oldLogRef = doc(firestore, "logs", "active-log");
+    const newLogRef = doc(firestore, "logs", "cross-tank-corrected-log");
+    const oldTankRef = doc(firestore, "tanks", "T001");
+    const newTankRef = doc(firestore, "tanks", "T002");
+    const policyRef = doc(firestore, "settings", "tankOperationPolicy");
+    const revisionRef = doc(firestore, "settings", "tankAggregationRevision");
+    const [oldLogSnapshot] = await Promise.all([
+      transaction.get(oldLogRef),
+      transaction.get(oldTankRef),
+      transaction.get(newTankRef),
+      transaction.get(policyRef),
+      transaction.get(revisionRef),
+    ]);
+    const oldLog = oldLogSnapshot.data();
+    const newPrevTankSnapshot = tankSnapshot({
+      status: "empty",
+      maintenanceDate: NEW_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: NEW_TANK_NEXT_MAINTENANCE_DATE,
+    });
+    const newNextTankSnapshot = tankSnapshot({
+      status: "filled",
+      staff: ADMIN.name,
+      maintenanceDate: NEW_TANK_MAINTENANCE_DATE,
+      nextMaintenanceDate: NEW_TANK_NEXT_MAINTENANCE_DATE,
+    });
+
+    transaction.update(oldLogRef, {
+      logStatus: "superseded",
+      supersededByLogId: newLogRef.id,
+    });
+    transaction.set(newLogRef, {
+      ...oldLog,
+      tankId: "T002",
+      note: "別タンクへ訂正済み",
+      transitionPlan: directPlan(),
+      prevStatus: "empty",
+      newStatus: "filled",
+      rootLogId: oldLogRef.id,
+      revision: 2,
+      supersedesLogId: oldLogRef.id,
+      revisionCreatedAt: serverTimestamp(),
+      editedByStaffId: ADMIN.staffId,
+      editedByStaffName: ADMIN.name,
+      editedByStaffEmail: ADMIN.email,
+      editReason: "Rules別タンク訂正確認",
+      prevTankSnapshot: newPrevTankSnapshot,
+      nextTankSnapshot: newNextTankSnapshot,
+      previousLogIdOnSameTank: null,
+    });
+    transaction.update(oldTankRef, {
+      ...oldLog.prevTankSnapshot,
+      staff: deleteField(),
+      latestLogId: null,
+      updatedAt: serverTimestamp(),
+    });
+    transaction.update(newTankRef, {
+      ...newNextTankSnapshot,
       latestLogId: newLogRef.id,
       updatedAt: serverTimestamp(),
     });

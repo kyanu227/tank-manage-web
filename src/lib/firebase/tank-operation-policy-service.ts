@@ -12,16 +12,16 @@ import {
 import { db } from "@/lib/firebase/config";
 import type { OperationActor } from "@/lib/operation-context";
 import {
+  ADVISORY_ACTIVATION_ENABLED,
   isTransitionEnforcementMode,
   normalizeTankOperationPolicy,
   type TankOperationPolicy,
   type TransitionEnforcementMode,
 } from "@/lib/tank-transition-policy";
 
+export { ADVISORY_ACTIVATION_ENABLED } from "@/lib/tank-transition-policy";
+
 export const TANK_OPERATION_POLICY_DOCUMENT_PATH = "settings/tankOperationPolicy";
-/** Rules保護とemulator smoke完了後、build時に明示的に開放するrollout gate。 */
-export const ADVISORY_ACTIVATION_ENABLED =
-  process.env.NEXT_PUBLIC_TANK_ADVISORY_ACTIVATION_ENABLED === "true";
 
 export function getTankOperationPolicyRef(): DocumentReference<DocumentData> {
   return doc(db, "settings", "tankOperationPolicy");
@@ -30,7 +30,7 @@ export function getTankOperationPolicyRef(): DocumentReference<DocumentData> {
 /** document不存在・field欠落・不正値はstrict。read自体の失敗は呼出元へthrowする。 */
 export async function getTankOperationPolicy(): Promise<TankOperationPolicy> {
   const snapshot = await getDoc(getTankOperationPolicyRef());
-  return normalizeRuntimeTankOperationPolicy(snapshot.exists() ? snapshot.data() : null);
+  return normalizeTankOperationPolicy(snapshot.exists() ? snapshot.data() : null);
 }
 
 /** transaction内で必ずwriteより先に呼び出す。read失敗時はtransaction全体が中止される。 */
@@ -38,7 +38,7 @@ export async function getTankOperationPolicyInTransaction(
   transaction: Transaction,
 ): Promise<TankOperationPolicy> {
   const snapshot = await transaction.get(getTankOperationPolicyRef());
-  return normalizeRuntimeTankOperationPolicy(snapshot.exists() ? snapshot.data() : null);
+  return normalizeTankOperationPolicy(snapshot.exists() ? snapshot.data() : null);
 }
 
 export type SaveTankOperationPolicyInput = {
@@ -121,17 +121,10 @@ export function subscribeTankOperationPolicy(
   return onSnapshot(
     getTankOperationPolicyRef(),
     (snapshot) => {
-      onPolicy(normalizeRuntimeTankOperationPolicy(snapshot.exists() ? snapshot.data() : null));
+      onPolicy(normalizeTankOperationPolicy(snapshot.exists() ? snapshot.data() : null));
     },
     (error) => {
       onError?.(error);
     },
   );
-}
-
-/** rollout gateが閉じているbuildでは、document値に関係なく実行モードをstrictへ固定する。 */
-function normalizeRuntimeTankOperationPolicy(value: unknown): TankOperationPolicy {
-  const policy = normalizeTankOperationPolicy(value);
-  if (ADVISORY_ACTIVATION_ENABLED || policy.transitionEnforcement === "strict") return policy;
-  return { ...policy, transitionEnforcement: "strict" };
 }

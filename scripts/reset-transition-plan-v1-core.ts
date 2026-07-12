@@ -84,9 +84,29 @@ export function assertMigrationMarkerMayStart(value: unknown): void {
   const marker = value && typeof value === "object"
     ? value as Record<string, unknown>
     : null;
+  if (!marker) return;
   const status = normalizedString(marker?.status);
   if (status === "completed") throw new Error("migrationは既にcompletedです");
   if (status === "in_progress") throw new Error("migrationは既にin_progressです");
+  if (status === "failed") return;
+  throw new Error("migration markerのstatusを検証できないため開始できません");
+}
+
+/** unknown recordをtank operationと推測せず、execute自体をfail closedにする。 */
+export function assertResetPreviewHasNoUnknownRecords(input: {
+  unknownLogIds: readonly string[];
+  unknownTransactions: readonly { id: string; type: string }[];
+}): void {
+  if (input.unknownLogIds.length > 0) {
+    throw new Error(
+      `logKindを判定できないlogが${input.unknownLogIds.length}件あるため実行できません`,
+    );
+  }
+  if (input.unknownTransactions.length > 0) {
+    throw new Error(
+      `未知のtransaction typeが${input.unknownTransactions.length}件あるため実行できません`,
+    );
+  }
 }
 
 export function classifyLogKind(value: unknown): ResetLogClassification {

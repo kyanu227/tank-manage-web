@@ -76,6 +76,10 @@ export type TankSnapshot = {
   location?: string;
   staff?: string;
   logNote?: string;
+  /** 耐圧検査操作で更新されるため、取消・訂正時に復元する。 */
+  maintenanceDate?: unknown;
+  /** 耐圧検査操作で更新されるため、取消・訂正時に復元する。 */
+  nextMaintenanceDate?: unknown;
 };
 
 type TankCustomerProjection = Pick<TankSnapshot, "customerId" | "customerName">;
@@ -205,6 +209,8 @@ type TankLogContent = {
   customerName?: string;
   note: string;
   logNote: string;
+  maintenanceDate?: unknown;
+  nextMaintenanceDate?: unknown;
   extraFields: Record<string, unknown>;
 };
 
@@ -325,6 +331,10 @@ const RESERVED_LOG_EXTRA_FIELDS = new Set([
 
 const PRIVILEGED_CORRECTION_ROLES: StaffCorrectionRole[] = ["管理者", "準管理者"];
 const CORRECTION_LIMIT_MS = 72 * 60 * 60 * 1000;
+const TANK_OPERATION_EXTRA_FIELDS = [
+  "maintenanceDate",
+  "nextMaintenanceDate",
+] as const;
 /* ════════════════════════════════════════════
    新規ログ作成
    ════════════════════════════════════════════ */
@@ -442,6 +452,7 @@ async function commitPlannedOperations(
       op.input.logAction ?? requestedTransitionAction,
       `[${op.input.tankId}] logAction`,
     );
+    assertVisibleActionContext(requestedAction, op.input.context);
     const expectedTransitionAction = normalizeTransitionAction(requestedTransitionAction);
     if (!expectedTransitionAction) {
       throw new Error(`[${op.input.tankId}] 通常のタンク状態遷移ではない操作です。`);
@@ -581,13 +592,15 @@ async function commitPlannedOperations(
       customer: input.context.customer,
       mode: "operation",
     });
-    const nextSnapshot: TankSnapshot = {
+    const nextSnapshot = applyTankExtraToSnapshot({
+      // 操作projection以外（耐圧日等）は通常操作で失わない。
+      ...operation.prevSnapshot,
       status: nextStatus,
       location,
       staff: actor.staffName,
       logNote: tankLogNote,
       ...nextCustomerProjection,
-    };
+    }, input.tankExtra, transitionAction);
     const reviewStatus = transitionPlan.kind === "recovery" ? "pending" : "not_required";
     const affectedCustomers = deriveAffectedCustomers(
       transitionPlan,
@@ -636,7 +649,6 @@ async function commitPlannedOperations(
     });
 
     tx.update(operation.tankRef, {
-      ...(input.tankExtra ?? {}),
       ...tankUpdateFromSnapshot(nextSnapshot, operation.logRef.id),
     });
 
@@ -884,6 +896,7 @@ export async function applyLogCorrection(
     const content = input.mode === "revert" && sourceLog
       ? tankLogContentFromSource(sourceLog)
       : mergeTankLogContent(oldLog, input.patch ?? {});
+    assertVisibleActionContext(content.action, content.extraFields);
     const newTankId = normalizeTankId(content.tankId);
     const sameTank = newTankId === oldTankId;
 
@@ -1088,6 +1101,21 @@ function normalizeTankId(tankId: string): string {
   return tankId.trim().toUpperCase();
 }
 
+function assertVisibleActionContext(
+  action: TankActionCode,
+  context: Pick<OperationContext, "source" | "workflow" | "transactionId">
+    | Record<string, unknown>,
+): void {
+  if (action !== "order_lend") return;
+  if (
+    context.source !== "order_fulfillment"
+    || context.workflow !== "order"
+    || !stringOrUndefined(context.transactionId)
+  ) {
+    throw new Error("受注貸出は受注transactionの完了処理でだけ実行できます");
+  }
+}
+
 function snapshotFromTankData(data: DocumentData): TankSnapshot {
   const snapshot: TankSnapshot = {
     status: requireTankStatusCode(data.status, "タンクのstatus"),
@@ -1099,6 +1127,10 @@ function snapshotFromTankData(data: DocumentData): TankSnapshot {
   if (data.location != null) snapshot.location = String(data.location);
   if (data.staff != null) snapshot.staff = String(data.staff);
   if (data.logNote != null) snapshot.logNote = String(data.logNote);
+  if (data.maintenanceDate !== undefined) snapshot.maintenanceDate = data.maintenanceDate;
+  if (data.nextMaintenanceDate !== undefined) {
+    snapshot.nextMaintenanceDate = data.nextMaintenanceDate;
+  }
   return snapshot;
 }
 
@@ -1111,15 +1143,50 @@ function tankUpdateFromSnapshot(
     location: snapshot.location ?? deleteField(),
     staff: snapshot.staff ?? deleteField(),
     logNote: snapshot.logNote ?? deleteField(),
-    ...(snapshot.customerId !== undefined
-      ? { customerId: snapshot.customerId }
-      : {}),
-    ...(snapshot.customerName !== undefined
-      ? { customerName: snapshot.customerName }
-      : {}),
+    customerId: snapshot.customerId !== undefined
+      ? snapshot.customerId
+      : deleteField(),
+    customerName: snapshot.customerName !== undefined
+      ? snapshot.customerName
+      : deleteField(),
+    maintenanceDate: snapshot.maintenanceDate !== undefined
+      ? snapshot.maintenanceDate
+      : deleteField(),
+    nextMaintenanceDate: snapshot.nextMaintenanceDate !== undefined
+      ? snapshot.nextMaintenanceDate
+      : deleteField(),
     latestLogId,
     updatedAt: serverTimestamp(),
   };
+}
+
+function applyTankExtraToSnapshot(
+  snapshot: TankSnapshot,
+  tankExtra: Record<string, unknown> | undefined,
+  transitionAction: TankActionCode,
+): TankSnapshot {
+  if (!tankExtra) return snapshot;
+
+  const unsupportedKeys = Object.keys(tankExtra).filter(
+    (key) => !(TANK_OPERATION_EXTRA_FIELDS as readonly string[]).includes(key),
+  );
+  if (unsupportedKeys.length > 0) {
+    throw new Error(`tankExtraに未対応のfieldがあります: ${unsupportedKeys.join(", ")}`);
+  }
+  if (Object.keys(tankExtra).length > 0 && transitionAction !== "inspection") {
+    throw new Error("耐圧日情報は耐圧検査操作でだけ更新できます");
+  }
+
+  const next = { ...snapshot };
+  for (const key of TANK_OPERATION_EXTRA_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(tankExtra, key)) continue;
+    const value = tankExtra[key];
+    if (value === undefined) {
+      throw new Error(`tankExtra.${key}にundefinedは保存できません`);
+    }
+    next[key] = value;
+  }
+  return next;
 }
 
 function optionalNullableString(value: unknown): string | null | undefined {
@@ -1360,6 +1427,12 @@ function nextSnapshotFromContent(
     location: content.location,
     staff: content.staffName,
     logNote: content.logNote,
+    ...(content.maintenanceDate !== undefined
+      ? { maintenanceDate: content.maintenanceDate }
+      : {}),
+    ...(content.nextMaintenanceDate !== undefined
+      ? { nextMaintenanceDate: content.nextMaintenanceDate }
+      : {}),
     ...nextCustomerProjection,
   };
 }
@@ -1395,6 +1468,10 @@ function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch): Ta
     patch.customer === undefined
       ? identity.customer
       : patch.customer ?? undefined;
+  const oldNextSnapshot = requireTankSnapshot(
+    oldLog.nextTankSnapshot,
+    "対象ログのnextTankSnapshot",
+  );
 
   return {
     tankId,
@@ -1409,6 +1486,12 @@ function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch): Ta
       : {}),
     note: patch.note ?? stringOrDefault(oldLog.note, ""),
     logNote: patch.logNote ?? stringOrDefault(oldLog.logNote, ""),
+    ...(oldNextSnapshot.maintenanceDate !== undefined
+      ? { maintenanceDate: oldNextSnapshot.maintenanceDate }
+      : {}),
+    ...(oldNextSnapshot.nextMaintenanceDate !== undefined
+      ? { nextMaintenanceDate: oldNextSnapshot.nextMaintenanceDate }
+      : {}),
     extraFields: copyBodyExtraFields(oldLog),
   };
 }
@@ -1419,6 +1502,10 @@ function tankLogContentFromSource(sourceLog: TankLogData): TankLogContent {
     "復元元ログのtransitionAction"
   );
   const identity = tankLogIdentityFromLog(sourceLog, "復元元ログ");
+  const sourceNextSnapshot = requireTankSnapshot(
+    sourceLog.nextTankSnapshot,
+    "復元元ログのnextTankSnapshot",
+  );
   return {
     tankId: requireString(sourceLog.tankId, "復元元ログのtankId"),
     action: optionalTankActionCode(sourceLog.action) ?? transitionAction,
@@ -1432,6 +1519,12 @@ function tankLogContentFromSource(sourceLog: TankLogData): TankLogContent {
       : {}),
     note: stringOrDefault(sourceLog.note, ""),
     logNote: stringOrDefault(sourceLog.logNote, ""),
+    ...(sourceNextSnapshot.maintenanceDate !== undefined
+      ? { maintenanceDate: sourceNextSnapshot.maintenanceDate }
+      : {}),
+    ...(sourceNextSnapshot.nextMaintenanceDate !== undefined
+      ? { nextMaintenanceDate: sourceNextSnapshot.nextMaintenanceDate }
+      : {}),
     extraFields: copyBodyExtraFields(sourceLog),
   };
 }
@@ -1524,6 +1617,12 @@ function requireTankSnapshot(value: unknown, label: string): TankSnapshot {
     ...(raw.location != null ? { location: String(raw.location) } : {}),
     ...(raw.staff != null ? { staff: String(raw.staff) } : {}),
     ...(raw.logNote != null ? { logNote: String(raw.logNote) } : {}),
+    ...(raw.maintenanceDate !== undefined
+      ? { maintenanceDate: raw.maintenanceDate }
+      : {}),
+    ...(raw.nextMaintenanceDate !== undefined
+      ? { nextMaintenanceDate: raw.nextMaintenanceDate }
+      : {}),
   };
 }
 

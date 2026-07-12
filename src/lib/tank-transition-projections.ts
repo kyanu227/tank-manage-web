@@ -37,6 +37,42 @@ export interface PendingTransitionReviewImpact {
   pendingLogIds: string[];
 }
 
+/**
+ * transitionPlan必須schemaへの移行前ログを、正式集計で黙って無視しないためのguard。
+ * Data Reset完了前に新consumerだけをdeployした場合は、空請求書を作らずfail closedにする。
+ */
+export function assertOfficialAggregationSchemaReady(logs: readonly LogDoc[]): void {
+  const invalidLogIds = logs.flatMap((log) => {
+    if (log.logKind === "order" || log.logKind === "procurement") return [];
+    // legacy logのlogKind欠落を非tankと推測して集計続行しない。
+    if (log.logKind !== "tank") return [log.id];
+    if (log.logStatus !== "active") return [];
+    const plan = normalizeTransitionPlan(log.transitionPlan);
+    const reviewStatusValid = plan?.kind === "direct"
+      ? log.transitionReviewStatus === "not_required"
+      : plan?.kind === "recovery"
+        ? log.transitionReviewStatus === "pending"
+          || log.transitionReviewStatus === "approved"
+          || log.transitionReviewStatus === "excluded"
+        : false;
+    const policyValid = (log.policyMode === "strict" || log.policyMode === "advisory")
+      && typeof log.policyRevision === "number"
+      && Number.isSafeInteger(log.policyRevision)
+      && log.policyRevision >= 0;
+    const impactValid = Array.isArray(log.affectedCustomerIds)
+      && typeof log.hasUnknownAffectedCustomer === "boolean";
+    return plan && reviewStatusValid && policyValid && impactValid ? [] : [log.id];
+  });
+
+  if (invalidLogIds.length === 0) return;
+  const preview = invalidLogIds.slice(0, 5).join(", ");
+  const suffix = invalidLogIds.length > 5 ? ` 他${invalidLogIds.length - 5}件` : "";
+  throw new Error(
+    `transitionPlan必須schemaへ未移行のactive tank logがあります (${preview}${suffix})。`
+      + " Data Resetとschema verificationが完了するまで正式集計を生成できません。",
+  );
+}
+
 /** 編集revisionでも変わらない元の業務操作日時。 */
 export function getOperationOccurredAt(log: LogDoc): Timestamp | undefined {
   return log.originalAt ?? log.timestamp;

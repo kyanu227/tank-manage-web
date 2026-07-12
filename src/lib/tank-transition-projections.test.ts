@@ -2,6 +2,7 @@ import { Timestamp } from "firebase/firestore";
 import { describe, expect, it } from "vitest";
 import type { LogDoc } from "@/lib/firebase/repositories/types";
 import {
+  assertOfficialAggregationSchemaReady,
   getOperationOccurredAt,
   projectOfficialAggregationEvent,
   projectRentalCycleEvents,
@@ -21,7 +22,7 @@ describe("transition projections", () => {
   const recoveryPlan = requirePlan(planTankTransition({
     policyMode: "advisory",
     current: { status: "lent", ...customerA, location: "A社" },
-    requestedAction: "order_lend",
+    requestedAction: "lend",
     targetCustomer: customerB,
     targetLocation: "B社",
   }));
@@ -63,6 +64,23 @@ describe("transition projections", () => {
     expect(log.action).toBe("order_lend");
     expect(log.transitionAction).toBe("lend");
     expect(projectOfficialAggregationEvent(log)?.action).toBe("lend");
+  });
+
+  it("fails closed when an active tank log has not migrated to the required schema", () => {
+    const migrated = makeLog(recoveryPlan, "approved");
+    expect(() => assertOfficialAggregationSchemaReady([migrated])).not.toThrow();
+    expect(() => assertOfficialAggregationSchemaReady([{
+      ...migrated,
+      id: "legacy-log",
+      transitionPlan: undefined,
+      transitionReviewStatus: undefined,
+    }])).toThrow("transitionPlan必須schemaへ未移行");
+    expect(() => assertOfficialAggregationSchemaReady([{
+      ...migrated,
+      id: "legacy-kindless-log",
+      logKind: "",
+      transitionPlan: undefined,
+    }])).toThrow("transitionPlan必須schemaへ未移行");
   });
 });
 

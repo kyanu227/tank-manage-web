@@ -8,7 +8,10 @@ import {
   ADVISORY_ACTIVATION_ENABLED,
   saveTankOperationPolicy,
 } from "@/lib/firebase/tank-operation-policy-service";
-import type { TransitionEnforcementMode } from "@/lib/tank-transition-policy";
+import {
+  resolveRuntimeTransitionEnforcement,
+  type TransitionEnforcementMode,
+} from "@/lib/tank-transition-policy";
 
 const MODES: Array<{
   id: TransitionEnforcementMode;
@@ -39,6 +42,7 @@ export default function TankOperationPolicySettingsPage() {
   }, [policy.transitionEnforcement, policy.policyRevision]);
 
   const dirty = selectedMode !== policy.transitionEnforcement;
+  const runtimeMode = resolveRuntimeTransitionEnforcement(policy.transitionEnforcement);
   const advisoryLocked = !ADVISORY_ACTIVATION_ENABLED
     && policy.transitionEnforcement !== "advisory";
 
@@ -126,7 +130,11 @@ export default function TankOperationPolicySettingsPage() {
 
       <div style={{ background: "#fff", border: "1px solid #e2e8f0", borderRadius: 14, padding: 18 }}>
         <div style={{ fontSize: 12, lineHeight: 1.8, color: "#475569" }}>
-          <div>現在: <strong>{policy.transitionEnforcement === "strict" ? "厳格" : "自動補完"}</strong></div>
+          <div>保存済み設定: <strong>{policy.transitionEnforcement === "strict" ? "厳格" : "自動補完"}</strong></div>
+          <div>
+            実行時モード: <strong>{runtimeMode === "strict" ? "厳格" : "自動補完"}</strong>
+            {runtimeMode !== policy.transitionEnforcement ? "（rollout gateにより厳格固定）" : ""}
+          </div>
           <div>policy revision: <strong>{policy.policyRevision}</strong></div>
           <div>自動補完の対象: スタッフ直接の貸出・返却・充填・自社利用・自社返却に必要な返却／充填補完</div>
           <div>顧客transaction対象外: 受注・返却申請・未充填申請の処理経路</div>
@@ -137,8 +145,11 @@ export default function TankOperationPolicySettingsPage() {
       {!ADVISORY_ACTIVATION_ENABLED && (
         <div role="status" style={noticeStyle("warning")}>
           <LockKeyhole size={18} />
-          自動補完の有効化はrollout gateで停止中です。Rules保護とスタッフ直接操作1/10/50/100件のemulator検証後、
-          build時に <code>NEXT_PUBLIC_TANK_ADVISORY_ACTIVATION_ENABLED=true</code> を設定してください。
+          <span>
+            自動補完の実行はrollout gateで停止中です。保存済み設定が自動補完でも、実行時は厳格モードになります。
+            保存済み設定を厳格へ戻す操作は可能です。Rules保護とスタッフ直接操作1/10/50/100件のemulator検証後、
+            build時に <code>NEXT_PUBLIC_TANK_ADVISORY_ACTIVATION_ENABLED=true</code> を設定してください。
+          </span>
         </div>
       )}
 
