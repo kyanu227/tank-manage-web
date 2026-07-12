@@ -1,9 +1,11 @@
 import type { LogDoc } from "@/lib/firebase/repositories/types";
 import {
-  isFillTankLogAction,
-  isLendTankLogAction,
-  isReturnTankLogAction,
+  isFillActionCode,
+  isLendActionCode,
+  isReturnActionCode,
+  type TankActionCode,
 } from "@/lib/tank-action-status-codes";
+import { projectOfficialAggregationEvent } from "@/lib/tank-transition-projections";
 
 export interface DailyOperationStat {
   date: string;
@@ -46,10 +48,11 @@ export function buildDailyOperationStats(
   const dateMap = new Map<string, ActionCounts>();
 
   logs.forEach((log) => {
-    if (!log.timestamp?.toDate) return;
-    const key = toLocalDateKey(log.timestamp.toDate());
+    const event = projectOfficialAggregationEvent(log);
+    if (!event?.occurredAt?.toDate) return;
+    const key = toLocalDateKey(event.occurredAt.toDate());
     const counts = dateMap.get(key) ?? { lend: 0, return_: 0, fill: 0 };
-    incrementActionCounts(counts, log);
+    if (!incrementActionCounts(counts, event.action)) return;
     dateMap.set(key, counts);
   });
 
@@ -67,6 +70,8 @@ export function buildStaffOperationStats(logs: LogDoc[]): StaffOperationStat[] {
   const staffMap = new Map<string, ActionCounts & { name: string }>();
 
   logs.forEach((log) => {
+    const event = projectOfficialAggregationEvent(log);
+    if (!event) return;
     const key = log.staffId || "不明";
     const counts = staffMap.get(key) ?? {
       name: log.staffName || "不明",
@@ -74,7 +79,7 @@ export function buildStaffOperationStats(logs: LogDoc[]): StaffOperationStat[] {
       return_: 0,
       fill: 0,
     };
-    incrementActionCounts(counts, log);
+    if (!incrementActionCounts(counts, event.action)) return;
     staffMap.set(key, counts);
   });
 
@@ -90,8 +95,10 @@ export function buildStaffOperationStats(logs: LogDoc[]): StaffOperationStat[] {
     .sort((a, b) => b.total - a.total);
 }
 
-function incrementActionCounts(counts: ActionCounts, log: LogDoc): void {
-  if (isLendTankLogAction(log.action, log.transitionAction)) counts.lend += 1;
-  else if (isReturnTankLogAction(log.action, log.transitionAction)) counts.return_ += 1;
-  else if (isFillTankLogAction(log.action, log.transitionAction)) counts.fill += 1;
+function incrementActionCounts(counts: ActionCounts, action: TankActionCode): boolean {
+  if (isLendActionCode(action)) counts.lend += 1;
+  else if (isReturnActionCode(action)) counts.return_ += 1;
+  else if (isFillActionCode(action)) counts.fill += 1;
+  else return false;
+  return true;
 }

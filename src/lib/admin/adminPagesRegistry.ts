@@ -17,7 +17,9 @@ export type AdminPageDef = {
 
 export const ADMIN_PAGES: readonly AdminPageDef[] = [
   { path: "/admin", label: "ダッシュボード", group: "確認・分析" },
+  { path: "/admin/operation-reviews", label: "例外操作レビュー", group: "確認・分析", adminOnly: true },
   { path: "/admin/settings", label: "設定変更", group: "マスタ・料金", hidden: true },
+  { path: "/admin/settings/tank-operations", label: "状態遷移モード", group: "設定", adminOnly: true },
   { path: "/admin/settings/portal", label: "ポータル設定", group: "設定" },
   { path: "/admin/settings/inspection", label: "耐圧検査設定", group: "設定" },
   { path: "/admin/notifications", label: "通知設定", group: "設定" },

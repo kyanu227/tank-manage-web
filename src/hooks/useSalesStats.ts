@@ -9,11 +9,13 @@ import {
 } from "@/lib/analytics/operation-stats";
 import { getMonthlyStats, type MonthlyStat } from "@/lib/firebase/monthly-stats-service";
 import { logsRepository } from "@/lib/firebase/repositories";
+import { useTankDataRevision } from "@/hooks/useTankDataRevision";
 
 export interface SalesStatsViewModel {
   dailyStats: DailyOperationStat[];
   monthlyStats: MonthlyStat[];
   groupedMonthly: [string, MonthlyStat[]][];
+  staleMonthlyCount: number;
   loadingDaily: boolean;
   loadingMonthly: boolean;
   todayStat: DailyOperationStat | undefined;
@@ -24,6 +26,7 @@ export interface SalesStatsViewModel {
 }
 
 export function useSalesStats(): SalesStatsViewModel {
+  const tankDataRevision = useTankDataRevision();
   const [dailyStats, setDailyStats] = useState<DailyOperationStat[]>([]);
   const [loadingDaily, setLoadingDaily] = useState(true);
   const [monthlyStats, setMonthlyStats] = useState<MonthlyStat[]>([]);
@@ -47,7 +50,7 @@ export function useSalesStats(): SalesStatsViewModel {
     return () => {
       active = false;
     };
-  }, []);
+  }, [tankDataRevision]);
 
   useEffect(() => {
     let active = true;
@@ -67,7 +70,7 @@ export function useSalesStats(): SalesStatsViewModel {
     return () => {
       active = false;
     };
-  }, []);
+  }, [tankDataRevision]);
 
   const todayKey = toLocalDateKey(new Date());
   const yesterdayKey = toLocalDateKey(addLocalDays(new Date(), -1));
@@ -81,17 +84,19 @@ export function useSalesStats(): SalesStatsViewModel {
 
   const groupedMonthly = useMemo(() => {
     const map = new Map<string, MonthlyStat[]>();
-    monthlyStats.forEach((stat) => {
+    monthlyStats.filter((stat) => !stat.isStale).forEach((stat) => {
       if (!map.has(stat.month)) map.set(stat.month, []);
       map.get(stat.month)!.push(stat);
     });
     return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0]));
   }, [monthlyStats]);
+  const staleMonthlyCount = monthlyStats.filter((stat) => stat.isStale).length;
 
   return {
     dailyStats,
     monthlyStats,
     groupedMonthly,
+    staleMonthlyCount,
     loadingDaily,
     loadingMonthly,
     todayStat,

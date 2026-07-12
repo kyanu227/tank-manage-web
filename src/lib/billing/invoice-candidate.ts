@@ -12,6 +12,7 @@ import {
   normalizeCustomerIdentityText,
 } from "@/lib/customer-identity-read";
 import type { LogDoc } from "@/lib/firebase/repositories/types";
+import { collectPendingTransitionReviewImpact } from "@/lib/tank-transition-projections";
 
 export type BillingCustomerMaster = {
   customerId: string;
@@ -40,6 +41,9 @@ export type InvoiceCandidate = {
   tax: number;
   total: number;
   warnings: string[];
+  /** pending recoveryが残る間は請求書印刷を禁止する。 */
+  printBlocked: boolean;
+  printBlockReasons: string[];
 };
 
 type BuildInvoiceCandidatesInput = {
@@ -62,6 +66,7 @@ type InvoiceCandidateGroup = {
   carryOverExtras: Array<{ sourceLogId: string; quantity: number; note?: string }>;
   sourceLogIds: Set<string>;
   warnings: Set<string>;
+  printBlockReasons: Set<string>;
 };
 
 export function buildInvoiceCandidates({
@@ -74,16 +79,20 @@ export function buildInvoiceCandidates({
   const customersByName = buildCustomerNameIndex(customers);
   const groups = new Map<string, InvoiceCandidateGroup>();
   const matches = collectBillingSourceLogMatches(logs, period);
+  const pendingImpact = collectPendingTransitionReviewImpact(logs);
 
   for (const match of matches) {
     const lendLog = match.lendLog;
-    const customerId = normalizeCustomerIdentityText(lendLog.customerId);
+    const lendEvent = match.lendEvent;
+    const customerId = normalizeCustomerIdentityText(
+      lendEvent.customerId ?? lendLog.customerId,
+    );
     const customerMaster = customerId ? customerById.get(customerId) : undefined;
     const identity = buildCustomerIdentityGroup(
       {
-        customerId: lendLog.customerId,
-        customerName: lendLog.customerName,
-        location: lendLog.location,
+        customerId: lendEvent.customerId ?? lendLog.customerId,
+        customerName: lendEvent.customerName ?? lendLog.customerName,
+        location: lendEvent.location ?? lendLog.location,
       },
       { currentCustomerName: customerMaster?.customerName },
     );
@@ -103,7 +112,7 @@ export function buildInvoiceCandidates({
 
     group.sourceLines.push({
       sourceLogId: lendLog.id,
-      tankId: lendLog.tankId,
+      tankId: lendEvent.tankId ?? lendLog.tankId,
       action: match.lendActionCode,
       customerId: identity.customerId,
       customerName: identity.displayName,
@@ -128,6 +137,20 @@ export function buildInvoiceCandidates({
     }
   }
 
+  const affectedCustomerIds = new Set(pendingImpact.affectedCustomerIds);
+  for (const group of groups.values()) {
+    if (pendingImpact.hasUnknownAffectedCustomer) {
+      group.printBlockReasons.add(
+        "影響顧客を特定できない未レビューの例外操作があるため、印刷できません。",
+      );
+    }
+    if (group.customerId && affectedCustomerIds.has(group.customerId)) {
+      group.printBlockReasons.add(
+        "この顧客に未レビューの例外操作があるため、集計承認または除外の完了まで印刷できません。",
+      );
+    }
+  }
+
   return Array.from(groups.values())
     .map((group) => buildCandidate(group, settings))
     .sort((a, b) => b.total - a.total || a.recipientName.localeCompare(b.recipientName));
@@ -148,6 +171,7 @@ function buildCandidate(
     carryOverExtras: group.carryOverExtras,
   });
   const warnings = new Set(group.warnings);
+  group.printBlockReasons.forEach((reason) => warnings.add(reason));
 
   if (group.isLegacy) {
     warnings.add("旧形式データのため、顧客IDではなく過去の貸出先名で集計しています。");
@@ -174,6 +198,8 @@ function buildCandidate(
     tax: calculation.tax,
     total: calculation.total,
     warnings: Array.from(warnings),
+    printBlocked: group.printBlockReasons.size > 0,
+    printBlockReasons: Array.from(group.printBlockReasons),
   };
 }
 
@@ -211,6 +237,7 @@ function getOrCreateGroup({
     carryOverExtras: [],
     sourceLogIds: new Set(),
     warnings: new Set(),
+    printBlockReasons: new Set(),
   };
   groups.set(identityKey, group);
   return group;

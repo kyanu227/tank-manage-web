@@ -69,15 +69,17 @@ export async function traceUnderfilledSource(
     where("tankId", "==", triggerLog.tankId),
     where("action", "==", "fill"),
     where("timestamp", "<", triggerLog.timestamp),
-    orderBy("timestamp", "desc"),
-    limit(1)
+    orderBy("timestamp", "desc")
   );
 
   const snap = await getDocs(q);
-  if (snap.empty) return null;
+  const sourceDoc = snap.docs.find((snapshot) => {
+    const status = snapshot.data().transitionReviewStatus;
+    return status === "not_required" || status === "approved";
+  });
+  if (!sourceDoc) return null;
 
-  const doc = snap.docs[0];
-  const sourceLog = tankLogFromData(doc.id, doc.data());
+  const sourceLog = tankLogFromData(sourceDoc.id, sourceDoc.data());
 
   return {
     responsibleStaff: sourceLog.staffName,

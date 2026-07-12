@@ -6,6 +6,7 @@ import {
   type StaffOperationStat,
 } from "@/lib/analytics/operation-stats";
 import { logsRepository } from "@/lib/firebase/repositories";
+import { useTankDataRevision } from "@/hooks/useTankDataRevision";
 
 export interface StaffAnalyticsStatsViewModel {
   stats: StaffOperationStat[];
@@ -13,6 +14,7 @@ export interface StaffAnalyticsStatsViewModel {
 }
 
 export function useStaffAnalyticsStats(): StaffAnalyticsStatsViewModel {
+  const tankDataRevision = useTankDataRevision();
   const [stats, setStats] = useState<StaffOperationStat[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -34,7 +36,7 @@ export function useStaffAnalyticsStats(): StaffAnalyticsStatsViewModel {
     return () => {
       active = false;
     };
-  }, []);
+  }, [tankDataRevision]);
 
   return { stats, loading };
 }

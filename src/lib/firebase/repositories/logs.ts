@@ -16,6 +16,7 @@ import {
 } from "firebase/firestore";
 import { db } from "../config";
 import type { LogDoc } from "./types";
+import { normalizeTransitionPlan } from "../../tank-transition-policy";
 
 /** logs 購読の unsubscribe 関数 */
 export type Unsubscribe = () => void;
@@ -75,6 +76,26 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     source: data.source as LogDoc["source"],
     workflow: data.workflow as LogDoc["workflow"],
     returnCondition: data.returnCondition as LogDoc["returnCondition"],
+    transitionPlan: normalizeTransitionPlan(data.transitionPlan) ?? undefined,
+    transitionReviewStatus: transitionReviewStatusOrUndefined(
+      data.transitionReviewStatus,
+    ),
+    policyMode: policyModeOrUndefined(data.policyMode),
+    policyRevision: numberOrUndefined(data.policyRevision),
+    recoveryReason: stringOrUndefined(data.recoveryReason),
+    recoveryEvidence: data.recoveryEvidence as LogDoc["recoveryEvidence"],
+    affectedCustomerIds: stringArrayOrUndefined(data.affectedCustomerIds),
+    hasUnknownAffectedCustomer:
+      typeof data.hasUnknownAffectedCustomer === "boolean"
+        ? data.hasUnknownAffectedCustomer
+        : undefined,
+    reviewedByStaffId: stringOrUndefined(data.reviewedByStaffId),
+    reviewedByStaffName: stringOrUndefined(data.reviewedByStaffName),
+    reviewedByUid: stringOrUndefined(data.reviewedByUid),
+    reviewedByEmail: stringOrUndefined(data.reviewedByEmail),
+    reviewEventId: stringOrUndefined(data.reviewEventId),
+    reviewReason: stringOrUndefined(data.reviewReason),
+    reviewedAt: data.reviewedAt as Timestamp | undefined,
     billable: typeof data.billable === "boolean" ? data.billable : undefined,
     note: data.note as string | undefined,
     logNote: data.logNote as string | undefined,
@@ -95,6 +116,7 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     voidedAt: data.voidedAt as Timestamp | undefined,
     logExtra: data.logExtra as Record<string, unknown> | undefined,
     timestamp: data.timestamp as Timestamp | undefined,
+    originalAt: data.originalAt as Timestamp | undefined,
     createdAt: data.createdAt as Timestamp | undefined,
     revisionCreatedAt: data.revisionCreatedAt as Timestamp | undefined,
   };
@@ -104,6 +126,34 @@ function stringOrUndefined(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const trimmed = value.trim();
   return trimmed ? trimmed : undefined;
+}
+
+function stringArrayOrUndefined(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const items = Array.from(new Set(value.flatMap((item) => {
+    const normalized = stringOrUndefined(item);
+    return normalized ? [normalized] : [];
+  }))).sort();
+  return items.length > 0 ? items : [];
+}
+
+function numberOrUndefined(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function policyModeOrUndefined(value: unknown): LogDoc["policyMode"] {
+  return value === "strict" || value === "advisory" ? value : undefined;
+}
+
+function transitionReviewStatusOrUndefined(
+  value: unknown,
+): LogDoc["transitionReviewStatus"] {
+  return value === "not_required"
+    || value === "pending"
+    || value === "approved"
+    || value === "excluded"
+    ? value
+    : undefined;
 }
 
 /** タンク単位の履歴取得オプション */

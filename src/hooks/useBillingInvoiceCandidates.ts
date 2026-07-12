@@ -13,6 +13,7 @@ import {
 import { getBillingCustomerMasters } from "@/lib/firebase/billing-customers-service";
 import { getBillingInvoiceSettings } from "@/lib/firebase/billing-settings-service";
 import { logsRepository } from "@/lib/firebase/repositories";
+import { useTankDataRevision } from "@/hooks/useTankDataRevision";
 
 export interface BillingInvoiceCandidatesState {
   bills: InvoiceCandidate[];
@@ -26,6 +27,7 @@ export interface BillingInvoiceCandidatesState {
 }
 
 export function useBillingInvoiceCandidates(period: string): BillingInvoiceCandidatesState {
+  const tankDataRevision = useTankDataRevision();
   const [bills, setBills] = useState<InvoiceCandidate[]>([]);
   const [selectedBillKey, setSelectedBillKey] = useState<string | null>(null);
   const [settings, setSettings] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
@@ -73,7 +75,7 @@ export function useBillingInvoiceCandidates(period: string): BillingInvoiceCandi
     return () => {
       active = false;
     };
-  }, [period]);
+  }, [period, tankDataRevision]);
 
   return {
     bills,

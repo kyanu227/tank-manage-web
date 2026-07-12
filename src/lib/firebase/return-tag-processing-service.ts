@@ -11,6 +11,7 @@ import { tryParseTankId } from "@/lib/tank-id";
 import {
   applyBulkTankOperations,
   type TankOperationInput,
+  type TankOperationResult,
   type TankOperationWriter,
 } from "@/lib/tank-operation";
 import { coerceTankStatusCode, type TankActionCode, type TankStatusCode } from "@/lib/tank-action-status-codes";
@@ -49,6 +50,7 @@ type ReturnConfirmation = {
 type ReturnTransactionCompletionPatch = {
   status: "completed";
   finalCondition: ReturnCondition;
+  fulfilledLogId: string;
   fulfilledAt: ReturnType<typeof serverTimestamp>;
   fulfilledBy: string;
   fulfilledByStaffId: string;
@@ -81,7 +83,12 @@ export async function confirmPendingReturnRequests(
   // スタッフ確定時点で pending_return を実際の tanks/logs 更新に反映する。
   await applyBulkTankOperations(
     buildReturnConfirmationOperations(confirmations, baseContext),
-    (writer) => completePendingReturnRequests(writer, confirmations, actor),
+    (writer, results) => completePendingReturnRequests(
+      writer,
+      confirmations,
+      results,
+      actor,
+    ),
   );
 
   return { processedCount: selectedItems.length };
@@ -182,27 +189,40 @@ function buildReturnConfirmationOperations(
 function completePendingReturnRequests(
   writer: TankOperationWriter,
   confirmations: ReturnConfirmation[],
+  results: readonly TankOperationResult[],
   actor: OperationActor,
 ): void {
+  const resultByTankId = new Map(results.map((result) => [result.tankId, result]));
   confirmations.forEach(({ item, condition }) => {
+    const result = resultByTankId.get(normalizeReturnTankId(item.tankId));
+    if (!result) {
+      throw new Error(`[${item.tankId}] 返却ログIDをtransactionに紐付けできません`);
+    }
     writer.update(
       doc(db, "transactions", item.id),
-      buildReturnTransactionCompletionPatch(condition, actor),
+      buildReturnTransactionCompletionPatch(condition, result.logRef.id, actor),
     );
   });
 }
 
 function buildReturnTransactionCompletionPatch(
   condition: ReturnCondition,
+  fulfilledLogId: string,
   actor: OperationActor,
 ): ReturnTransactionCompletionPatch {
   return {
     status: "completed",
     finalCondition: condition,
+    fulfilledLogId,
     fulfilledAt: serverTimestamp(),
     fulfilledBy: actor.staffName,
     fulfilledByStaffId: actor.staffId,
     fulfilledByStaffName: actor.staffName,
     ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
   };
+}
+
+function normalizeReturnTankId(tankId: string): string {
+  const parsed = tryParseTankId(tankId);
+  return parsed.ok ? parsed.canonicalTankId : tankId.trim().toUpperCase();
 }

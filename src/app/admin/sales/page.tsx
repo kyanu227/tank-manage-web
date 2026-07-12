@@ -9,6 +9,7 @@ export default function SalesPage() {
   const {
     dailyStats,
     groupedMonthly,
+    staleMonthlyCount,
     loadingDaily,
     loadingMonthly,
     todayStat,
@@ -127,6 +128,13 @@ export default function SalesPage() {
           <p style={{ fontSize: 13, color: "#64748b", marginBottom: 24 }}>
             ※毎月15日に前々月の統計データが自動集計されてここに追加されます。
           </p>
+
+          {staleMonthlyCount > 0 && (
+            <div style={{ padding: "10px 12px", marginBottom: 18, borderRadius: 10, background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", fontSize: 12, lineHeight: 1.6 }}>
+              例外操作レビュー後に再生成されていない月次アーカイブが {staleMonthlyCount}件あります。
+              古い集計値は表示から除外しています。
+            </div>
+          )}
 
           {loadingMonthly ? (
             <div style={{ padding: 60, textAlign: "center", color: "#94a3b8" }}>アーカイブを読み込み中…</div>

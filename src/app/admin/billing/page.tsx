@@ -123,6 +123,8 @@ export default function BillingPage() {
         ? [selectedBill]
         : [];
   const grandTotal = bills.reduce((s, b) => s + b.total, 0);
+  const blockedBillCount = bills.filter((bill) => bill.printBlocked).length;
+  const allPrintBlocked = blockedBillCount > 0;
 
   const updateDraft = <K extends keyof BillingInvoiceSettings>(
     key: K,
@@ -155,6 +157,17 @@ export default function BillingPage() {
   };
 
   const requestPrint = (mode: Exclude<PrintMode, null>) => {
+    const targets = mode.type === "all"
+      ? bills
+      : bills.filter((bill) => bill.key === mode.billKey);
+    const blocked = targets.filter((bill) => bill.printBlocked);
+    if (blocked.length > 0) {
+      const reasons = Array.from(new Set(
+        blocked.flatMap((bill) => bill.printBlockReasons),
+      ));
+      alert(`未レビューの例外操作があるため印刷できません。\n${reasons.join("\n")}`);
+      return;
+    }
     setPrintMode(mode);
     window.setTimeout(() => window.print(), 50);
   };
@@ -186,7 +199,10 @@ export default function BillingPage() {
               type="button"
               className="billing-primary-button"
               onClick={() => requestPrint({ type: "all" })}
-              disabled={bills.length === 0}
+              disabled={bills.length === 0 || allPrintBlocked}
+              title={allPrintBlocked
+                ? "未レビューの例外操作を含む請求先があるため、全件印刷できません。"
+                : undefined}
             >
               <Printer size={15} /> 全請求書をPDF保存
             </button>
@@ -207,6 +223,13 @@ export default function BillingPage() {
           請求書文言・税率・振込先はこの画面の設定から変更できます。
           PDF保存は印刷画面で「PDFとして保存」を選択してください。
         </div>
+
+        {activeTab === "list" && blockedBillCount > 0 && (
+          <div className="billing-warning">
+            未レビューの例外操作が影響する請求先が {blockedBillCount}件あります。
+            対象の個別印刷と全件印刷は、集計承認または除外が完了するまで停止します。
+          </div>
+        )}
 
         {activeTab === "settings" ? (
           <BillingSettingsForm
@@ -247,6 +270,7 @@ export default function BillingPage() {
                     <span className="billing-list-badges">
                       {bill.isLegacy && settings.showLegacyWarning && <span>旧形式</span>}
                       {!bill.pricingResolved && <span>単価未設定</span>}
+                      {bill.printBlocked && <span>印刷停止</span>}
                       {bill.warnings.length > 0 && <span>要確認</span>}
                     </span>
                   </button>
@@ -264,7 +288,10 @@ export default function BillingPage() {
                   type="button"
                   className="billing-primary-button"
                   onClick={() => selectedBill && requestPrint({ type: "single", billKey: selectedBill.key })}
-                  disabled={!selectedBill}
+                  disabled={!selectedBill || selectedBill.printBlocked}
+                  title={selectedBill?.printBlocked
+                    ? selectedBill.printBlockReasons.join("\n")
+                    : undefined}
                 >
                   <Printer size={15} /> この請求書をPDF保存
                 </button>
