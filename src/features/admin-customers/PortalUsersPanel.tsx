@@ -2,25 +2,22 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { RefreshCw, Save } from "lucide-react";
-import { auth, db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
+import { auth } from "@/lib/firebase/config";
 import {
   linkCustomerUsersToCustomers,
   listCustomerUsers,
   type CustomerUserAssignment,
   type PortalCustomerUser,
 } from "@/lib/firebase/customer-linking-service";
+import {
+  listCustomersForPortalUserLinking,
+  type CustomerManagementRow,
+} from "@/lib/firebase/customers-service";
 import { findStaffProfileByEmailReadOnly } from "@/lib/firebase/staff-auth";
 import { getStaffIdentity } from "@/hooks/useStaffSession";
 import type { OperationActor } from "@/lib/operation-context";
 
-interface Customer {
-  id: string;
-  name?: string;
-  email?: string;
-  companyName?: string;
-  isActive?: boolean;
-}
+type Customer = CustomerManagementRow;
 
 const inputStyle: React.CSSProperties = {
   width: "100%", padding: "8px 12px", fontSize: 13, fontWeight: 500,
@@ -52,10 +49,7 @@ export default function PortalUsersPanel() {
   const fetchAll = useCallback(async () => {
     setLoading(true);
     try {
-      const custSnap = await getDocs(collection(db, "customers"));
-      const custs: Customer[] = [];
-      custSnap.forEach((c) => custs.push({ id: c.id, ...c.data() } as Customer));
-      setCustomerList(custs.length > 0 ? custs : []);
+      setCustomerList(await listCustomersForPortalUserLinking());
 
       const customerUsers = await listCustomerUsers();
       setCustomerUserList(customerUsers);
@@ -73,7 +67,11 @@ export default function PortalUsersPanel() {
     customer?.name || customer?.companyName || customer?.email || customer?.id || ""
   );
 
-  const updateCustomerUser = (id: string, field: keyof PortalCustomerUser, value: any) => {
+  const updateCustomerUser = <K extends keyof PortalCustomerUser>(
+    id: string,
+    field: K,
+    value: PortalCustomerUser[K],
+  ) => {
     setDirtyCustomerUserIds((prev) => prev.includes(id) ? prev : [...prev, id]);
     setCustomerUserList((prev) => prev.map((u) => (u.id === id ? { ...u, [field]: value } : u)));
   };
@@ -103,8 +101,8 @@ export default function PortalUsersPanel() {
       await linkCustomerUsersToCustomers({ assignments, actor });
       await fetchAll();
       alert("ポータル利用者の紐付けを保存しました。");
-    } catch (e: any) {
-      alert("保存エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("保存エラー: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSaving(false);
     }

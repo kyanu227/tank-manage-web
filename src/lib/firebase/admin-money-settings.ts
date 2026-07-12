@@ -1,6 +1,11 @@
 import { collection, doc, getDocs, serverTimestamp, writeBatch, type DocumentData } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { assertNotChangedSinceLoad, createDocId, hasFieldChanges, isNewDocId } from "@/lib/firebase/diff-write";
+import {
+  assertSettingsSectionsLoaded,
+  loadIndependentSettingsSections,
+  type SettingsSectionLoadResult,
+} from "@/lib/settings-section-load";
 
 export interface AdminPriceRow {
   uid: string;
@@ -22,6 +27,39 @@ export interface SaveAdminMoneySettingsInput {
   deletedPriceIds: string[];
   dirtyRankIds: string[];
   deletedRankIds: string[];
+  pricesLoaded: boolean;
+  ranksLoaded: boolean;
+}
+
+export interface AdminMoneySettings {
+  prices: SettingsSectionLoadResult<AdminPriceRow[]>;
+  ranks: SettingsSectionLoadResult<AdminRankRow[]>;
+}
+
+export async function loadAdminMoneySettings(): Promise<AdminMoneySettings> {
+  const [prices, ranks] = await loadIndependentSettingsSections(
+    loadAdminPrices,
+    loadAdminRanks,
+  );
+  return { prices, ranks };
+}
+
+async function loadAdminPrices(): Promise<AdminPriceRow[]> {
+  const priceSnap = await getDocs(collection(db, "priceMaster"));
+  const prices: AdminPriceRow[] = [];
+  priceSnap.forEach((docSnap) => {
+    prices.push({ uid: docSnap.id, ...docSnap.data() } as AdminPriceRow);
+  });
+  return prices;
+}
+
+async function loadAdminRanks(): Promise<AdminRankRow[]> {
+  const rankSnap = await getDocs(collection(db, "rankMaster"));
+  const ranks: AdminRankRow[] = [];
+  rankSnap.forEach((docSnap) => {
+    ranks.push({ uid: docSnap.id, ...docSnap.data() } as AdminRankRow);
+  });
+  return ranks.sort((a, b) => Number(b.minScore) - Number(a.minScore));
 }
 
 export async function saveAdminMoneySettings({
@@ -31,7 +69,10 @@ export async function saveAdminMoneySettings({
   deletedPriceIds,
   dirtyRankIds,
   deletedRankIds,
+  pricesLoaded,
+  ranksLoaded,
 }: SaveAdminMoneySettingsInput): Promise<void> {
+  assertSettingsSectionsLoaded({ pricesLoaded, ranksLoaded });
   const batch = writeBatch(db);
 
   const priceSnap = await getDocs(collection(db, "priceMaster"));

@@ -1,6 +1,15 @@
 import { collection, doc, getDocs, serverTimestamp, writeBatch, type DocumentData } from "firebase/firestore";
 import { db } from "@/lib/firebase/config";
 import { assertNotChangedSinceLoad, createDocId, hasFieldChanges, isNewDocId } from "@/lib/firebase/diff-write";
+import {
+  normalizeAdminSystemNotificationSettings,
+  type NormalizedAdminSystemNotificationSettings,
+} from "@/lib/firebase/admin-notification-settings-load-state";
+import {
+  assertSettingsSectionsLoaded,
+  loadIndependentSettingsSections,
+  type SettingsSectionLoadResult,
+} from "@/lib/settings-section-load";
 
 export interface AdminLineConfig {
   uid: string;
@@ -17,6 +26,41 @@ export interface SaveAdminNotificationSettingsInput {
   lineConfigs: AdminLineConfig[];
   dirtyLineConfigIds: string[];
   deletedLineConfigIds: string[];
+  notifySettingsLoaded: boolean;
+  lineConfigsLoaded: boolean;
+}
+
+export interface AdminNotificationSettingsLoadResult {
+  notifySettings: SettingsSectionLoadResult<NormalizedAdminSystemNotificationSettings>;
+  lineConfigs: SettingsSectionLoadResult<AdminLineConfig[]>;
+}
+
+export async function loadAdminNotificationSettings(): Promise<AdminNotificationSettingsLoadResult> {
+  const [notifySettings, lineConfigs] = await loadIndependentSettingsSections(
+    loadAdminSystemNotificationSettings,
+    loadAdminLineConfigs,
+  );
+
+  return { notifySettings, lineConfigs };
+}
+
+async function loadAdminSystemNotificationSettings(): Promise<NormalizedAdminSystemNotificationSettings> {
+  const notifySnap = await getDocs(collection(db, "notifySettings"));
+  let configData: Record<string, unknown> | undefined;
+  notifySnap.forEach((docSnap) => {
+    if (docSnap.id !== "config") return;
+    configData = docSnap.data();
+  });
+  return normalizeAdminSystemNotificationSettings(configData);
+}
+
+async function loadAdminLineConfigs(): Promise<AdminLineConfig[]> {
+  const lineSnap = await getDocs(collection(db, "lineConfigs"));
+  const lineConfigs: AdminLineConfig[] = [];
+  lineSnap.forEach((docSnap) => {
+    lineConfigs.push({ uid: docSnap.id, ...docSnap.data() } as AdminLineConfig);
+  });
+  return lineConfigs;
 }
 
 export async function saveAdminNotificationSettings({
@@ -26,7 +70,10 @@ export async function saveAdminNotificationSettings({
   lineConfigs,
   dirtyLineConfigIds,
   deletedLineConfigIds,
+  notifySettingsLoaded,
+  lineConfigsLoaded,
 }: SaveAdminNotificationSettingsInput): Promise<void> {
+  assertSettingsSectionsLoaded({ notifySettingsLoaded, lineConfigsLoaded });
   const batch = writeBatch(db);
 
   batch.set(doc(db, "notifySettings", "config"), {

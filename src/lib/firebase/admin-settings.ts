@@ -6,6 +6,11 @@ export type PortalSettings = {
   autoReturnMinute: number;
 };
 
+export type PortalAutoReturnSchedule = {
+  autoReturnHour: number;
+  autoReturnMinute: number;
+};
+
 export type InspectionSettings = {
   validityYears: number;
   alertMonths: number;
@@ -33,6 +38,21 @@ export async function getPortalSettings(): Promise<PortalSettings> {
     autoReturnMinute: typeof data.autoReturnMinute === "number"
       ? data.autoReturnMinute
       : DEFAULT_PORTAL_SETTINGS.autoReturnMinute,
+  };
+}
+
+export async function getPortalAutoReturnSchedule(): Promise<PortalAutoReturnSchedule | null> {
+  const snap = await getDoc(doc(db, "settings", "portal"));
+  if (!snap.exists()) return null;
+
+  const data = snap.data();
+  if (data.autoReturnHour == null || data.autoReturnMinute == null) {
+    return null;
+  }
+
+  return {
+    autoReturnHour: Number(data.autoReturnHour),
+    autoReturnMinute: Number(data.autoReturnMinute),
   };
 }
 

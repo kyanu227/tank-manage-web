@@ -3,11 +3,9 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Printer } from "lucide-react";
 import {
-  buildInvoiceCandidates,
   type InvoiceCandidate,
 } from "@/lib/billing/invoice-candidate";
 import {
-  DEFAULT_BILLING_INVOICE_SETTINGS,
   normalizeBillingInvoiceSettings,
   type BillingInvoiceSettings,
   type CarryOverBillingMode,
@@ -16,12 +14,11 @@ import {
   type BillingRoundingMode,
   type BillingTaxMode,
 } from "@/lib/billing/settings";
-import { logsRepository } from "@/lib/firebase/repositories";
 import {
   getBillingInvoiceSettings,
   saveBillingInvoiceSettings,
 } from "@/lib/firebase/billing-settings-service";
-import { getBillingCustomerMasters } from "@/lib/firebase/billing-customers-service";
+import { useBillingInvoiceCandidates } from "@/hooks/useBillingInvoiceCandidates";
 
 type BillingTab = "list" | "settings";
 
@@ -91,55 +88,25 @@ function labelStyle(): CSSProperties {
 }
 
 export default function BillingPage() {
-  const [bills, setBills] = useState<InvoiceCandidate[]>([]);
-  const [selectedBillKey, setSelectedBillKey] = useState<string | null>(null);
-  const [settings, setSettings] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
-  const [settingsDraft, setSettingsDraft] = useState<BillingInvoiceSettings>(DEFAULT_BILLING_INVOICE_SETTINGS);
   const [activeTab, setActiveTab] = useState<BillingTab>("list");
-  const [loading, setLoading] = useState(true);
   const [savingSettings, setSavingSettings] = useState(false);
   const [printMode, setPrintMode] = useState<PrintMode>(null);
   const [period, setPeriod] = useState(() => {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
   });
+  const {
+    bills,
+    selectedBillKey,
+    setSelectedBillKey,
+    settings,
+    setSettings,
+    settingsDraft,
+    setSettingsDraft,
+    loading,
+  } = useBillingInvoiceCandidates(period);
 
   const issueDate = useMemo(() => formatIssueDate(new Date()), []);
-
-  useEffect(() => {
-    (async () => {
-      setLoading(true);
-      try {
-        const [logs, customers, invoiceSettings] = await Promise.all([
-          logsRepository.getActiveLogs(),
-          getBillingCustomerMasters(),
-          getBillingInvoiceSettings().catch((error) => {
-            console.error("Fetch billing invoice settings error:", error);
-            return DEFAULT_BILLING_INVOICE_SETTINGS;
-          }),
-        ]);
-        const normalizedSettings = normalizeBillingInvoiceSettings(invoiceSettings);
-        setSettings(normalizedSettings);
-        setSettingsDraft(normalizedSettings);
-
-        const items = buildInvoiceCandidates({
-          logs,
-          customers,
-          period,
-          settings: normalizedSettings,
-        });
-        setBills(items);
-        setSelectedBillKey((current) => {
-          if (current && items.some((item) => item.key === current)) return current;
-          return items[0]?.key ?? null;
-        });
-      } catch (e) {
-        console.error(e);
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [period]);
 
   useEffect(() => {
     const handleAfterPrint = () => setPrintMode(null);

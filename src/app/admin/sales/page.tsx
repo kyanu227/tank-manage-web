@@ -1,66 +1,20 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState } from "react";
 import { BarChart3, Calendar, Archive } from "lucide-react";
-import { logsRepository } from "@/lib/firebase/repositories";
-import {
-  addLocalDays,
-  buildDailyOperationStats,
-  toLocalDateKey,
-  type DailyOperationStat,
-} from "@/lib/analytics/operation-stats";
-import { getMonthlyStats, type MonthlyStat } from "@/lib/firebase/monthly-stats-service";
+import { useSalesStats } from "@/hooks/useSalesStats";
 
 export default function SalesPage() {
   const [tab, setTab] = useState<"daily" | "monthly">("daily");
-  
-  // Daily Stats State
-  const [dailyStats, setDailyStats] = useState<DailyOperationStat[]>([]);
-  const [loadingDaily, setLoadingDaily] = useState(true);
-
-  // Monthly Stats State
-  const [monthlyStats, setMonthlyStats] = useState<MonthlyStat[]>([]);
-  const [loadingMonthly, setLoadingMonthly] = useState(true);
-
-  // Fetch Daily Stats (Last 30 Days)
-  useEffect(() => {
-    (async () => {
-      try {
-        // Only fetch a reasonable amount of recent logs for daily stats
-        const logs = await logsRepository.getActiveLogs({ limit: 3000 });
-        setDailyStats(buildDailyOperationStats(logs, { limit: 30 }));
-      } catch (e) { console.error(e); }
-      finally { setLoadingDaily(false); }
-    })();
-  }, []);
-
-  // Fetch Monthly Stats (Archived Data)
-  useEffect(() => {
-    (async () => {
-      try {
-        setMonthlyStats(await getMonthlyStats());
-      } catch (e) { console.error("Failed to load monthly stats", e); }
-      finally { setLoadingMonthly(false); }
-    })();
-  }, []);
-
-  const todayKey = toLocalDateKey(new Date());
-  const yesterdayKey = toLocalDateKey(addLocalDays(new Date(), -1));
-  const todayStat = dailyStats.find((stat) => stat.date === todayKey);
-  const yesterdayStat = dailyStats.find((stat) => stat.date === yesterdayKey);
-  const todayTotal = todayStat?.total || 0;
-  const yesterdayTotal = yesterdayStat?.total || 0;
-  const ratio = yesterdayTotal > 0 ? Math.round(((todayTotal - yesterdayTotal) / yesterdayTotal) * 100) : 0;
-
-  // Group monthly stats by month for accordion/table display
-  const groupedMonthly = useMemo(() => {
-    const map = new Map<string, MonthlyStat[]>();
-    monthlyStats.forEach(stat => {
-      if (!map.has(stat.month)) map.set(stat.month, []);
-      map.get(stat.month)!.push(stat);
-    });
-    return Array.from(map.entries()).sort((a, b) => b[0].localeCompare(a[0])); // sort desc
-  }, [monthlyStats]);
+  const {
+    dailyStats,
+    groupedMonthly,
+    loadingDaily,
+    loadingMonthly,
+    todayStat,
+    todayTotal,
+    ratio,
+  } = useSalesStats();
 
   return (
     <div>

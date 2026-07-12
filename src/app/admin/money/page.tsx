@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Wallet, Plus, Trash2, Save, Loader2 } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
+import { Wallet, Plus, Trash2, Save, Loader2, RefreshCw } from "lucide-react";
 import { isNewDocId } from "@/lib/firebase/diff-write";
-import { saveAdminMoneySettings } from "@/lib/firebase/admin-money-settings";
+import {
+  loadAdminMoneySettings,
+  saveAdminMoneySettings,
+} from "@/lib/firebase/admin-money-settings";
 
 interface PriceRow { uid: string; action: string; base: number | string; score: number | string; }
 interface RankRow { uid: string; name: string; minScore: number | string; }
@@ -19,23 +20,46 @@ export default function MoneySettingsPage() {
   const [deletedPriceIds, setDeletedPriceIds] = useState<string[]>([]);
   const [dirtyRankIds, setDirtyRankIds] = useState<string[]>([]);
   const [deletedRankIds, setDeletedRankIds] = useState<string[]>([]);
+  const [pricesLoaded, setPricesLoaded] = useState(false);
+  const [ranksLoaded, setRanksLoaded] = useState(false);
+  const [pricesLoadError, setPricesLoadError] = useState<string | null>(null);
+  const [ranksLoadError, setRanksLoadError] = useState<string | null>(null);
 
   const fetchSettings = useCallback(async () => {
+    setLoading(true);
     try {
-      const pSnap = await getDocs(collection(db, "priceMaster"));
-      const pList: PriceRow[] = [];
-      pSnap.forEach((d) => pList.push({ uid: d.id, ...d.data() } as PriceRow));
-      setPrices(pList);
-      setDirtyPriceIds([]);
-      setDeletedPriceIds([]);
+      const result = await loadAdminMoneySettings();
+      const loadedPrices = result.prices.status === "loaded";
+      const loadedRanks = result.ranks.status === "loaded";
+      setPricesLoaded(loadedPrices);
+      setRanksLoaded(loadedRanks);
 
-      const rSnap = await getDocs(collection(db, "rankMaster"));
-      const rList: RankRow[] = [];
-      rSnap.forEach((d) => rList.push({ uid: d.id, ...d.data() } as RankRow));
-      setRanks(rList.sort((a, b) => Number(b.minScore) - Number(a.minScore)));
-      setDirtyRankIds([]);
-      setDeletedRankIds([]);
-    } catch (e) { console.error(e); }
+      if (result.prices.status === "loaded") {
+        setPrices(result.prices.value);
+        setDirtyPriceIds([]);
+        setDeletedPriceIds([]);
+        setPricesLoadError(null);
+      } else {
+        console.error("Failed to load price settings", result.prices.error);
+        setPricesLoadError("単価マスタを読み込めませんでした。");
+      }
+
+      if (result.ranks.status === "loaded") {
+        setRanks(result.ranks.value);
+        setDirtyRankIds([]);
+        setDeletedRankIds([]);
+        setRanksLoadError(null);
+      } else {
+        console.error("Failed to load rank settings", result.ranks.error);
+        setRanksLoadError("ランク条件を読み込めませんでした。");
+      }
+    } catch (e) {
+      console.error(e);
+      setPricesLoaded(false);
+      setRanksLoaded(false);
+      setPricesLoadError("単価マスタを読み込めませんでした。");
+      setRanksLoadError("ランク条件を読み込めませんでした。");
+    }
     finally { setLoading(false); }
   }, []);
 
@@ -70,6 +94,10 @@ export default function MoneySettingsPage() {
   };
 
   const handleSave = async () => {
+    if (!pricesLoaded || !ranksLoaded) {
+      alert("未取得の設定があるため保存できません。再読み込みしてください。");
+      return;
+    }
     if (!confirm("金銭・ランク設定を保存しますか？")) return;
     setSaving(true);
     try {
@@ -80,6 +108,8 @@ export default function MoneySettingsPage() {
         deletedPriceIds,
         dirtyRankIds,
         deletedRankIds,
+        pricesLoaded,
+        ranksLoaded,
       });
       await fetchSettings();
       alert("金銭・ランク設定を保存しました。");
@@ -94,10 +124,23 @@ export default function MoneySettingsPage() {
 
   if (loading) return <div style={{ padding: 60, textAlign: "center", color: "#94a3b8" }}>読み込み中…</div>;
 
+  const canSave = pricesLoaded && ranksLoaded;
+
   return (
     <div>
       <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", marginBottom: 4 }}>金銭・ランク設定</h1>
       <p style={{ fontSize: 14, color: "#94a3b8", marginBottom: 24 }}>操作単価とランク条件の管理</p>
+
+      {(pricesLoadError || ranksLoadError) && (
+        <div role="alert" style={{ background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 12, padding: 14, marginBottom: 20, color: "#9a3412", fontSize: 13 }}>
+          {pricesLoadError && <div>{pricesLoadError}</div>}
+          {ranksLoadError && <div>{ranksLoadError}</div>}
+          <div style={{ marginTop: 6 }}>取得できた領域は表示していますが、全領域を再取得するまで保存できません。</div>
+          <button onClick={() => void fetchSettings()} style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, border: "1px solid #fdba74", background: "#fff", color: "#9a3412", fontWeight: 700, cursor: "pointer" }}>
+            <RefreshCw size={14} /> 再読み込み
+          </button>
+        </div>
+      )}
 
       {/* Price master */}
       <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 24, marginBottom: 20 }}>
@@ -151,8 +194,8 @@ export default function MoneySettingsPage() {
         </div>
       </div>
 
-      <button onClick={handleSave} disabled={saving}
-        style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "12px 24px", borderRadius: 12, border: "none", background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.7 : 1 }}>
+      <button onClick={handleSave} disabled={saving || !canSave}
+        style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "12px 24px", borderRadius: 12, border: "none", background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 700, cursor: canSave ? "pointer" : "not-allowed", opacity: saving || !canSave ? 0.7 : 1 }}>
         {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Save size={16} />}
         {saving ? "保存中…" : "金銭・ランク設定を保存"}
       </button>

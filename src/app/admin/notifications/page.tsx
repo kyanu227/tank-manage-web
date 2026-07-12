@@ -1,11 +1,12 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { Bell, Plus, Trash2, Save, Loader2, Mail, MessageSquare } from "lucide-react";
-import { db } from "@/lib/firebase/config";
-import { collection, getDocs } from "firebase/firestore";
+import { Bell, Plus, Trash2, Save, Loader2, Mail, MessageSquare, RefreshCw } from "lucide-react";
 import { isNewDocId } from "@/lib/firebase/diff-write";
-import { saveAdminNotificationSettings } from "@/lib/firebase/admin-notification-settings";
+import {
+  loadAdminNotificationSettings,
+  saveAdminNotificationSettings,
+} from "@/lib/firebase/admin-notification-settings";
 
 interface LineConfig {
   uid: string;
@@ -30,25 +31,47 @@ export default function NotificationsPage() {
   const [loading, setLoading] = useState(true);
   const [dirtyLineConfigIds, setDirtyLineConfigIds] = useState<string[]>([]);
   const [deletedLineConfigIds, setDeletedLineConfigIds] = useState<string[]>([]);
+  const [notifySettingsLoaded, setNotifySettingsLoaded] = useState(false);
+  const [lineConfigsLoaded, setLineConfigsLoaded] = useState(false);
+  const [notifySettingsLoadError, setNotifySettingsLoadError] = useState<string | null>(null);
+  const [lineConfigsLoadError, setLineConfigsLoadError] = useState<string | null>(null);
 
   const fetchSettings = useCallback(async () => {
+    setLoading(true);
     try {
-      const snap = await getDocs(collection(db, "notifySettings"));
-      snap.forEach((d) => {
-        const data = d.data();
-        if (d.id === "config") {
-          setEmails(data.emails || []);
-          setAlertMonths(data.alertMonths || 6);
-          setValidityYears(data.validityYears || 3);
-        }
-      });
-      const lineSnap = await getDocs(collection(db, "lineConfigs"));
-      const configs: LineConfig[] = [];
-      lineSnap.forEach((d) => configs.push({ uid: d.id, ...d.data() } as LineConfig));
-      setLineConfigs(configs);
-      setDirtyLineConfigIds([]);
-      setDeletedLineConfigIds([]);
-    } catch (e) { console.error(e); }
+      const result = await loadAdminNotificationSettings();
+      const notifyLoaded = result.notifySettings.status === "loaded";
+      const lineLoaded = result.lineConfigs.status === "loaded";
+      setNotifySettingsLoaded(notifyLoaded);
+      setLineConfigsLoaded(lineLoaded);
+
+      if (result.notifySettings.status === "loaded") {
+        const settings = result.notifySettings.value.settings;
+        setEmails(settings.emails);
+        setAlertMonths(settings.alertMonths);
+        setValidityYears(settings.validityYears);
+        setNotifySettingsLoadError(null);
+      } else {
+        console.error("Failed to load notification settings", result.notifySettings.error);
+        setNotifySettingsLoadError("Email・検査通知設定を読み込めませんでした。");
+      }
+
+      if (result.lineConfigs.status === "loaded") {
+        setLineConfigs(result.lineConfigs.value);
+        setDirtyLineConfigIds([]);
+        setDeletedLineConfigIds([]);
+        setLineConfigsLoadError(null);
+      } else {
+        console.error("Failed to load LINE settings", result.lineConfigs.error);
+        setLineConfigsLoadError("LINE通知設定を読み込めませんでした。");
+      }
+    } catch (e) {
+      console.error(e);
+      setNotifySettingsLoaded(false);
+      setLineConfigsLoaded(false);
+      setNotifySettingsLoadError("Email・検査通知設定を読み込めませんでした。");
+      setLineConfigsLoadError("LINE通知設定を読み込めませんでした。");
+    }
     finally { setLoading(false); }
   }, []);
 
@@ -82,6 +105,10 @@ export default function NotificationsPage() {
   };
 
   const handleSave = async () => {
+    if (!notifySettingsLoaded || !lineConfigsLoaded) {
+      alert("未取得の設定があるため保存できません。再読み込みしてください。");
+      return;
+    }
     setSaving(true);
     try {
       await saveAdminNotificationSettings({
@@ -91,6 +118,8 @@ export default function NotificationsPage() {
         lineConfigs,
         dirtyLineConfigIds,
         deletedLineConfigIds,
+        notifySettingsLoaded,
+        lineConfigsLoaded,
       });
       await fetchSettings();
       alert("通知設定を保存しました。");
@@ -109,10 +138,23 @@ export default function NotificationsPage() {
 
   if (loading) return <div style={{ padding: 60, textAlign: "center", color: "#94a3b8" }}>読み込み中…</div>;
 
+  const canSave = notifySettingsLoaded && lineConfigsLoaded;
+
   return (
     <div>
       <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", marginBottom: 4 }}>通知設定</h1>
       <p style={{ fontSize: 14, color: "#94a3b8", marginBottom: 24 }}>LINE・Email通知と耐圧検査アラートの設定</p>
+
+      {(notifySettingsLoadError || lineConfigsLoadError) && (
+        <div role="alert" style={{ background: "#fff7ed", border: "1px solid #fdba74", borderRadius: 12, padding: 14, marginBottom: 20, color: "#9a3412", fontSize: 13 }}>
+          {notifySettingsLoadError && <div>{notifySettingsLoadError}</div>}
+          {lineConfigsLoadError && <div>{lineConfigsLoadError}</div>}
+          <div style={{ marginTop: 6 }}>取得できた領域は表示していますが、全領域を再取得するまで保存できません。</div>
+          <button onClick={() => void fetchSettings()} style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 10px", borderRadius: 8, border: "1px solid #fdba74", background: "#fff", color: "#9a3412", fontWeight: 700, cursor: "pointer" }}>
+            <RefreshCw size={14} /> 再読み込み
+          </button>
+        </div>
+      )}
 
       {/* System Settings */}
       <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 24, marginBottom: 20 }}>
@@ -200,8 +242,8 @@ export default function NotificationsPage() {
       </div>
 
       {/* Save */}
-      <button onClick={handleSave} disabled={saving}
-        style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "12px 24px", borderRadius: 12, border: "none", background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 700, cursor: "pointer", opacity: saving ? 0.7 : 1 }}>
+      <button onClick={handleSave} disabled={saving || !canSave}
+        style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "12px 24px", borderRadius: 12, border: "none", background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 700, cursor: canSave ? "pointer" : "not-allowed", opacity: saving || !canSave ? 0.7 : 1 }}>
         {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Save size={16} />}
         {saving ? "保存中…" : "通知設定を保存"}
       </button>

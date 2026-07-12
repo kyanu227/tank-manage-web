@@ -3,9 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { ArrowLeft, Send, CheckCircle2, Clock, RotateCcw, AlertCircle } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { db } from "@/lib/firebase/config";
-import { doc, getDoc } from "firebase/firestore";
 import ReturnTagSelector, { getReturnTagLabel, getReturnTagStyle, type ReturnTagValue } from "@/components/ReturnTagSelector";
+import { getPortalAutoReturnSchedule } from "@/lib/firebase/admin-settings";
 import { createPortalReturnRequests } from "@/lib/firebase/portal-transaction-service";
 import { getPortalCurrentLentTanks } from "@/lib/portal/customer-reads";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
@@ -59,7 +58,7 @@ export default function CustomerReturnPage() {
 
       const [tankDocs, settingsDoc] = await Promise.all([
         getPortalCurrentLentTanks(currentIdentity),
-        getDoc(doc(db, "settings", "portal")),
+        getPortalAutoReturnSchedule(),
       ]);
 
       const items: TankItem[] = tankDocs.map((t) => {
@@ -71,13 +70,10 @@ export default function CustomerReturnPage() {
       setTanks(items);
 
       // Schedule
-      if (settingsDoc.exists()) {
-        const s = settingsDoc.data();
-        if (s.autoReturnHour != null && s.autoReturnMinute != null) {
-          const h = String(s.autoReturnHour).padStart(2, "0");
-          const m = String(s.autoReturnMinute).padStart(2, "0");
-          setScheduleTime(`${h}:${m}`);
-        }
+      if (settingsDoc) {
+        const h = String(settingsDoc.autoReturnHour).padStart(2, "0");
+        const m = String(settingsDoc.autoReturnMinute).padStart(2, "0");
+        setScheduleTime(`${h}:${m}`);
       }
     } catch (e) {
       console.error(e);
