@@ -5,6 +5,7 @@ import {
   isTransitionPlan,
   normalizeTankOperationPolicy,
   planTankTransition,
+  resolvePlannerPolicyMode,
   type TransitionPlan,
 } from "@/lib/tank-transition-policy";
 
@@ -47,7 +48,7 @@ const relend = requirePlan(planTankTransition({
     customerName: customerA.customerName,
     location: "A社",
   },
-  requestedAction: "order_lend",
+  requestedAction: "lend",
   targetCustomer: customerB,
   targetLocation: "B社",
 }));
@@ -129,6 +130,25 @@ assert.deepEqual(normalizeTankOperationPolicy(null), {
   transitionEnforcement: "strict",
   policyRevision: 0,
 });
+assert.equal(resolvePlannerPolicyMode("advisory", {
+  source: "manual",
+  workflow: "tank_operation",
+}), "advisory");
+assert.equal(resolvePlannerPolicyMode("advisory", {
+  source: "manual",
+  workflow: "tank_operation",
+}, "order_lend"), "strict", "受注貸出actionはstaff-directを偽装してもstrictへ固定する");
+for (const context of [
+  { source: "order_fulfillment" as const, workflow: "order" as const, transactionId: "order-1" },
+  { source: "return_tag_processing" as const, workflow: "return" as const, transactionId: "return-1" },
+  { source: "portal" as const, workflow: "uncharged_report" as const, transactionId: "report-1" },
+]) {
+  assert.equal(
+    resolvePlannerPolicyMode("advisory", context),
+    "strict",
+    `${context.workflow} workflowはstrictへ固定する`,
+  );
+}
 
 const fingerprintInput = {
   latestLogId: "log-a",
@@ -136,7 +156,7 @@ const fingerprintInput = {
   location: "A社",
   customerId: "customer-a",
   customerName: "A社",
-  requestedAction: "order_lend" as const,
+  requestedAction: "lend" as const,
   plan: relend.plan,
   policyRevision: 8,
 };
@@ -176,7 +196,7 @@ const unreturnedRelend = requirePlan(planTankTransition({
     customerName: customerA.customerName,
     location: "A社",
   },
-  requestedAction: "order_lend",
+  requestedAction: "lend",
   targetCustomer: customerB,
   targetLocation: "B社",
 }));

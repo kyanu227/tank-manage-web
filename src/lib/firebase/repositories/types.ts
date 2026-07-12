@@ -119,8 +119,6 @@ export interface TransactionDoc {
   fulfilledByStaffId?: string;
   fulfilledByStaffName?: string;
   fulfilledByStaffEmail?: string;
-  /** 返却完了transactionと同atomic requestで作成されたtank log。 */
-  fulfilledLogId?: string;
   linkedByStaffId?: string;
   linkedByStaffName?: string;
   linkedByStaffEmail?: string;

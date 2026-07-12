@@ -1,5 +1,5 @@
-/** Rulesでtank/log/return transactionを相互検証する最も重い経路の実測上限。 */
-export const MAX_ATOMIC_TANK_OPERATIONS = 10;
+/** 全tank operation共通のapplication上限。staff直接recoveryで100件まで実測済み。 */
+export const MAX_ATOMIC_TANK_OPERATIONS = 100;
 
 export function assertAtomicTankOperationCount(count: number): void {
   if (!Number.isSafeInteger(count) || count < 0) {

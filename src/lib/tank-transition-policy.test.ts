@@ -3,7 +3,9 @@ import { getTankActionLabel } from "@/lib/tank-action-status-labels";
 import {
   createRecoveryConfirmationFingerprint,
   deriveAffectedCustomers,
+  isStaffDirectAdvisoryContext,
   planTankTransition,
+  resolvePlannerPolicyMode,
   type TransitionPlan,
 } from "@/lib/tank-transition-policy";
 
@@ -57,7 +59,7 @@ describe("tank transition planner", () => {
     const result = requirePlan(planTankTransition({
       policyMode: "advisory",
       current: { status: "lent", ...customerA, location: "A社" },
-      requestedAction: "order_lend",
+      requestedAction: "lend",
       targetCustomer: customerB,
       targetLocation: "B社",
     }));
@@ -124,12 +126,47 @@ describe("tank transition planner", () => {
   });
 });
 
+describe("advisory operation scope", () => {
+  it.each([
+    { source: "manual" as const, workflow: "tank_operation" as const },
+    { source: "bulk_return" as const, workflow: "tank_operation" as const },
+  ])("allows explicit staff-direct context: $source", (context) => {
+    expect(isStaffDirectAdvisoryContext(context)).toBe(true);
+    expect(resolvePlannerPolicyMode("advisory", context)).toBe("advisory");
+  });
+
+  it.each([
+    { source: "order_fulfillment" as const, workflow: "order" as const, transactionId: "order-1" },
+    { source: "return_tag_processing" as const, workflow: "return" as const, transactionId: "return-1" },
+    { source: "portal" as const, workflow: "uncharged_report" as const, transactionId: "report-1" },
+    { source: "manual" as const, workflow: "tank_operation" as const, transactionId: "unexpected" },
+    {},
+  ])("keeps customer/transaction/unspecified context strict: %#", (context) => {
+    expect(isStaffDirectAdvisoryContext(context)).toBe(false);
+    expect(resolvePlannerPolicyMode("advisory", context)).toBe("strict");
+  });
+
+  it("keeps every context strict when the configured policy is strict", () => {
+    expect(resolvePlannerPolicyMode("strict", {
+      source: "manual",
+      workflow: "tank_operation",
+    })).toBe("strict");
+  });
+
+  it("keeps order_lend strict even if a caller labels it as staff-direct", () => {
+    expect(resolvePlannerPolicyMode("advisory", {
+      source: "manual",
+      workflow: "tank_operation",
+    }, "order_lend")).toBe("strict");
+  });
+});
+
 describe("recovery confirmation fingerprint", () => {
   it("is canonical across batch order and changes with audited state", async () => {
     const plan = requirePlan(planTankTransition({
       policyMode: "advisory",
       current: { status: "lent", ...customerA, location: "A社" },
-      requestedAction: "order_lend",
+      requestedAction: "lend",
       targetCustomer: customerB,
       targetLocation: "B社",
     })).plan;
@@ -139,7 +176,7 @@ describe("recovery confirmation fingerprint", () => {
       location: "A社",
       customerId: customerA.customerId,
       customerName: customerA.customerName,
-      requestedAction: "order_lend" as const,
+      requestedAction: "lend" as const,
       plan,
       policyRevision: 8,
     };
@@ -165,7 +202,7 @@ describe("recovery confirmation fingerprint", () => {
     const plan = requirePlan(planTankTransition({
       policyMode: "advisory",
       current: { status: "lent", ...customerA, location: "A社" },
-      requestedAction: "order_lend",
+      requestedAction: "lend",
       targetCustomer: customerB,
       targetLocation: "B社",
     })).plan;
@@ -176,7 +213,7 @@ describe("recovery confirmation fingerprint", () => {
       location: "A社",
       customerId: customerA.customerId,
       customerName: customerA.customerName,
-      requestedAction: "order_lend" as const,
+      requestedAction: "lend" as const,
       plan,
       policyRevision: 8,
     };
@@ -196,7 +233,7 @@ describe("recovery confirmation fingerprint", () => {
     const changedStatusPlan = requirePlan(planTankTransition({
       policyMode: "advisory",
       current: { status: "unreturned", ...customerA, location: "A社" },
-      requestedAction: "order_lend",
+      requestedAction: "lend",
       targetCustomer: customerB,
       targetLocation: "B社",
     })).plan;

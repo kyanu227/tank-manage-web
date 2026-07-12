@@ -347,6 +347,12 @@ service cloud.firestore {
           && data.get("policyRevision", -1) == 0;
     }
 
+    function isStaffDirectRecoveryData(data) {
+      return data.get("source", "") in ["manual", "bulk_return"]
+        && data.get("workflow", "") == "tank_operation"
+        && !data.keys().hasAny(["transactionId"]);
+    }
+
     function revisionAfter() {
       return getAfter(/databases/$(database)/documents/settings/tankAggregationRevision).data;
     }
@@ -442,6 +448,8 @@ service cloud.firestore {
             : (
               data.transitionReviewStatus == "pending"
               && data.policyMode == "advisory"
+              && isStaffDirectRecoveryData(data)
+              && data.get("action", "") != "order_lend"
               && data.get("recoveryReason", "") is string
               && data.get("recoveryReason", "").size() >= 5
               && isCompleteRecoveryEvidence(plan, data.get("recoveryEvidence", {}))
@@ -453,93 +461,6 @@ service cloud.firestore {
           && tankAfter.get("latestLogId", "") == logId
           && tankSnapshotMatches(data.nextTankSnapshot, tankAfter)
         );
-    }
-
-    function isValidReturnTransitionStep(step, data) {
-      let rentalClose = step.get("action", "") in [
-        "return", "return_unused", "return_uncharged"
-      ];
-      return step is map
-        && step.keys().hasOnly([
-          "action", "fromStatus", "toStatus", "actorType", "businessEffect",
-          "customerId", "customerName", "location"
-        ])
-        && step.get("actorType", "") == "operator"
-        && step.get("location", "") is string
-        && step.get("location", "").size() > 0
-        && (
-          rentalClose
-          ? (
-            step.get("fromStatus", "") in ["lent", "unreturned"]
-            && step.get("toStatus", "") == (
-              step.get("action", "") == "return_unused" ? "filled" : "empty"
-            )
-            && step.get("businessEffect", "") == "rental_close"
-            && step.get("customerId", "") == data.get("customerId", "")
-            && step.get("customerName", "") == data.get("customerName", "")
-          )
-          : (
-            step.get("action", "") == "carry_over"
-            && step.get("fromStatus", "") == "lent"
-            && step.get("toStatus", "") == "unreturned"
-            && step.get("businessEffect", "") == "state_only"
-            && !step.keys().hasAny(["customerId", "customerName"])
-          )
-        );
-    }
-
-    // 返却transaction由来の操作は必ず1-step direct。transactionとの相互結合を追加するため、
-    // recovery全分岐を評価しない専用pathでRules式数上限内に収める。
-    function isValidReturnTankTransitionLogCreate(logId) {
-      let data = request.resource.data;
-      let plan = data.get("transitionPlan", {});
-      let steps = plan.get("steps", []);
-      let tankAfter = getAfter(
-        /databases/$(database)/documents/tanks/$(data.get("tankId", ""))
-      ).data;
-      return data.keys().hasAll([
-          "tankId", "action", "transitionAction", "prevStatus", "newStatus",
-          "staffId", "staffName", "customerId", "customerName",
-          "transactionId", "workflow", "transitionPlan", "transitionReviewStatus",
-          "policyMode", "policyRevision", "affectedCustomerIds",
-          "hasUnknownAffectedCustomer", "prevTankSnapshot", "nextTankSnapshot",
-          "logStatus", "logKind", "rootLogId", "revision", "revisionCreatedAt"
-        ])
-        && data.get("tankId", "") is string
-        && data.get("tankId", "").size() > 0
-        && data.get("workflow", "") == "return"
-        && data.get("logKind", "") == "tank"
-        && data.get("logStatus", "") == "active"
-        && data.get("revision", 0) == 1
-        && data.get("rootLogId", "") == logId
-        && data.get("transitionReviewStatus", "") == "not_required"
-        && data.get("affectedCustomerIds", []) is list
-        && data.get("hasUnknownAffectedCustomer", null) is bool
-        && data.get("revisionCreatedAt", null) == request.time
-        && !data.keys().hasAny([
-          "supersedesLogId", "recoveryReason", "recoveryEvidence",
-          "recoveryConfirmationFingerprint", "reviewedAt", "reviewEventId"
-        ])
-        && plan is map
-        && plan.keys().hasOnly(["version", "kind", "steps", "requiredEvidence"])
-        && plan.get("version", 0) == 1
-        && plan.get("kind", "") == "direct"
-        && plan.get("requiredEvidence", []) == []
-        && steps is list
-        && steps.size() == 1
-        && isValidReturnTransitionStep(steps[0], data)
-        && steps[0].get("fromStatus", "") == data.get("prevStatus", "")
-        && steps[0].get("action", "") == data.get("transitionAction", "")
-        && steps[0].get("toStatus", "") == data.get("newStatus", "")
-        && data.get("prevTankSnapshot", {}).get("status", "") == data.get("prevStatus", "")
-        && data.get("nextTankSnapshot", {}).get("status", "") == data.get("newStatus", "")
-        && data.get("prevTankSnapshot", {}).get("customerId", null)
-          == data.get("customerId", "")
-        && actorMatchesAuth(data)
-        && transitionPolicyMatches(data)
-        && isRevisionWriteForLog(logId, "operation", true)
-        && tankAfter.get("latestLogId", "") == logId
-        && tankSnapshotMatches(data.get("nextTankSnapshot", {}), tankAfter);
     }
 
     // correctionは必ずdirect plan。recovery recipe全分岐を再評価せず、
@@ -564,7 +485,6 @@ service cloud.firestore {
         && data.get("logKind", "") == "tank"
         && data.get("logStatus", "") == "active"
         && data.get("transitionReviewStatus", "") == "not_required"
-        && data.get("workflow", "") != "return"
         && data.get("affectedCustomerIds", []) is list
         && data.get("hasUnknownAffectedCustomer", null) is bool
         && data.get("revisionCreatedAt", null) == request.time
@@ -595,11 +515,7 @@ service cloud.firestore {
 
     function isValidTankTransitionLogCreate(logId) {
       return request.resource.data.get("revision", 0) == 1
-        ? (
-          request.resource.data.get("workflow", "") == "return"
-          ? isValidReturnTankTransitionLogCreate(logId)
-          : isValidInitialTankTransitionLogCreate(logId)
-        )
+        ? isValidInitialTankTransitionLogCreate(logId)
         : isValidCorrectedTankTransitionLogCreate(logId);
     }
 
@@ -1313,22 +1229,7 @@ service cloud.firestore {
         );
     }
 
-    function isCompletedReturnLogCoupled(transactionId) {
-      let logId = request.resource.data.get("fulfilledLogId", "");
-      let logAfter = getAfter(/databases/$(database)/documents/logs/$(logId)).data;
-      return logId is string
-        && logId.size() > 0
-        && logAfter.get("logKind", "") == "tank"
-        && logAfter.get("logStatus", "") == "active"
-        && logAfter.get("workflow", "") == "return"
-        && logAfter.get("transactionId", "") == transactionId
-        && logAfter.get("tankId", "") == resource.data.get("tankId", "")
-        && logAfter.get("customerId", "") == resource.data.get("customerId", "")
-        && logAfter.get("prevTankSnapshot", {}).get("customerId", null)
-          == resource.data.get("customerId", "");
-    }
-
-    function isStaffReturnCompletionUpdate(transactionId) {
+    function isStaffReturnCompletionUpdate() {
       return isStaff()
         && resource.data.type == "return"
         && resource.data.status == "pending_return"
@@ -1342,7 +1243,6 @@ service cloud.firestore {
           "fulfilledByStaffId",
           "fulfilledByStaffName",
           "fulfilledByStaffEmail",
-          "fulfilledLogId",
           "updatedAt"
         ])
         && request.resource.data.keys().hasAll([
@@ -1351,8 +1251,7 @@ service cloud.firestore {
           "fulfilledAt",
           "fulfilledBy",
           "fulfilledByStaffId",
-          "fulfilledByStaffName",
-          "fulfilledLogId"
+          "fulfilledByStaffName"
         ])
         && request.resource.data.fulfilledBy is string
         && request.resource.data.fulfilledBy.size() > 0
@@ -1360,14 +1259,10 @@ service cloud.firestore {
         && request.resource.data.fulfilledByStaffId.size() > 0
         && request.resource.data.fulfilledByStaffName is string
         && request.resource.data.fulfilledByStaffName.size() > 0
-        && request.resource.data.fulfilledByStaffId == authenticatedStaffId()
-        && request.resource.data.fulfilledByStaffName == staffMirror().get("name", "")
         && (
           !request.resource.data.keys().hasAny(["fulfilledByStaffEmail"])
           || request.resource.data.fulfilledByStaffEmail is string
-            && request.resource.data.fulfilledByStaffEmail == request.auth.token.email
-        )
-        && isCompletedReturnLogCoupled(transactionId);
+        );
     }
 
     function isStaffPendingLinkOrderUpdate() {
@@ -1408,10 +1303,10 @@ service cloud.firestore {
         );
     }
 
-    function isStaffTransactionUpdate(transactionId) {
+    function isStaffTransactionUpdate() {
       return isStaffOrderApproveUpdate()
         || isStaffOrderFulfillUpdate()
-        || isStaffReturnCompletionUpdate(transactionId)
+        || isStaffReturnCompletionUpdate()
         || isStaffPendingLinkOrderUpdate();
     }
 
@@ -1705,7 +1600,7 @@ service cloud.firestore {
     match /transactions/{transactionId} {
       allow get, list: if isStaff() || isOwnTransaction();
       allow create: if isStaff() || isOwnTransactionCreate();
-      allow update: if isStaffTransactionUpdate(transactionId);
+      allow update: if isStaffTransactionUpdate();
       allow delete: if isAdmin();
     }
 

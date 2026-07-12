@@ -50,12 +50,12 @@ import {
   normalizeTransitionAction,
   pickRequiredRecoveryEvidence,
   planTankTransition,
+  resolvePlannerPolicyMode,
   type RecoveryEvidence,
   type RecoveryEvidenceKey,
   type TransitionEnforcementMode,
   type TransitionPlan,
 } from "./tank-transition-policy";
-import { assertReturnTransactionCustomerConsistency } from "./tank-return-transaction-consistency";
 import {
   assertAtomicTankOperationCount,
 } from "./tank-operation-limits";
@@ -365,10 +365,7 @@ export async function applyTankOperation(
  */
 export async function applyBulkTankOperations(
   inputs: TankOperationInput[],
-  extraOps?: (
-    writer: TankOperationWriter,
-    results: readonly TankOperationResult[],
-  ) => void,
+  extraOps?: (writer: TankOperationWriter) => void,
 ): Promise<TankOperationResult[]> {
   if (inputs.length === 0) return [];
   assertAtomicTankOperationCount(inputs.length);
@@ -389,10 +386,7 @@ export async function applyBulkTankOperations(
 
 async function runPlannedOperationsWithRecoveryConfirmation(
   initialPlanned: PlannedTankOperation[],
-  extraOps?: (
-    writer: TankOperationWriter,
-    results: readonly TankOperationResult[],
-  ) => void,
+  extraOps?: (writer: TankOperationWriter) => void,
 ): Promise<TankOperationResult[]> {
   let planned = initialPlanned;
 
@@ -401,7 +395,7 @@ async function runPlannedOperationsWithRecoveryConfirmation(
       return await runTransaction(db, async (tx) => {
         const results = await commitPlannedOperations(tx, planned);
         // callbackはtransaction writerへの宣言的な追加だけに限定する。
-        if (extraOps) extraOps(tx as unknown as TankOperationWriter, results);
+        if (extraOps) extraOps(tx as unknown as TankOperationWriter);
         return results;
       });
     } catch (error) {
@@ -426,60 +420,11 @@ async function commitPlannedOperations(
 ): Promise<TankOperationResult[]> {
   // policy read失敗はstrictとして続行せず、transaction全体をfail closedにする。
   const policy = await getTankOperationPolicyInTransaction(tx);
-  const returnTransactionRefs = planned.map((operation) => (
-    operation.input.context.workflow === "return"
-      ? doc(
-          db,
-          "transactions",
-          requireString(
-            operation.input.context.transactionId,
-            `[${operation.input.tankId}] 返却transaction ID`,
-          ).trim(),
-        )
-      : null
-  ));
   const aggregationRevisionRef = getTankAggregationRevisionRef();
-  const [tankSnaps, returnTransactionSnaps, aggregationRevisionSnapshot] = await Promise.all([
+  const [tankSnaps, aggregationRevisionSnapshot] = await Promise.all([
     Promise.all(planned.map((op) => tx.get(op.tankRef))),
-    Promise.all(returnTransactionRefs.map((reference) => (
-      reference ? tx.get(reference) : Promise.resolve(null)
-    ))),
     tx.get(aggregationRevisionRef),
   ]);
-
-  // 返却申請の顧客とtransaction実行時点のholderを、全件まとめて最初のwrite前に検証する。
-  assertReturnTransactionCustomerConsistency(
-    planned.flatMap((operation, index) => {
-      const transactionRef = returnTransactionRefs[index];
-      const transactionSnap = returnTransactionSnaps[index];
-      if (!transactionRef) return [];
-      if (!transactionSnap) {
-        throw new Error(`[${operation.input.tankId}] 返却transactionの読取結果がありません`);
-      }
-      const tankSnap = tankSnaps[index];
-      if (!tankSnap.exists()) {
-        throw new Error(`[${operation.input.tankId}] タンクが存在しません`);
-      }
-      const tankData = tankSnap.data();
-      const currentTank = snapshotFromTankData(tankData);
-      const transactionData = transactionSnap.exists() ? transactionSnap.data() : {};
-      return [{
-        tankId: operation.input.tankId,
-        currentStatus: currentTank.status,
-        latestLogId: stringOrNull(tankData.latestLogId),
-        tankCustomerId: currentTank.customerId,
-        contextCustomerId: operation.input.context.customer?.customerId,
-        transaction: {
-          id: transactionRef.id,
-          exists: transactionSnap.exists(),
-          type: transactionData.type,
-          status: transactionData.status,
-          tankId: transactionData.tankId,
-          customerId: transactionData.customerId,
-        },
-      }];
-    }),
-  );
 
   const prepared = planned.map((op, index): PreparedTankOperation => {
     const tankSnap = tankSnaps[index];
@@ -502,8 +447,13 @@ async function commitPlannedOperations(
       throw new Error(`[${op.input.tankId}] 通常のタンク状態遷移ではない操作です。`);
     }
 
+    const effectivePolicyMode = resolvePlannerPolicyMode(
+      policy.transitionEnforcement,
+      op.input.context,
+      requestedAction,
+    );
     const planResult = planTankTransition({
-      policyMode: policy.transitionEnforcement,
+      policyMode: effectivePolicyMode,
       current: {
         status: prevSnapshot.status,
         customerId: prevSnapshot.customerId,
@@ -528,6 +478,7 @@ async function commitPlannedOperations(
       transitionAction: planResult.transitionAction,
       logAction: requestedAction,
       transitionPlan: planResult.plan,
+      // policyModeは設定snapshot。contextによるstrict固定はtransitionPlanへ反映する。
       policyMode: policy.transitionEnforcement,
       policyRevision: policy.policyRevision,
     };

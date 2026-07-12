@@ -128,7 +128,8 @@ export default function TankOperationPolicySettingsPage() {
         <div style={{ fontSize: 12, lineHeight: 1.8, color: "#475569" }}>
           <div>現在: <strong>{policy.transitionEnforcement === "strict" ? "厳格" : "自動補完"}</strong></div>
           <div>policy revision: <strong>{policy.policyRevision}</strong></div>
-          <div>自動補完の対象: 貸出・受注貸出・返却・充填・自社利用・自社返却に必要な返却／充填補完</div>
+          <div>自動補完の対象: スタッフ直接の貸出・返却・充填・自社利用・自社返却に必要な返却／充填補完</div>
+          <div>顧客transaction対象外: 受注・返却申請・未充填申請の処理経路</div>
           <div>対象外: 破損報告・故障／不良化・修理・耐圧検査・検査不合格・廃棄</div>
         </div>
       </div>
@@ -136,7 +137,7 @@ export default function TankOperationPolicySettingsPage() {
       {!ADVISORY_ACTIVATION_ENABLED && (
         <div role="status" style={noticeStyle("warning")}>
           <LockKeyhole size={18} />
-          自動補完の有効化はrollout gateで停止中です。Rules保護と通常操作1/10/50/100件、返却連動1/10件のemulator検証後、
+          自動補完の有効化はrollout gateで停止中です。Rules保護とスタッフ直接操作1/10/50/100件のemulator検証後、
           build時に <code>NEXT_PUBLIC_TANK_ADVISORY_ACTIVATION_ENABLED=true</code> を設定してください。
         </div>
       )}

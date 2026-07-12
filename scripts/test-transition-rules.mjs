@@ -40,10 +40,6 @@ const CUSTOMER = {
   customerId: "customer-1",
   customerName: "Rules顧客",
 };
-const OTHER_CUSTOMER = {
-  customerId: "customer-2",
-  customerName: "別顧客",
-};
 const WAREHOUSE = "倉庫";
 
 const testEnvironment = await initializeTestEnvironment({
@@ -78,19 +74,14 @@ try {
     });
   }
 
-  for (const size of [1, 10]) {
-    await succeeds(`return transaction coupled operation: ${size}`, async () => {
-      await seedReturnBatch(size);
-      await executeReturnBatch(size);
+  await succeeds("staff bulk-return recovery uses the same advisory boundary", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { source: "bulk_return" },
     });
-  }
-
-  for (const size of [50, 100]) {
-    await fails(`return transaction exceeds verified Rules budget: ${size}`, async () => {
-      await seedReturnBatch(size);
-      await executeReturnBatch(size);
-    });
-  }
+  });
 
   await fails("atomic operation limit rejects 101 tanks", async () => {
     await resetAndSeed({ size: 101, policyMode: "advisory", policyRevision: 2 });
@@ -120,6 +111,28 @@ try {
     await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
     await updateDoc(doc(contextFor(WORKER), "tanks", "T001"), {
       logNote: "[TAG:unused]",
+    });
+  });
+
+  await succeeds("existing strict return transaction completion remains unchanged", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await testEnvironment.withSecurityRulesDisabled(async (context) => {
+      await setDoc(doc(context.firestore(), "transactions", "strict-return"), {
+        type: "return",
+        status: "pending_return",
+        tankId: "T001",
+        ...CUSTOMER,
+        createdAt: new Date(1_000),
+      });
+    });
+    await updateDoc(doc(contextFor(ADMIN), "transactions", "strict-return"), {
+      status: "completed",
+      finalCondition: "normal",
+      fulfilledAt: serverTimestamp(),
+      fulfilledBy: ADMIN.name,
+      fulfilledByStaffId: ADMIN.staffId,
+      fulfilledByStaffName: ADMIN.name,
+      fulfilledByStaffEmail: ADMIN.email,
     });
   });
 
@@ -244,15 +257,56 @@ async function runDenialCases() {
     await updateRevisionOnly();
   });
 
-  await fails("return transaction customer mismatch is rejected", async () => {
-    await resetAndSeed({
-      size: 1,
-      policyMode: "strict",
-      policyRevision: 1,
-      tankState: "lent",
-      tankCustomer: CUSTOMER,
+  for (const workflow of ["order", "return", "uncharged_report"]) {
+    await fails(`customer ${workflow} workflow cannot create recovery`, async () => {
+      await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+      await executeOperationBatch({
+        size: 1,
+        kind: "recovery",
+        logOverrides: {
+          source: workflow === "order"
+            ? "order_fulfillment"
+            : workflow === "return"
+              ? "return_tag_processing"
+              : "portal",
+          workflow,
+          transactionId: `${workflow}-transaction`,
+        },
+      });
     });
-    await executeMismatchedReturn();
+  }
+
+  await fails("order_lend action cannot create recovery", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { action: "order_lend" },
+    });
+  });
+
+  await fails("transactionId cannot accompany staff-direct recovery", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { transactionId: "unexpected-transaction" },
+    });
+  });
+
+  await succeeds("customer transaction direct operation remains allowed under advisory setting", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      policyMode: "advisory",
+      policyRevision: 2,
+      logOverrides: {
+        source: "order_fulfillment",
+        workflow: "order",
+        transactionId: "order-transaction",
+      },
+    });
   });
 
   await fails("recovery evidence shortage is rejected", async () => {
@@ -470,6 +524,8 @@ function buildOperationLog({ id, kind, policyMode, policyRevision, overrides = {
     affectedCustomerIds: direct ? [] : [CUSTOMER.customerId],
     hasUnknownAffectedCustomer: false,
     ...(!direct ? {
+      source: "manual",
+      workflow: "tank_operation",
       recoveryReason: "Rules自動補完確認",
       recoveryEvidence: {
         physicalTankConfirmed: true,
@@ -494,6 +550,8 @@ function buildOperationLog({ id, kind, policyMode, policyRevision, overrides = {
 function executeOperationBatch({
   size,
   kind,
+  policyMode = kind === "direct" ? "strict" : "advisory",
+  policyRevision = kind === "direct" ? 1 : 2,
   logOverrides = {},
   omitLogWrites = false,
   omitTankWrites = false,
@@ -501,8 +559,6 @@ function executeOperationBatch({
 }) {
   const firestore = contextFor(ADMIN);
   const direct = kind === "direct";
-  const policyMode = direct ? "strict" : "advisory";
-  const policyRevision = direct ? 1 : 2;
   return runTransaction(firestore, async (transaction) => {
     const policyRef = doc(firestore, "settings", "tankOperationPolicy");
     const revisionRef = doc(firestore, "settings", "tankAggregationRevision");
@@ -564,140 +620,6 @@ async function seedPendingRecoveries(size) {
         revisionCreatedAt: new Date(1_000),
       });
     }));
-  });
-}
-
-async function seedReturnBatch(size) {
-  await resetAndSeed({
-    size,
-    policyMode: "strict",
-    policyRevision: 1,
-    tankState: "lent",
-    tankCustomer: CUSTOMER,
-  });
-  await testEnvironment.withSecurityRulesDisabled(async (context) => {
-    const firestore = context.firestore();
-    await Promise.all(Array.from({ length: size }, async (_, index) => {
-      const id = tankId(index);
-      await Promise.all([
-        setDoc(doc(firestore, "transactions", `return-${id}`), {
-          type: "return",
-          status: "pending_return",
-          tankId: id,
-          ...CUSTOMER,
-          createdAt: new Date(1_000),
-        }),
-        setDoc(doc(firestore, "logs", `previous-${id}`), {
-          logKind: "tank",
-          logStatus: "active",
-          tankId: id,
-          transitionReviewStatus: "not_required",
-        }),
-      ]);
-    }));
-  });
-}
-
-function executeReturnBatch(size) {
-  const firestore = contextFor(ADMIN);
-  return runTransaction(firestore, async (transaction) => {
-    const policyRef = doc(firestore, "settings", "tankOperationPolicy");
-    const revisionRef = doc(firestore, "settings", "tankAggregationRevision");
-    const tankRefs = Array.from({ length: size }, (_, index) => (
-      doc(firestore, "tanks", tankId(index))
-    ));
-    const logRefs = tankRefs.map((_, index) => (
-      doc(firestore, "logs", `return-log-${tankId(index)}`)
-    ));
-    const returnRefs = tankRefs.map((_, index) => (
-      doc(firestore, "transactions", `return-${tankId(index)}`)
-    ));
-    const [tankSnapshots] = await Promise.all([
-      Promise.all(tankRefs.map((reference) => transaction.get(reference))),
-      Promise.all(returnRefs.map((reference) => transaction.get(reference))),
-      transaction.get(policyRef),
-      transaction.get(revisionRef),
-    ]);
-    const logIds = logRefs.map((reference) => reference.id).sort();
-    transaction.set(revisionRef, revisionDocument({
-      tankDataRevision: 6,
-      officialAggregationRevision: 4,
-      revisionChangeKind: "operation",
-      changedLogIds: logIds,
-      officialAggregationLogIds: logIds,
-      affectedCustomerIds: [CUSTOMER.customerId],
-      timestamp: serverTimestamp(),
-    }));
-
-    tankRefs.forEach((tankRef, index) => {
-      const id = tankId(index);
-      const logRef = logRefs[index];
-      const returnRef = returnRefs[index];
-      const prevTankSnapshot = tankSnapshot({ status: "lent", customer: CUSTOMER });
-      const nextTankSnapshot = tankSnapshot({ status: "empty", staff: ADMIN.name });
-      transaction.set(logRef, {
-        tankId: id,
-        action: "return",
-        transitionAction: "return",
-        prevStatus: "lent",
-        newStatus: "empty",
-        location: WAREHOUSE,
-        staffId: ADMIN.staffId,
-        staffName: ADMIN.name,
-        staffEmail: ADMIN.email,
-        ...CUSTOMER,
-        transactionId: returnRef.id,
-        source: "return_tag_processing",
-        workflow: "return",
-        returnCondition: "normal",
-        note: "",
-        logNote: "",
-        transitionPlan: {
-          version: 1,
-          kind: "direct",
-          steps: [{
-            action: "return",
-            fromStatus: "lent",
-            toStatus: "empty",
-            actorType: "operator",
-            businessEffect: "rental_close",
-            ...CUSTOMER,
-            location: WAREHOUSE,
-          }],
-          requiredEvidence: [],
-        },
-        transitionReviewStatus: "not_required",
-        policyMode: "strict",
-        policyRevision: 1,
-        affectedCustomerIds: [CUSTOMER.customerId],
-        hasUnknownAffectedCustomer: false,
-        timestamp: serverTimestamp(),
-        originalAt: serverTimestamp(),
-        revisionCreatedAt: serverTimestamp(),
-        logStatus: "active",
-        logKind: "tank",
-        rootLogId: logRef.id,
-        revision: 1,
-        prevTankSnapshot,
-        nextTankSnapshot,
-        previousLogIdOnSameTank: tankSnapshots[index].data().latestLogId,
-      });
-      transaction.update(tankRef, {
-        ...nextTankSnapshot,
-        latestLogId: logRef.id,
-        updatedAt: serverTimestamp(),
-      });
-      transaction.update(returnRef, {
-        status: "completed",
-        finalCondition: "normal",
-        fulfilledAt: serverTimestamp(),
-        fulfilledBy: ADMIN.name,
-        fulfilledByStaffId: ADMIN.staffId,
-        fulfilledByStaffName: ADMIN.name,
-        fulfilledByStaffEmail: ADMIN.email,
-        fulfilledLogId: logRef.id,
-      });
-    });
   });
 }
 
@@ -919,79 +841,6 @@ function updateRevisionOnly() {
     officialAggregationLogIds: ["active-log"],
     timestamp: serverTimestamp(),
   }));
-}
-
-function executeMismatchedReturn() {
-  const firestore = contextFor(ADMIN);
-  return runTransaction(firestore, async (transaction) => {
-    const tankRef = doc(firestore, "tanks", "T001");
-    const logRef = doc(firestore, "logs", "mismatched-return-log");
-    const revisionRef = doc(firestore, "settings", "tankAggregationRevision");
-    await Promise.all([
-      transaction.get(doc(firestore, "settings", "tankOperationPolicy")),
-      transaction.get(revisionRef),
-      transaction.get(tankRef),
-    ]);
-    const prevTankSnapshot = tankSnapshot({ status: "lent", customer: CUSTOMER });
-    const nextTankSnapshot = tankSnapshot({ status: "empty", staff: ADMIN.name });
-    transaction.set(logRef, {
-      tankId: "T001",
-      action: "return",
-      transitionAction: "return",
-      prevStatus: "lent",
-      newStatus: "empty",
-      location: WAREHOUSE,
-      staffId: ADMIN.staffId,
-      staffName: ADMIN.name,
-      staffEmail: ADMIN.email,
-      ...OTHER_CUSTOMER,
-      transactionId: "return-request-a",
-      workflow: "return",
-      transitionPlan: {
-        version: 1,
-        kind: "direct",
-        steps: [{
-          action: "return",
-          fromStatus: "lent",
-          toStatus: "empty",
-          actorType: "operator",
-          businessEffect: "rental_close",
-          ...CUSTOMER,
-          location: WAREHOUSE,
-        }],
-        requiredEvidence: [],
-      },
-      transitionReviewStatus: "not_required",
-      policyMode: "strict",
-      policyRevision: 1,
-      affectedCustomerIds: [CUSTOMER.customerId, OTHER_CUSTOMER.customerId],
-      hasUnknownAffectedCustomer: false,
-      timestamp: serverTimestamp(),
-      originalAt: serverTimestamp(),
-      revisionCreatedAt: serverTimestamp(),
-      logStatus: "active",
-      logKind: "tank",
-      rootLogId: logRef.id,
-      revision: 1,
-      prevTankSnapshot,
-      nextTankSnapshot,
-      previousLogIdOnSameTank: "previous-T001",
-    });
-    transaction.update(tankRef, {
-      ...nextTankSnapshot,
-      latestLogId: logRef.id,
-      updatedAt: serverTimestamp(),
-    });
-    transaction.set(revisionRef, revisionDocument({
-      tankDataRevision: 6,
-      officialAggregationRevision: 4,
-      revisionChangeKind: "operation",
-      changedLogIds: [logRef.id],
-      officialAggregationLogIds: [logRef.id],
-      affectedCustomerIds: [CUSTOMER.customerId, OTHER_CUSTOMER.customerId],
-      timestamp: serverTimestamp(),
-    }));
-  });
 }
 
 async function succeeds(label, operation) {

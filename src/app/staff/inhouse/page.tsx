@@ -92,7 +92,11 @@ export default function InHousePage() {
     setReporting(true);
     setReportResult(null);
     try {
-      const context = { actor: requireStaffIdentity() };
+      const context = {
+        actor: requireStaffIdentity(),
+        source: "manual" as const,
+        workflow: "tank_operation" as const,
+      };
       const tank = tankMap[tankId];
       if (!tank) {
         setReportResult({ success: false, message: `${tankId} は登録されていません` });
@@ -128,7 +132,11 @@ export default function InHousePage() {
     if (!confirm(`自社利用中のタンク全 ${inHouseTanks.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`)) return;
     setReturning(true);
     try {
-      const context = { actor: requireStaffIdentity() };
+      const context = {
+        actor: requireStaffIdentity(),
+        source: "manual" as const,
+        workflow: "tank_operation" as const,
+      };
       await applyBulkTankOperations(
         inHouseTanks.map((tank) => {
           const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;

@@ -6,11 +6,11 @@ import {
 
 describe("atomic tank operation limit", () => {
   it("accepts the Rules-verified maximum", () => {
-    expect(MAX_ATOMIC_TANK_OPERATIONS).toBe(10);
-    expect(() => assertAtomicTankOperationCount(10)).not.toThrow();
+    expect(MAX_ATOMIC_TANK_OPERATIONS).toBe(100);
+    expect(() => assertAtomicTankOperationCount(100)).not.toThrow();
   });
 
   it("does not split or accept an oversized operation", () => {
-    expect(() => assertAtomicTankOperationCount(11)).toThrow("対象件数を減らしてください");
+    expect(() => assertAtomicTankOperationCount(101)).toThrow("対象件数を減らしてください");
   });
 });

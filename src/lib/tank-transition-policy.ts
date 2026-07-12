@@ -9,6 +9,7 @@ import {
   validateTransitionCode,
   type TankOperationActionCode,
 } from "@/lib/tank-rules";
+import type { OperationContext } from "@/lib/operation-context";
 
 export const TRANSITION_ENFORCEMENT_MODES = ["strict", "advisory"] as const;
 export type TransitionEnforcementMode = (typeof TRANSITION_ENFORCEMENT_MODES)[number];
@@ -147,6 +148,37 @@ const SYSTEM_RECOVERY_ACTIONS: readonly TankOperationActionCode[] = [
   "fill",
   "inhouse_return",
 ];
+
+type AdvisoryRecoveryContext = Pick<
+  OperationContext,
+  "source" | "workflow" | "transactionId"
+>;
+
+/**
+ * recoveryは、顧客transactionを処理しないスタッフ直接操作だけに限定する。
+ * source/workflowが欠落した既存経路はstrictのまま扱う。
+ */
+export function isStaffDirectAdvisoryContext(
+  context: AdvisoryRecoveryContext,
+): boolean {
+  return (
+    (context.source === "manual" || context.source === "bulk_return")
+    && context.workflow === "tank_operation"
+    && !context.transactionId
+  );
+}
+
+export function resolvePlannerPolicyMode(
+  configuredMode: TransitionEnforcementMode,
+  context: AdvisoryRecoveryContext,
+  requestedAction?: TankActionCode,
+): TransitionEnforcementMode {
+  return configuredMode === "advisory"
+    && requestedAction !== "order_lend"
+    && isStaffDirectAdvisoryContext(context)
+    ? "advisory"
+    : "strict";
+}
 
 export function isTransitionEnforcementMode(value: unknown): value is TransitionEnforcementMode {
   return TRANSITION_ENFORCEMENT_MODES.includes(value as TransitionEnforcementMode);

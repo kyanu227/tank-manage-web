@@ -272,7 +272,11 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
 
     setReturning(prev => ({ ...prev, [groupKey]: true }));
     try {
-      const context = { actor: requireStaffIdentity() };
+      const context = {
+        actor: requireStaffIdentity(),
+        source: "bulk_return" as const,
+        workflow: "tank_operation" as const,
+      };
 
       await applyBulkTankOperations(
         tanksToReturn.map((tank) => {
