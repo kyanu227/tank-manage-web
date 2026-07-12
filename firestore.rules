@@ -52,6 +52,882 @@ service cloud.firestore {
       return isAdmin() || isSubAdmin();
     }
 
+    function staffMirror() {
+      return get(/databases/$(database)/documents/staffByEmail/$(request.auth.token.email)).data;
+    }
+
+    function authenticatedStaffId() {
+      return staffMirror().get("staffId", "");
+    }
+
+    function staffIdentityMatches(staffId, staffName) {
+      let mirror = staffMirror();
+      return mirror.get("staffId", "") is string
+        && mirror.get("staffId", "").size() > 0
+        && staffId == mirror.get("staffId", "")
+        && staffName == mirror.get("name", "");
+    }
+
+    function actorMatchesAuth(data) {
+      return staffIdentityMatches(data.get("staffId", ""), data.get("staffName", ""))
+        && (
+          !data.keys().hasAny(["staffEmail"])
+          || data.staffEmail == request.auth.token.email
+        );
+    }
+
+    function reviewActorMatchesAuth(data) {
+      return staffIdentityMatches(
+          data.get("reviewedByStaffId", ""),
+          data.get("reviewedByStaffName", "")
+        )
+        && data.get("reviewedByUid", "") == request.auth.uid
+        && data.get("reviewedByEmail", "") == request.auth.token.email;
+    }
+
+    function editActorMatchesAuth(data) {
+      return staffIdentityMatches(
+          data.get("editedByStaffId", ""),
+          data.get("editedByStaffName", "")
+        )
+        && (
+          !data.keys().hasAny(["editedByStaffEmail"])
+          || data.editedByStaffEmail == request.auth.token.email
+        );
+    }
+
+    function voidActorMatchesAuth(data) {
+      return staffIdentityMatches(
+          data.get("voidedByStaffId", ""),
+          data.get("voidedByStaffName", "")
+        )
+        && (
+          !data.keys().hasAny(["voidedByStaffEmail"])
+          || data.voidedByStaffEmail == request.auth.token.email
+        );
+    }
+
+    function isTankStatusCode(status) {
+      return status in [
+        "filled", "empty", "lent", "unreturned", "in_house",
+        "damaged", "defective", "disposed"
+      ];
+    }
+
+    function isTransitionRule(action, fromStatus, toStatus) {
+      let allowedPrevious = {
+        "lend": ["filled"],
+        "return": ["lent", "unreturned", "in_house"],
+        "return_unused": ["lent", "unreturned", "in_house"],
+        "return_uncharged": ["lent", "unreturned", "in_house"],
+        "carry_over": ["lent"],
+        "fill": ["empty"],
+        "inhouse_use": ["filled"],
+        "inhouse_use_retro": ["filled"],
+        "inhouse_return": ["in_house"],
+        "inhouse_return_unused": ["in_house"],
+        "inhouse_return_uncharged": ["in_house"],
+        "damage_report": ["empty", "filled", "in_house"],
+        "repaired": ["damaged", "defective"],
+        "inspection": ["filled", "empty", "lent", "unreturned", "in_house", "damaged", "defective"],
+        "dispose": ["empty", "filled", "damaged"]
+      };
+      let nextStatuses = {
+        "lend": "lent",
+        "return": "empty",
+        "return_unused": "filled",
+        "return_uncharged": "empty",
+        "carry_over": "unreturned",
+        "fill": "filled",
+        "inhouse_use": "in_house",
+        "inhouse_use_retro": "in_house",
+        "inhouse_return": "empty",
+        "inhouse_return_unused": "filled",
+        "inhouse_return_uncharged": "empty",
+        "damage_report": "damaged",
+        "repaired": "empty",
+        "inspection": "empty",
+        "dispose": "disposed"
+      };
+      return fromStatus in allowedPrevious.get(action, [])
+        && toStatus == nextStatuses.get(action, "");
+    }
+
+    function expectedBusinessEffect(action, fromStatus) {
+      return action == "lend"
+        ? "rental_open"
+        : (
+          action in ["return", "return_unused", "return_uncharged"]
+          && fromStatus != "in_house"
+        )
+        ? "rental_close"
+        : "state_only";
+    }
+
+    function isValidTransitionStep(step) {
+      let customerEffect = step.get("businessEffect", "") in ["rental_open", "rental_close"];
+      return step is map
+        && step.keys().hasAll([
+          "action", "fromStatus", "toStatus", "actorType", "businessEffect", "location"
+        ])
+        && step.keys().hasOnly([
+          "action", "fromStatus", "toStatus", "actorType", "businessEffect",
+          "customerId", "customerName", "location"
+        ])
+        && isTankStatusCode(step.fromStatus)
+        && isTankStatusCode(step.toStatus)
+        && step.fromStatus != "disposed"
+        && step.actorType in ["system", "operator"]
+        && step.businessEffect in ["state_only", "rental_open", "rental_close"]
+        && step.location is string
+        && step.location.size() > 0
+        && isTransitionRule(step.action, step.fromStatus, step.toStatus)
+        && step.businessEffect == expectedBusinessEffect(step.action, step.fromStatus)
+        && (
+          step.actorType != "system"
+          || step.action in ["return", "fill", "inhouse_return"]
+        )
+        && (
+          customerEffect
+          ? (
+            step.get("customerId", "") is string
+            && step.get("customerId", "").size() > 0
+            && step.get("customerName", "") is string
+            && step.get("customerName", "").size() > 0
+          )
+          : !step.keys().hasAny(["customerId", "customerName"])
+        );
+    }
+
+    function isSystemFill(step) {
+      return step.action == "fill"
+        && step.fromStatus == "empty"
+        && step.toStatus == "filled"
+        && step.actorType == "system";
+    }
+
+    function isSystemHolderClose(step) {
+      return (
+        step.action == "return"
+        && step.fromStatus in ["lent", "unreturned"]
+        && step.toStatus == "empty"
+        && step.actorType == "system"
+      ) || (
+        step.action == "inhouse_return"
+        && step.fromStatus == "in_house"
+        && step.toStatus == "empty"
+        && step.actorType == "system"
+      );
+    }
+
+    function isRecoveryFinalStep(step) {
+      return step.actorType == "operator"
+        && (
+          (step.action == "lend" && step.fromStatus == "filled" && step.toStatus == "lent")
+          || (step.action == "fill" && step.fromStatus == "empty" && step.toStatus == "filled")
+          || (
+            step.action in ["inhouse_use", "inhouse_use_retro"]
+            && step.fromStatus == "filled"
+            && step.toStatus == "in_house"
+          )
+        );
+    }
+
+    function isInitialRecoveryRecipe(steps) {
+      return (
+        steps.size() == 2
+        && (
+          (isSystemFill(steps[0]) && isRecoveryFinalStep(steps[1]))
+          || (isSystemHolderClose(steps[0]) && steps[1].action == "fill" && isRecoveryFinalStep(steps[1]))
+        )
+      ) || (
+        steps.size() == 3
+        && isSystemHolderClose(steps[0])
+        && isSystemFill(steps[1])
+        && isRecoveryFinalStep(steps[2])
+      );
+    }
+
+    function isCanonicalRequiredEvidence(plan) {
+      let firstStatus = plan.steps[0].fromStatus;
+      return (
+        firstStatus == "empty"
+        && plan.requiredEvidence == ["physicalTankConfirmed", "fillStateConfirmed"]
+      ) || (
+        firstStatus == "in_house"
+        && plan.requiredEvidence == [
+          "physicalTankConfirmed", "possessionConfirmed", "fillStateConfirmed"
+        ]
+      ) || (
+        firstStatus in ["lent", "unreturned"]
+        && plan.requiredEvidence == [
+          "physicalTankConfirmed", "possessionConfirmed",
+          "previousCustomerConfirmed", "fillStateConfirmed"
+        ]
+      );
+    }
+
+    function isCompleteRecoveryEvidence(plan, evidence) {
+      return evidence is map
+        && evidence.keys().hasOnly([
+          "physicalTankConfirmed", "possessionConfirmed",
+          "previousCustomerConfirmed", "fillStateConfirmed", "damageStateConfirmed"
+        ])
+        && evidence.get("physicalTankConfirmed", false) == true
+        && evidence.get("fillStateConfirmed", false) == true
+        && (
+          plan.steps[0].fromStatus == "empty"
+          ? evidence.keys().hasOnly(["physicalTankConfirmed", "fillStateConfirmed"])
+          : plan.steps[0].fromStatus == "in_house"
+          ? (
+            evidence.get("possessionConfirmed", false) == true
+            && evidence.keys().hasOnly([
+              "physicalTankConfirmed", "possessionConfirmed", "fillStateConfirmed"
+            ])
+          )
+          : (
+            evidence.get("possessionConfirmed", false) == true
+            && evidence.get("previousCustomerConfirmed", false) == true
+            && evidence.keys().hasOnly([
+              "physicalTankConfirmed", "possessionConfirmed",
+              "previousCustomerConfirmed", "fillStateConfirmed"
+            ])
+          )
+        );
+    }
+
+    function isValidTransitionPlan(plan, prevStatus, transitionAction, newStatus) {
+      let steps = plan.get("steps", []);
+      return plan is map
+        && plan.keys().hasOnly(["version", "kind", "steps", "requiredEvidence"])
+        && plan.get("version", 0) == 1
+        && plan.get("kind", "") in ["direct", "recovery"]
+        && steps is list
+        && steps.size() >= 1
+        && steps.size() <= 3
+        && plan.get("requiredEvidence", []) is list
+        && steps[0] is map
+        && steps[0].get("fromStatus", "") == prevStatus
+        && steps[0].get("actorType", "") in ["system", "operator"]
+        && (steps.size() < 2 || steps[1] is map)
+        && (steps.size() < 3 || steps[2] is map)
+        && (steps.size() < 2 || steps[0].toStatus == steps[1].fromStatus)
+        && (steps.size() < 3 || steps[1].toStatus == steps[2].fromStatus)
+        && steps[steps.size() - 1].action == transitionAction
+        && steps[steps.size() - 1].toStatus == newStatus
+        && (
+          plan.kind == "direct"
+          ? (
+            steps.size() == 1
+            && steps[0].actorType == "operator"
+            && isValidTransitionStep(steps[0])
+            && plan.requiredEvidence == []
+          )
+          : (
+            steps.size() >= 2
+            && steps[0].actorType == "system"
+            && (steps.size() < 3 || steps[1].actorType == "system")
+            && steps[steps.size() - 1].actorType == "operator"
+            && isInitialRecoveryRecipe(steps)
+            && isCanonicalRequiredEvidence(plan)
+          )
+        );
+    }
+
+    function transitionPolicyMatches(data) {
+      let policyPath = /databases/$(database)/documents/settings/tankOperationPolicy;
+      return exists(policyPath)
+        ? (
+          data.get("policyMode", "")
+            == get(policyPath).data.get("transitionEnforcement", "strict")
+          && data.get("policyRevision", -1)
+            == get(policyPath).data.get("policyRevision", 0)
+        )
+        : data.get("policyMode", "") == "strict"
+          && data.get("policyRevision", -1) == 0;
+    }
+
+    function revisionAfter() {
+      return getAfter(/databases/$(database)/documents/settings/tankAggregationRevision).data;
+    }
+
+    function isRevisionWriteForLog(logId, kind, officialChanged) {
+      let revision = revisionAfter();
+      return revision.get("updatedAt", null) == request.time
+        && revision.get("revisionChangeKind", "") == kind
+        && revision.get("changedLogIds", []).hasAny([logId])
+        && (
+          officialChanged
+          ? revision.get("officialAggregationLogIds", []).hasAny([logId])
+          : !revision.get("officialAggregationLogIds", []).hasAny([logId])
+        );
+    }
+
+    function tankSnapshotMatches(snapshot, tank) {
+      return snapshot is map
+        && snapshot.get("status", null) == tank.get("status", null)
+        && snapshot.get("location", null) == tank.get("location", null)
+        && snapshot.get("customerId", null) == tank.get("customerId", null)
+        && snapshot.get("customerName", null) == tank.get("customerName", null)
+        && snapshot.get("staff", null) == tank.get("staff", null)
+        && snapshot.get("logNote", null) == tank.get("logNote", null);
+    }
+
+    function isValidInitialTankLogCreate(logId, data) {
+      return data.get("revision", 0) == 1
+        && data.get("rootLogId", "") == logId
+        && !data.keys().hasAny(["supersedesLogId"])
+        && actorMatchesAuth(data)
+        && isRevisionWriteForLog(
+          logId,
+          "operation",
+          data.get("transitionReviewStatus", "") == "not_required"
+        );
+    }
+
+    function isValidCorrectionChain(logId, data) {
+      let oldLogId = data.get("supersedesLogId", "");
+      let oldLog = get(/databases/$(database)/documents/logs/$(oldLogId)).data;
+      let oldLogAfter = getAfter(/databases/$(database)/documents/logs/$(oldLogId)).data;
+      return oldLogId is string
+        && oldLogId.size() > 0
+        && oldLogAfter.get("logStatus", "") == "superseded"
+        && oldLogAfter.get("supersededByLogId", "") == logId
+        && data.get("rootLogId", "") == oldLog.get("rootLogId", "")
+        && data.get("revision", 0) == oldLog.get("revision", 0) + 1
+        && editActorMatchesAuth(data)
+        && isRevisionWriteForLog(logId, "correction", true);
+    }
+
+    function isValidInitialTankTransitionLogCreate(logId) {
+      let data = request.resource.data;
+      let plan = data.get("transitionPlan", {});
+      let tankAfter = getAfter(
+        /databases/$(database)/documents/tanks/$(data.get("tankId", ""))
+      ).data;
+      return (
+          data.keys().hasAll([
+            "tankId", "action", "transitionAction", "prevStatus", "newStatus",
+            "staffId", "staffName", "transitionPlan", "transitionReviewStatus",
+            "policyMode", "policyRevision", "affectedCustomerIds",
+            "hasUnknownAffectedCustomer", "prevTankSnapshot", "nextTankSnapshot",
+            "logStatus", "logKind", "rootLogId", "revision", "revisionCreatedAt"
+          ])
+          && data.tankId is string
+          && data.tankId.size() > 0
+          && data.get("logStatus", "") == "active"
+          && data.get("transitionReviewStatus", "") in ["not_required", "pending"]
+          && data.get("policyMode", "") in ["strict", "advisory"]
+          && data.get("policyRevision", -1) is int
+          && data.get("affectedCustomerIds", []) is list
+          && data.get("hasUnknownAffectedCustomer", null) is bool
+          && data.get("revisionCreatedAt", null) == request.time
+          && isValidTransitionPlan(
+            plan,
+            data.get("prevStatus", ""),
+            data.get("transitionAction", ""),
+            data.get("newStatus", "")
+          )
+          && data.get("prevTankSnapshot", {}).get("status", "") == data.prevStatus
+          && data.get("nextTankSnapshot", {}).get("status", "") == data.newStatus
+          && transitionPolicyMatches(data)
+          && (
+            plan.kind == "direct"
+            ? (
+              data.transitionReviewStatus == "not_required"
+              && !data.keys().hasAny([
+                "recoveryReason", "recoveryEvidence", "recoveryConfirmationFingerprint"
+              ])
+            )
+            : (
+              data.transitionReviewStatus == "pending"
+              && data.policyMode == "advisory"
+              && data.get("recoveryReason", "") is string
+              && data.get("recoveryReason", "").size() >= 5
+              && isCompleteRecoveryEvidence(plan, data.get("recoveryEvidence", {}))
+              && data.get("recoveryConfirmationFingerprint", "") is string
+              && data.get("recoveryConfirmationFingerprint", "").matches("^[0-9a-f]{64}$")
+            )
+          )
+          && isValidInitialTankLogCreate(logId, data)
+          && tankAfter.get("latestLogId", "") == logId
+          && tankSnapshotMatches(data.nextTankSnapshot, tankAfter)
+        );
+    }
+
+    function isValidReturnTransitionStep(step, data) {
+      let rentalClose = step.get("action", "") in [
+        "return", "return_unused", "return_uncharged"
+      ];
+      return step is map
+        && step.keys().hasOnly([
+          "action", "fromStatus", "toStatus", "actorType", "businessEffect",
+          "customerId", "customerName", "location"
+        ])
+        && step.get("actorType", "") == "operator"
+        && step.get("location", "") is string
+        && step.get("location", "").size() > 0
+        && (
+          rentalClose
+          ? (
+            step.get("fromStatus", "") in ["lent", "unreturned"]
+            && step.get("toStatus", "") == (
+              step.get("action", "") == "return_unused" ? "filled" : "empty"
+            )
+            && step.get("businessEffect", "") == "rental_close"
+            && step.get("customerId", "") == data.get("customerId", "")
+            && step.get("customerName", "") == data.get("customerName", "")
+          )
+          : (
+            step.get("action", "") == "carry_over"
+            && step.get("fromStatus", "") == "lent"
+            && step.get("toStatus", "") == "unreturned"
+            && step.get("businessEffect", "") == "state_only"
+            && !step.keys().hasAny(["customerId", "customerName"])
+          )
+        );
+    }
+
+    // 返却transaction由来の操作は必ず1-step direct。transactionとの相互結合を追加するため、
+    // recovery全分岐を評価しない専用pathでRules式数上限内に収める。
+    function isValidReturnTankTransitionLogCreate(logId) {
+      let data = request.resource.data;
+      let plan = data.get("transitionPlan", {});
+      let steps = plan.get("steps", []);
+      let tankAfter = getAfter(
+        /databases/$(database)/documents/tanks/$(data.get("tankId", ""))
+      ).data;
+      return data.keys().hasAll([
+          "tankId", "action", "transitionAction", "prevStatus", "newStatus",
+          "staffId", "staffName", "customerId", "customerName",
+          "transactionId", "workflow", "transitionPlan", "transitionReviewStatus",
+          "policyMode", "policyRevision", "affectedCustomerIds",
+          "hasUnknownAffectedCustomer", "prevTankSnapshot", "nextTankSnapshot",
+          "logStatus", "logKind", "rootLogId", "revision", "revisionCreatedAt"
+        ])
+        && data.get("tankId", "") is string
+        && data.get("tankId", "").size() > 0
+        && data.get("workflow", "") == "return"
+        && data.get("logKind", "") == "tank"
+        && data.get("logStatus", "") == "active"
+        && data.get("revision", 0) == 1
+        && data.get("rootLogId", "") == logId
+        && data.get("transitionReviewStatus", "") == "not_required"
+        && data.get("affectedCustomerIds", []) is list
+        && data.get("hasUnknownAffectedCustomer", null) is bool
+        && data.get("revisionCreatedAt", null) == request.time
+        && !data.keys().hasAny([
+          "supersedesLogId", "recoveryReason", "recoveryEvidence",
+          "recoveryConfirmationFingerprint", "reviewedAt", "reviewEventId"
+        ])
+        && plan is map
+        && plan.keys().hasOnly(["version", "kind", "steps", "requiredEvidence"])
+        && plan.get("version", 0) == 1
+        && plan.get("kind", "") == "direct"
+        && plan.get("requiredEvidence", []) == []
+        && steps is list
+        && steps.size() == 1
+        && isValidReturnTransitionStep(steps[0], data)
+        && steps[0].get("fromStatus", "") == data.get("prevStatus", "")
+        && steps[0].get("action", "") == data.get("transitionAction", "")
+        && steps[0].get("toStatus", "") == data.get("newStatus", "")
+        && data.get("prevTankSnapshot", {}).get("status", "") == data.get("prevStatus", "")
+        && data.get("nextTankSnapshot", {}).get("status", "") == data.get("newStatus", "")
+        && data.get("prevTankSnapshot", {}).get("customerId", null)
+          == data.get("customerId", "")
+        && actorMatchesAuth(data)
+        && transitionPolicyMatches(data)
+        && isRevisionWriteForLog(logId, "operation", true)
+        && tankAfter.get("latestLogId", "") == logId
+        && tankSnapshotMatches(data.get("nextTankSnapshot", {}), tankAfter);
+    }
+
+    // correctionは必ずdirect plan。recovery recipe全分岐を再評価せず、
+    // 同じ不変条件を1-step directに限定してRules式数上限内で検証する。
+    function isValidCorrectedTankTransitionLogCreate(logId) {
+      let data = request.resource.data;
+      let plan = data.get("transitionPlan", {});
+      let steps = plan.get("steps", []);
+      let tankAfter = getAfter(
+        /databases/$(database)/documents/tanks/$(data.get("tankId", ""))
+      ).data;
+      return data.keys().hasAll([
+          "tankId", "action", "transitionAction", "prevStatus", "newStatus",
+          "staffId", "staffName", "transitionPlan", "transitionReviewStatus",
+          "policyMode", "policyRevision", "affectedCustomerIds",
+          "hasUnknownAffectedCustomer", "prevTankSnapshot", "nextTankSnapshot",
+          "logStatus", "logKind", "rootLogId", "revision", "revisionCreatedAt",
+          "supersedesLogId", "editedByStaffId", "editedByStaffName", "editReason"
+        ])
+        && data.get("tankId", "") is string
+        && data.get("tankId", "").size() > 0
+        && data.get("logKind", "") == "tank"
+        && data.get("logStatus", "") == "active"
+        && data.get("transitionReviewStatus", "") == "not_required"
+        && data.get("workflow", "") != "return"
+        && data.get("affectedCustomerIds", []) is list
+        && data.get("hasUnknownAffectedCustomer", null) is bool
+        && data.get("revisionCreatedAt", null) == request.time
+        && !data.keys().hasAny([
+          "recoveryReason", "recoveryEvidence", "recoveryConfirmationFingerprint",
+          "reviewedAt", "reviewedByStaffId", "reviewedByStaffName",
+          "reviewedByUid", "reviewedByEmail", "reviewReason", "reviewEventId"
+        ])
+        && plan is map
+        && plan.keys().hasOnly(["version", "kind", "steps", "requiredEvidence"])
+        && plan.get("version", 0) == 1
+        && plan.get("kind", "") == "direct"
+        && plan.get("requiredEvidence", []) == []
+        && steps is list
+        && steps.size() == 1
+        && isValidTransitionStep(steps[0])
+        && steps[0].get("actorType", "") == "operator"
+        && steps[0].get("fromStatus", "") == data.get("prevStatus", "")
+        && steps[0].get("action", "") == data.get("transitionAction", "")
+        && steps[0].get("toStatus", "") == data.get("newStatus", "")
+        && data.get("prevTankSnapshot", {}).get("status", "") == data.get("prevStatus", "")
+        && data.get("nextTankSnapshot", {}).get("status", "") == data.get("newStatus", "")
+        && transitionPolicyMatches(data)
+        && isValidCorrectionChain(logId, data)
+        && tankAfter.get("latestLogId", "") == logId
+        && tankSnapshotMatches(data.get("nextTankSnapshot", {}), tankAfter);
+    }
+
+    function isValidTankTransitionLogCreate(logId) {
+      return request.resource.data.get("revision", 0) == 1
+        ? (
+          request.resource.data.get("workflow", "") == "return"
+          ? isValidReturnTankTransitionLogCreate(logId)
+          : isValidInitialTankTransitionLogCreate(logId)
+        )
+        : isValidCorrectedTankTransitionLogCreate(logId);
+    }
+
+    function isAdminTransitionReviewUpdate(logId) {
+      let decision = request.resource.data.get("transitionReviewStatus", "");
+      let eventId = request.resource.data.get("reviewEventId", "");
+      let event = getAfter(
+        /databases/$(database)/documents/operationReviewEvents/$(eventId)
+      ).data;
+      return isAdmin()
+        && resource.data.get("logKind", "") == "tank"
+        && resource.data.get("logStatus", "") == "active"
+        && resource.data.get("transitionPlan", {}).get("kind", "") == "recovery"
+        && resource.data.get("transitionReviewStatus", "") == "pending"
+        && decision in ["approved", "excluded"]
+        && request.resource.data.get("reviewedAt", null) == request.time
+        && request.resource.data.get("reviewReason", "") is string
+        && request.resource.data.get("reviewReason", "").size() >= 5
+        && reviewActorMatchesAuth(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "transitionReviewStatus", "reviewedAt", "reviewedByStaffId",
+          "reviewedByStaffName", "reviewedByUid", "reviewedByEmail",
+          "reviewReason", "reviewEventId"
+        ])
+        && eventId is string
+        && eventId.size() > 0
+        && event.get("eventKind", "") == "transition_aggregation_review_batch"
+        && event.get("logIds", []).hasAny([logId])
+        && event.get("decision", "") == decision
+        && event.get("reviewedByStaffId", "") == request.resource.data.reviewedByStaffId
+        && event.get("reviewedByUid", "") == request.auth.uid
+        && event.get("reviewedAt", null) == request.time
+        && revisionAfter().get("reviewDecision", null) == decision
+        && revisionAfter().get("reviewEventId", null) == eventId
+        && isRevisionWriteForLog(logId, "review", decision == "approved");
+    }
+
+    function isTankLogSupersedeUpdate(logId) {
+      let newLogId = request.resource.data.get("supersededByLogId", "");
+      let newLog = getAfter(/databases/$(database)/documents/logs/$(newLogId)).data;
+      return resource.data.get("logKind", "") == "tank"
+        && resource.data.get("logStatus", "") == "active"
+        && resource.data.get("transitionPlan", {}).get("kind", "") == "direct"
+        && request.resource.data.get("logStatus", "") == "superseded"
+        && newLogId is string
+        && newLogId.size() > 0
+        && newLog.get("supersedesLogId", "") == logId
+        && editActorMatchesAuth(newLog)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "logStatus", "supersededByLogId"
+        ])
+        && isRevisionWriteForLog(logId, "correction", true);
+    }
+
+    function isTankLogVoidUpdate(logId) {
+      let tankBefore = get(
+        /databases/$(database)/documents/tanks/$(resource.data.get("tankId", ""))
+      ).data;
+      let tankAfter = getAfter(
+        /databases/$(database)/documents/tanks/$(resource.data.get("tankId", ""))
+      ).data;
+      return resource.data.get("logKind", "") == "tank"
+        && resource.data.get("logStatus", "") == "active"
+        && tankBefore.get("latestLogId", "") == logId
+        && request.resource.data.get("logStatus", "") == "voided"
+        && request.resource.data.get("voidReason", "") is string
+        && request.resource.data.get("voidReason", "").size() >= 5
+        && request.resource.data.get("voidedAt", null) == request.time
+        && voidActorMatchesAuth(request.resource.data)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+          "logStatus", "voidReason", "voidedAt", "voidedByStaffId",
+          "voidedByStaffName", "voidedByStaffEmail"
+        ])
+        && tankAfter.get("latestLogId", null) == resource.data.get("previousLogIdOnSameTank", null)
+        && isRevisionWriteForLog(
+          logId,
+          "void",
+          resource.data.get("transitionReviewStatus", "") in ["not_required", "approved"]
+        );
+    }
+
+    function isTankProjectionChanged() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny([
+        "status", "location", "staff", "customerId", "customerName", "latestLogId", "logNote"
+      ]);
+    }
+
+    // 既存の返却タグ選択は状態遷移ではない。logNoteだけを既知markerへ変更する経路に限定する。
+    function isReturnTagMarkerOnlyUpdate() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasOnly(["logNote"])
+        && request.resource.data.diff(resource.data).affectedKeys().hasAny(["logNote"])
+        && request.resource.data.get("logNote", "") in [
+          "", "[TAG:unused]", "[TAG:uncharged]"
+        ];
+    }
+
+    function isInitialTankOperationSnapshotUpdate(tankId, logId, logAfter) {
+      return logAfter.get("previousLogIdOnSameTank", null)
+          == resource.data.get("latestLogId", null)
+        && tankSnapshotMatches(logAfter.get("prevTankSnapshot", {}), resource.data)
+        && tankSnapshotMatches(logAfter.get("nextTankSnapshot", {}), request.resource.data)
+        && request.resource.data.get("staff", "") == logAfter.get("staffName", "")
+        && isRevisionWriteForLog(
+          logId,
+          "operation",
+          logAfter.get("transitionReviewStatus", "") == "not_required"
+        );
+    }
+
+    function isCorrectionTankOperationSnapshotUpdate(tankId, logId, logAfter) {
+      let oldLogId = logAfter.get("supersedesLogId", "");
+      let oldLog = get(/databases/$(database)/documents/logs/$(oldLogId)).data;
+      let oldLogAfter = getAfter(/databases/$(database)/documents/logs/$(oldLogId)).data;
+      return oldLogId is string
+        && oldLogId.size() > 0
+        && resource.data.get("latestLogId", "") == oldLogId
+        && oldLogAfter.get("logStatus", "") == "superseded"
+        && oldLogAfter.get("supersededByLogId", "") == logId
+        && tankSnapshotMatches(oldLog.get("nextTankSnapshot", {}), resource.data)
+        && tankSnapshotMatches(
+          logAfter.get("prevTankSnapshot", {}),
+          oldLog.get("prevTankSnapshot", {})
+        )
+        && tankSnapshotMatches(logAfter.get("nextTankSnapshot", {}), request.resource.data)
+        && request.resource.data.get("staff", "") == logAfter.get("staffName", "")
+        && isRevisionWriteForLog(logId, "correction", true);
+    }
+
+    function isTankOperationSnapshotUpdate(tankId) {
+      let logId = request.resource.data.get("latestLogId", "");
+      let logAfter = getAfter(/databases/$(database)/documents/logs/$(logId)).data;
+      return logId is string
+        && logId.size() > 0
+        && logAfter.get("tankId", "") == tankId
+        && logAfter.get("logKind", "") == "tank"
+        && logAfter.get("logStatus", "") == "active"
+        && (
+          logAfter.get("revision", 0) == 1
+          ? isInitialTankOperationSnapshotUpdate(tankId, logId, logAfter)
+          : isCorrectionTankOperationSnapshotUpdate(tankId, logId, logAfter)
+        );
+    }
+
+    function isTankRestoreSnapshotUpdate(tankId) {
+      let oldLogId = resource.data.get("latestLogId", "");
+      let oldLogAfter = getAfter(/databases/$(database)/documents/logs/$(oldLogId)).data;
+      return oldLogId is string
+        && oldLogId.size() > 0
+        && oldLogAfter.get("tankId", "") == tankId
+        && oldLogAfter.get("logStatus", "") in ["voided", "superseded"]
+        && request.resource.data.get("latestLogId", null)
+          == oldLogAfter.get("previousLogIdOnSameTank", null)
+        && tankSnapshotMatches(oldLogAfter.get("prevTankSnapshot", {}), request.resource.data);
+    }
+
+    function shouldRestoreTankSnapshot() {
+      let oldLogAfter = getAfter(
+        /databases/$(database)/documents/logs/$(resource.data.get("latestLogId", ""))
+      ).data;
+      return oldLogAfter.get("logStatus", "") == "voided"
+        || (
+          oldLogAfter.get("logStatus", "") == "superseded"
+          && request.resource.data.get("latestLogId", null)
+            != oldLogAfter.get("supersededByLogId", null)
+        );
+    }
+
+    function isValidTankUpdate(tankId) {
+      return isStaff()
+        && (
+          isReturnTagMarkerOnlyUpdate()
+          || !isTankProjectionChanged()
+          || (
+            resource.data.get("latestLogId", null) is string
+            && shouldRestoreTankSnapshot()
+            ? isTankRestoreSnapshotUpdate(tankId)
+            : isTankOperationSnapshotUpdate(tankId)
+          )
+        );
+    }
+
+    function isValidPolicyPayload() {
+      return isAdmin()
+        && request.resource.data.keys().hasAll([
+          "transitionEnforcement", "policyRevision", "updatedAt",
+          "updatedByStaffId", "updatedByStaffName"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "transitionEnforcement", "policyRevision", "updatedAt",
+          "updatedByStaffId", "updatedByStaffName"
+        ])
+        && request.resource.data.transitionEnforcement in ["strict", "advisory"]
+        && request.resource.data.policyRevision is int
+        && request.resource.data.policyRevision >= 1
+        && request.resource.data.updatedAt == request.time
+        && request.resource.data.updatedByStaffId == authenticatedStaffId()
+        && request.resource.data.updatedByStaffName == staffMirror().get("name", "");
+    }
+
+    function isValidPolicyCreate() {
+      return isValidPolicyPayload() && request.resource.data.policyRevision == 1;
+    }
+
+    function isValidPolicyUpdate() {
+      return isValidPolicyPayload()
+        && request.resource.data.policyRevision == resource.data.get("policyRevision", 0) + 1;
+    }
+
+    function hasValidRevisionShape(data) {
+      return data.keys().hasAll([
+          "tankDataRevision", "officialAggregationRevision", "updatedAt",
+          "revisionChangeKind", "changedLogIds", "officialAggregationLogIds",
+          "reviewDecision", "reviewEventId", "affectedCustomerIds",
+          "hasUnknownAffectedCustomer"
+        ])
+        && data.keys().hasOnly([
+          "tankDataRevision", "officialAggregationRevision", "updatedAt",
+          "revisionChangeKind", "changedLogIds", "officialAggregationLogIds",
+          "reviewDecision", "reviewEventId", "affectedCustomerIds",
+          "hasUnknownAffectedCustomer"
+        ])
+        && data.tankDataRevision is int
+        && data.officialAggregationRevision is int
+        && data.tankDataRevision >= 1
+        && data.officialAggregationRevision >= 0
+        && data.updatedAt == request.time
+        && data.revisionChangeKind in ["operation", "review", "void", "correction"]
+        && data.changedLogIds is list
+        && data.changedLogIds.size() >= 1
+        && data.changedLogIds.size() <= 100
+        && data.officialAggregationLogIds is list
+        && data.changedLogIds.hasAll(data.officialAggregationLogIds)
+        && data.affectedCustomerIds is list
+        && data.hasUnknownAffectedCustomer is bool
+        && (
+          data.revisionChangeKind == "review"
+          ? (
+            data.reviewDecision in ["approved", "excluded"]
+            && data.reviewEventId is string
+            && data.reviewEventId.size() > 0
+          )
+          : data.reviewDecision == null && data.reviewEventId == null
+        );
+    }
+
+    function revisionAnchorMatches(data) {
+      let anchorId = data.changedLogIds[0];
+      let anchor = getAfter(/databases/$(database)/documents/logs/$(anchorId)).data;
+      let officialChanged = data.officialAggregationLogIds.size() > 0;
+      return anchorId is string
+        && anchorId.size() > 0
+        && anchor.get("logKind", "") == "tank"
+        && (
+          (
+            data.revisionChangeKind in ["operation", "correction"]
+            &&
+            anchor.get("logStatus", "") == "active"
+            && anchor.get("revisionCreatedAt", null) == request.time
+            && (
+              officialChanged
+              ? anchor.get("transitionReviewStatus", "") == "not_required"
+              : anchor.get("transitionReviewStatus", "") == "pending"
+            )
+          )
+          || (
+            data.revisionChangeKind == "void"
+            &&
+            anchor.get("logStatus", "") == "voided"
+            && anchor.get("voidedAt", null) == request.time
+            && officialChanged
+              == (anchor.get("transitionReviewStatus", "") in ["not_required", "approved"])
+          )
+          || (
+            data.revisionChangeKind == "review"
+            &&
+            anchor.get("transitionReviewStatus", "") == data.reviewDecision
+            && anchor.get("reviewedAt", null) == request.time
+          )
+        );
+    }
+
+    function isValidAggregationRevisionPayload() {
+      let data = request.resource.data;
+      let officialChanged = data.get("officialAggregationLogIds", []).size() > 0;
+      return isStaff()
+        && hasValidRevisionShape(data)
+        && (data.revisionChangeKind != "review" || isAdmin())
+        && (
+          !officialChanged
+          || data.changedLogIds[0] == data.officialAggregationLogIds[0]
+        )
+        && (
+          data.revisionChangeKind != "review"
+          || (
+            data.reviewDecision == "approved"
+            ? data.officialAggregationLogIds == data.changedLogIds
+            : data.officialAggregationLogIds == []
+          )
+        )
+        && revisionAnchorMatches(data);
+    }
+
+    function isValidAggregationRevisionCreate() {
+      let data = request.resource.data;
+      let officialChanged = data.get("officialAggregationLogIds", []).size() > 0;
+      return isValidAggregationRevisionPayload()
+        && data.tankDataRevision == 1
+        && (
+          officialChanged
+          ? data.officialAggregationRevision == 1
+          : data.officialAggregationRevision == 0
+        );
+    }
+
+    function isValidAggregationRevisionUpdate() {
+      let data = request.resource.data;
+      let officialChanged = data.get("officialAggregationLogIds", []).size() > 0;
+      return isValidAggregationRevisionPayload()
+        && data.tankDataRevision == resource.data.get("tankDataRevision", 0) + 1
+        && (
+          officialChanged
+          ? data.officialAggregationRevision
+            == resource.data.get("officialAggregationRevision", 0) + 1
+          : data.officialAggregationRevision
+            == resource.data.get("officialAggregationRevision", 0)
+        );
+    }
+
     function isValidStaffJoinRequestStatus(status) {
       return status in ["pending", "approved", "rejected"];
     }
@@ -437,7 +1313,22 @@ service cloud.firestore {
         );
     }
 
-    function isStaffReturnCompletionUpdate() {
+    function isCompletedReturnLogCoupled(transactionId) {
+      let logId = request.resource.data.get("fulfilledLogId", "");
+      let logAfter = getAfter(/databases/$(database)/documents/logs/$(logId)).data;
+      return logId is string
+        && logId.size() > 0
+        && logAfter.get("logKind", "") == "tank"
+        && logAfter.get("logStatus", "") == "active"
+        && logAfter.get("workflow", "") == "return"
+        && logAfter.get("transactionId", "") == transactionId
+        && logAfter.get("tankId", "") == resource.data.get("tankId", "")
+        && logAfter.get("customerId", "") == resource.data.get("customerId", "")
+        && logAfter.get("prevTankSnapshot", {}).get("customerId", null)
+          == resource.data.get("customerId", "");
+    }
+
+    function isStaffReturnCompletionUpdate(transactionId) {
       return isStaff()
         && resource.data.type == "return"
         && resource.data.status == "pending_return"
@@ -451,6 +1342,7 @@ service cloud.firestore {
           "fulfilledByStaffId",
           "fulfilledByStaffName",
           "fulfilledByStaffEmail",
+          "fulfilledLogId",
           "updatedAt"
         ])
         && request.resource.data.keys().hasAll([
@@ -459,7 +1351,8 @@ service cloud.firestore {
           "fulfilledAt",
           "fulfilledBy",
           "fulfilledByStaffId",
-          "fulfilledByStaffName"
+          "fulfilledByStaffName",
+          "fulfilledLogId"
         ])
         && request.resource.data.fulfilledBy is string
         && request.resource.data.fulfilledBy.size() > 0
@@ -467,10 +1360,14 @@ service cloud.firestore {
         && request.resource.data.fulfilledByStaffId.size() > 0
         && request.resource.data.fulfilledByStaffName is string
         && request.resource.data.fulfilledByStaffName.size() > 0
+        && request.resource.data.fulfilledByStaffId == authenticatedStaffId()
+        && request.resource.data.fulfilledByStaffName == staffMirror().get("name", "")
         && (
           !request.resource.data.keys().hasAny(["fulfilledByStaffEmail"])
           || request.resource.data.fulfilledByStaffEmail is string
-        );
+            && request.resource.data.fulfilledByStaffEmail == request.auth.token.email
+        )
+        && isCompletedReturnLogCoupled(transactionId);
     }
 
     function isStaffPendingLinkOrderUpdate() {
@@ -511,10 +1408,10 @@ service cloud.firestore {
         );
     }
 
-    function isStaffTransactionUpdate() {
+    function isStaffTransactionUpdate(transactionId) {
       return isStaffOrderApproveUpdate()
         || isStaffOrderFulfillUpdate()
-        || isStaffReturnCompletionUpdate()
+        || isStaffReturnCompletionUpdate(transactionId)
         || isStaffPendingLinkOrderUpdate();
     }
 
@@ -700,16 +1597,36 @@ service cloud.firestore {
       allow create, update, delete: if isAdminStaff();
     }
 
+    match /settings/tankOperationPolicy {
+      allow get: if isStaff();
+      allow create: if isValidPolicyCreate();
+      allow update: if isValidPolicyUpdate();
+      allow delete: if isAdmin();
+    }
+
+    match /settings/tankAggregationRevision {
+      allow get: if isStaff();
+      allow create: if isValidAggregationRevisionCreate();
+      allow update: if isValidAggregationRevisionUpdate();
+      allow delete: if isAdmin();
+    }
+
     match /settings/{settingId} {
       allow get: if isStaff() || (signedIn() && settingId == "portal");
       allow list: if isAdminStaff();
-      allow create, update, delete: if isAdmin();
+      allow create, update, delete: if settingId != "tankOperationPolicy"
+        && settingId != "tankAggregationRevision"
+        && isAdmin();
     }
 
     match /tanks/{tankId} {
       allow get, list: if isStaff()
         || canReadLinkedCustomerResource();
-      allow create, update, delete: if isStaff();
+      // 新規購入・登録は既存procurement workflowを維持する。
+      // 操作projectionの更新は、同一atomic request内の正規tank logと相互結合する。
+      allow create: if isStaff();
+      allow update: if isValidTankUpdate(tankId);
+      allow delete: if isAdmin();
     }
 
     match /logs/{logId} {
@@ -717,13 +1634,78 @@ service cloud.firestore {
       // 未紐付け状態の /portal 表示は UI 側で permission-denied 対応が必要。
       allow get, list: if isStaff()
         || canReadLinkedCustomerResource();
-      allow create, update, delete: if isStaff();
+      allow create: if isStaff()
+        && (
+          request.resource.data.get("logKind", "") != "tank"
+          || isValidTankTransitionLogCreate(logId)
+        );
+      allow update: if isStaff()
+        && (
+          resource.data.get("logKind", "") != "tank"
+          || (
+            request.resource.data.get("transitionReviewStatus", "")
+              != resource.data.get("transitionReviewStatus", "")
+            && isAdminTransitionReviewUpdate(logId)
+          )
+          || (
+            request.resource.data.get("logStatus", "") == "superseded"
+            && isTankLogSupersedeUpdate(logId)
+          )
+          || (
+            request.resource.data.get("logStatus", "") == "voided"
+            && isTankLogVoidUpdate(logId)
+          )
+        );
+      allow delete: if isAdmin();
+    }
+
+    match /operationReviewEvents/{eventId} {
+      allow get, list: if isAdmin();
+      allow create: if isAdmin()
+        && request.resource.data.keys().hasAll([
+          "eventKind", "logIds", "decision", "reason", "reviewedAt",
+          "reviewedByStaffId", "reviewedByStaffName", "reviewedByUid",
+          "reviewedByEmail", "affectedCustomerIds", "hasUnknownAffectedCustomer",
+          "requiresAggregationRebuild", "entries"
+        ])
+        && request.resource.data.keys().hasOnly([
+          "eventKind", "logIds", "decision", "reason", "reviewedAt",
+          "reviewedByStaffId", "reviewedByStaffName", "reviewedByUid",
+          "reviewedByEmail", "affectedCustomerIds", "hasUnknownAffectedCustomer",
+          "requiresAggregationRebuild", "entries"
+        ])
+        && request.resource.data.get("eventKind", "") == "transition_aggregation_review_batch"
+        && request.resource.data.get("logIds", []) is list
+        && request.resource.data.get("logIds", []).size() >= 1
+        && request.resource.data.get("logIds", []).size() <= 100
+        && request.resource.data.get("decision", "") in ["approved", "excluded"]
+        && request.resource.data.get("reason", "") is string
+        && request.resource.data.get("reason", "").size() >= 5
+        && request.resource.data.get("reviewedAt", null) == request.time
+        && request.resource.data.get("affectedCustomerIds", []) is list
+        && request.resource.data.get("hasUnknownAffectedCustomer", null) is bool
+        && request.resource.data.get("entries", []) is list
+        && request.resource.data.get("requiresAggregationRebuild", false)
+          == (request.resource.data.get("decision", "") == "approved")
+        && reviewActorMatchesAuth(request.resource.data)
+        && revisionAfter().get("updatedAt", null) == request.time
+        && revisionAfter().get("revisionChangeKind", "") == "review"
+        && revisionAfter().get("reviewEventId", null) == eventId
+        && revisionAfter().get("reviewDecision", null)
+          == request.resource.data.get("decision", "")
+        && revisionAfter().get("changedLogIds", [])
+          == request.resource.data.get("logIds", []);
+      allow update, delete: if false;
+    }
+
+    match /migrationMarkers/{markerId} {
+      allow read, write: if false;
     }
 
     match /transactions/{transactionId} {
       allow get, list: if isStaff() || isOwnTransaction();
       allow create: if isStaff() || isOwnTransactionCreate();
-      allow update: if isStaffTransactionUpdate();
+      allow update: if isStaffTransactionUpdate(transactionId);
       allow delete: if isAdmin();
     }
 

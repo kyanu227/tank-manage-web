@@ -45,6 +45,7 @@ next-env.d.ts
 .firebase/
 firebase-service-account.json
 firebase-debug.log*
+firestore-debug.log*
 .firebaserc
 *-firebase-adminsdk-*.json
 *.json
@@ -52,4 +53,5 @@ firebase-debug.log*
 !tsconfig.json
 !next-env.d.ts
 !firebase.json
+!firebase.rules-test.json
 !.firebaserc
