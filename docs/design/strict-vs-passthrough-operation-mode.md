@@ -1,5 +1,10 @@
 # Strict Vs Memo-Only Operation Mode Design
 
+> Superseded on 2026-07-12. The implemented source of truth is
+> [strict-vs-assisted-transition-mode.md](./strict-vs-assisted-transition-mode.md).
+> Memo-only remains a possible separate feature, but it is not the implemented
+> strict/advisory switch.
+
 Date: 2026-07-09
 
 ## Summary
