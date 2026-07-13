@@ -282,13 +282,20 @@ export async function executeTransitionSnapshotRestore(
       );
     }
   }
-  if (typeof result.commitTime !== "string" || !result.commitTime) {
-    throw new Error("restore commitTimeを取得できません");
-  }
-  if (result.writeResults?.length !== plan.writes.length) {
-    throw new Error("restore commitのwriteResults件数が計画と一致しません");
-  }
   await assertRestoredSnapshot(options);
+  if (
+    typeof result.commitTime !== "string"
+    || !result.commitTime
+    || result.writeResults?.length !== plan.writes.length
+  ) {
+    return {
+      ...plan,
+      commitTime: typeof result.commitTime === "string" && result.commitTime
+        ? result.commitTime
+        : null,
+      commitResponse: "verified_after_ambiguous_response",
+    };
+  }
   return { ...plan, commitTime: result.commitTime, commitResponse: "confirmed" };
 }
 

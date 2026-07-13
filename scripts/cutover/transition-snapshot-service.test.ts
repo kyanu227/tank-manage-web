@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import { snapshotFieldSha256 } from "./canonical-firestore-value";
+import { describe, expect, it, vi } from "vitest";
+import { canonicalSha256, snapshotFieldSha256 } from "./canonical-firestore-value";
 import { FirestoreRestClient } from "./firestore-rest-client";
 import type {
   FirestoreRestDocument,
@@ -137,6 +137,25 @@ describe("transition snapshot restore core", () => {
       expectedMainCommit: "a".repeat(40),
     })).rejects.toThrow("本番restore execute");
   });
+
+  it.each([
+    ["commitTime欠落", { writeResults: [{}, {}, {}] }],
+    ["writeResults件数不一致", { commitTime: "2026-07-13T01:00:10Z", writeResults: [] }],
+  ])("%sの曖昧応答は完全read-back後にだけ成功とする", async (_label, response) => {
+    const payload = fixturePayload();
+    const client = ambiguousCommitClient(payload, response);
+    const result = await executeTransitionSnapshotRestore({
+      client,
+      payload,
+      snapshotPayloadSha256: "f".repeat(64),
+      expectedProjectId: PROJECT_ID,
+      expectedDatabaseId: DATABASE_ID,
+      expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
+      expectedMainCommit: "a".repeat(40),
+    });
+    expect(result.commitResponse).toBe("verified_after_ambiguous_response");
+    expect(client.runCollectionQuery).toHaveBeenCalledTimes(12);
+  });
 });
 
 function fixturePayload(): TransitionSnapshotPayloadV1 {
@@ -150,6 +169,15 @@ function fixturePayload(): TransitionSnapshotPayloadV1 {
     location: { stringValue: "A社" },
     latestLogId: { stringValue: "L-001" },
   }, "2026-07-13T00:00:01Z");
+  const documents = [log, tank];
+  const inventory = {
+    totalLogs: 1,
+    preservedNonTankLogs: 0,
+    unknownLogs: 0 as const,
+    totalTransactions: 0,
+    preservedTransactions: 0,
+    unknownTransactions: 0 as const,
+  };
   return {
     manifest: {
       version: 1,
@@ -164,21 +192,80 @@ function fixturePayload(): TransitionSnapshotPayloadV1 {
       keyId: "key-1",
       migrationMarkerPath: "migrationMarkers/transitionPlanRequiredV1",
       counts: { tanks: 1, tankLogs: 1, transactions: 0, restoreWrites: 3 },
-      inventory: {
-        totalLogs: 1,
-        preservedNonTankLogs: 0,
-        unknownLogs: 0,
-        totalTransactions: 0,
-        preservedTransactions: 0,
-        unknownTransactions: 0,
-      },
-      documentPathSha256: "0".repeat(64),
-      sourceCensusSha256: "1".repeat(64),
-      snapshotDocumentsSha256: "2".repeat(64),
+      inventory,
+      documentPathSha256: canonicalSha256(documents.map((document) => document.name)),
+      sourceCensusSha256: canonicalSha256({
+        documents: documents.map((document) => ({
+          name: document.name,
+          updateTime: document.updateTime,
+          fieldSha256: document.fieldSha256,
+        })),
+        inventory,
+        marker: null,
+      }),
+      snapshotDocumentsSha256: canonicalSha256(documents),
       subcollectionsChecked: 3,
     },
-    documents: [log, tank],
+    documents,
   };
+}
+
+function ambiguousCommitClient(
+  payload: TransitionSnapshotPayloadV1,
+  commitResponse: { commitTime?: string; writeResults?: Array<Record<string, never>> },
+): FirestoreRestClient {
+  const client = new FirestoreRestClient({
+    projectId: PROJECT_ID,
+    databaseId: DATABASE_ID,
+    emulatorHost: "127.0.0.1:8089",
+  });
+  const resetAt = "2026-07-13T01:00:00Z";
+  const tank = payload.documents.find((document) => document.kind === "tank")!;
+  const marker: FirestoreRestDocument = {
+    name: `${DATABASE_PREFIX}/documents/migrationMarkers/transitionPlanRequiredV1`,
+    fields: {
+      status: { stringValue: "completed" },
+      snapshotId: { stringValue: payload.manifest.snapshotId },
+      snapshotPayloadSha256: { stringValue: "f".repeat(64) },
+      snapshotDocumentsSha256: { stringValue: payload.manifest.snapshotDocumentsSha256 },
+      sourceCensusSha256: { stringValue: payload.manifest.sourceCensusSha256 },
+      resetAt: { timestampValue: resetAt },
+    },
+    createTime: resetAt,
+    updateTime: "2026-07-13T01:00:01Z",
+  };
+  let restored = false;
+  client.verifyDatabaseUid = vi.fn(async () => undefined);
+  client.beginReadOnlyTransaction = vi.fn(async () => "read-only-transaction");
+  client.rollback = vi.fn(async () => undefined);
+  client.listCollectionIds = vi.fn(async () => []);
+  client.runCollectionQuery = vi.fn(async (collectionId: string) => {
+    const documents = restored
+      ? payload.documents
+          .filter((document) => document.name.includes(`/documents/${collectionId}/`))
+          .map((document) => ({
+            name: document.name,
+            fields: document.fields,
+            createTime: document.createTime,
+            updateTime: document.updateTime,
+          }))
+      : collectionId === "tanks"
+        ? [{
+            name: tank.name,
+            fields: resetProjectionFieldsFromSnapshot(tank, resetAt),
+            createTime: tank.createTime,
+            updateTime: "2026-07-13T01:00:02Z",
+          }]
+        : collectionId === "migrationMarkers"
+          ? [marker]
+          : [];
+    return { documents, readTime: "2026-07-13T01:00:03Z" };
+  });
+  client.commit = vi.fn(async () => {
+    restored = true;
+    return commitResponse;
+  });
+  return client;
 }
 
 function snapshotDocument(

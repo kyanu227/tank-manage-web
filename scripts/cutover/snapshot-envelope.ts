@@ -32,6 +32,7 @@ const ENVELOPE_ALGORITHM = "AES-256-GCM";
 const KEY_BYTES = 32;
 const IV_BYTES = 12;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
+export const MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES = 16 * 1024 * 1024;
 
 export type SnapshotOutputPolicy = {
   repositoryRoot: string;
@@ -56,17 +57,25 @@ export function encryptTransitionSnapshot(
     payloadSha256,
   };
   const aad = Buffer.from(canonicalStringify(header), "utf8");
-  const cipher = createCipheriv(ALGORITHM, key, iv);
-  cipher.setAAD(aad);
-  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
-  const authTag = cipher.getAuthTag();
-
-  return {
-    ...header,
-    authTagBase64: authTag.toString("base64"),
-    ciphertextSha256: sha256Hex(ciphertext),
-    ciphertextBase64: ciphertext.toString("base64"),
-  };
+  let ciphertext: Buffer | null = null;
+  let authTag: Buffer | null = null;
+  try {
+    const cipher = createCipheriv(ALGORITHM, key, iv);
+    cipher.setAAD(aad);
+    ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+    authTag = cipher.getAuthTag();
+    return {
+      ...header,
+      authTagBase64: authTag.toString("base64"),
+      ciphertextSha256: sha256Hex(ciphertext),
+      ciphertextBase64: ciphertext.toString("base64"),
+    };
+  } finally {
+    plaintext.fill(0);
+    aad.fill(0);
+    ciphertext?.fill(0);
+    authTag?.fill(0);
+  }
 }
 
 export function decryptTransitionSnapshot(
@@ -80,7 +89,6 @@ export function decryptTransitionSnapshot(
     throw new Error(`snapshot key IDが一致しません: ${envelope.keyId}`);
   }
   const ciphertext = Buffer.from(envelope.ciphertextBase64, "base64");
-  assertDigestEquals(sha256Hex(ciphertext), envelope.ciphertextSha256, "ciphertext SHA-256");
   const header = {
     version: envelope.version,
     algorithm: envelope.algorithm,
@@ -89,43 +97,52 @@ export function decryptTransitionSnapshot(
     ivBase64: envelope.ivBase64,
     payloadSha256: envelope.payloadSha256,
   };
-  const decipher = createDecipheriv(
-    ALGORITHM,
-    key,
-    Buffer.from(envelope.ivBase64, "base64"),
-  );
-  decipher.setAAD(Buffer.from(canonicalStringify(header), "utf8"));
-  decipher.setAuthTag(Buffer.from(envelope.authTagBase64, "base64"));
-
-  let plaintext: Buffer;
+  const iv = Buffer.from(envelope.ivBase64, "base64");
+  const aad = Buffer.from(canonicalStringify(header), "utf8");
+  const authTag = Buffer.from(envelope.authTagBase64, "base64");
+  let plaintext: Buffer | null = null;
+  let canonicalPlaintext: Buffer | null = null;
   try {
-    plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-  } catch {
-    throw new Error("snapshotの復号またはAES-GCM改ざん検証に失敗しました");
-  }
-  assertDigestEquals(sha256Hex(plaintext), envelope.payloadSha256, "payload SHA-256");
+    assertDigestEquals(sha256Hex(ciphertext), envelope.ciphertextSha256, "ciphertext SHA-256");
+    const decipher = createDecipheriv(ALGORITHM, key, iv);
+    decipher.setAAD(aad);
+    decipher.setAuthTag(authTag);
+    try {
+      plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    } catch {
+      throw new Error("snapshotの復号またはAES-GCM改ざん検証に失敗しました");
+    }
+    assertDigestEquals(sha256Hex(plaintext), envelope.payloadSha256, "payload SHA-256");
 
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(plaintext.toString("utf8"));
-  } catch {
-    throw new Error("snapshot payloadが有効なJSONではありません");
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(plaintext.toString("utf8"));
+    } catch {
+      throw new Error("snapshot payloadが有効なJSONではありません");
+    }
+    const payload = validateTransitionSnapshotPayload(parsed);
+    canonicalPlaintext = Buffer.from(canonicalStringify(payload), "utf8");
+    if (
+      plaintext.byteLength !== canonicalPlaintext.byteLength
+      || !timingSafeEqual(plaintext, canonicalPlaintext)
+    ) {
+      throw new Error("snapshot payloadがcanonical JSONではありません");
+    }
+    if (payload.manifest.snapshotId !== envelope.snapshotId) {
+      throw new Error("envelopeとmanifestのsnapshot IDが一致しません");
+    }
+    if (payload.manifest.keyId !== envelope.keyId) {
+      throw new Error("envelopeとmanifestのkey IDが一致しません");
+    }
+    return payload;
+  } finally {
+    ciphertext.fill(0);
+    iv.fill(0);
+    aad.fill(0);
+    authTag.fill(0);
+    plaintext?.fill(0);
+    canonicalPlaintext?.fill(0);
   }
-  const payload = validateTransitionSnapshotPayload(parsed);
-  const canonicalPlaintext = Buffer.from(canonicalStringify(payload), "utf8");
-  if (
-    plaintext.byteLength !== canonicalPlaintext.byteLength
-    || !timingSafeEqual(plaintext, canonicalPlaintext)
-  ) {
-    throw new Error("snapshot payloadがcanonical JSONではありません");
-  }
-  if (payload.manifest.snapshotId !== envelope.snapshotId) {
-    throw new Error("envelopeとmanifestのsnapshot IDが一致しません");
-  }
-  if (payload.manifest.keyId !== envelope.keyId) {
-    throw new Error("envelopeとmanifestのkey IDが一致しません");
-  }
-  return payload;
 }
 
 export async function writeEncryptedSnapshotFile(
@@ -137,6 +154,9 @@ export async function writeEncryptedSnapshotFile(
   const directory = dirname(safeOutputPath);
   const temporaryPath = join(directory, `.${basename(safeOutputPath)}.${randomUUID()}.tmp`);
   const body = `${canonicalStringify(normalizeEnvelope(envelope))}\n`;
+  if (Buffer.byteLength(body, "utf8") > MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES) {
+    throw new Error("snapshot envelopeがfile size上限を超えています");
+  }
   let handle: Awaited<ReturnType<typeof open>> | null = null;
   try {
     handle = await open(temporaryPath, "wx", 0o600);
@@ -168,6 +188,9 @@ export async function readEncryptedSnapshotFile(
   policy: SnapshotOutputPolicy,
 ): Promise<EncryptedTransitionSnapshotEnvelopeV1> {
   const safeSnapshotPath = await assertSafeSnapshotPath(snapshotPath, policy, true);
+  if ((await stat(safeSnapshotPath)).size > MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES) {
+    throw new Error("snapshot envelopeがfile size上限を超えています");
+  }
   const raw = await readFile(safeSnapshotPath, "utf8");
   let parsed: unknown;
   try {
@@ -305,7 +328,7 @@ function nonEmptyString(value: unknown, label: string): string {
 async function assertSnapshotFileMetadata(snapshotPath: string): Promise<void> {
   const stats = await stat(snapshotPath);
   if (!stats.isFile()) throw new Error("snapshot pathが通常fileではありません");
-  if ((stats.mode & 0o077) !== 0) {
+  if ((stats.mode & 0o777) !== 0o600) {
     throw new Error("snapshot fileのpermissionが0600ではありません");
   }
   if (typeof process.getuid === "function" && stats.uid !== process.getuid()) {

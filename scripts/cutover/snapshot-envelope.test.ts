@@ -1,10 +1,27 @@
-import { randomBytes } from "node:crypto";
-import { mkdtemp, readFile, rm, stat, symlink } from "node:fs/promises";
+import { createCipheriv, randomBytes } from "node:crypto";
+import {
+  chmod,
+  link,
+  mkdir,
+  mkdtemp,
+  readFile,
+  rm,
+  stat,
+  symlink,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { canonicalSha256, snapshotFieldSha256 } from "./canonical-firestore-value";
 import {
+  canonicalSha256,
+  canonicalStringify,
+  sha256Hex,
+  snapshotFieldSha256,
+} from "./canonical-firestore-value";
+import {
+  MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES,
   assertSafeSnapshotPath,
   decryptTransitionSnapshot,
   encryptTransitionSnapshot,
@@ -43,6 +60,26 @@ describe("encrypted transition snapshot envelope", () => {
       .toThrow("ciphertext SHA-256");
   });
 
+  it("AAD header、auth tag、非canonical plaintextの改ざんを拒否する", () => {
+    const key = randomBytes(32);
+    const envelope = encryptTransitionSnapshot(fixturePayload(), key);
+    expect(() => decryptTransitionSnapshot({
+      ...envelope,
+      snapshotId: "tampered-snapshot-id",
+    }, key, envelope.keyId)).toThrow("AES-GCM");
+
+    const authTag = Buffer.from(envelope.authTagBase64, "base64");
+    authTag[0] ^= 0xff;
+    expect(() => decryptTransitionSnapshot({
+      ...envelope,
+      authTagBase64: authTag.toString("base64"),
+    }, key, envelope.keyId)).toThrow("AES-GCM");
+
+    const nonCanonical = encryptNonCanonicalPayload(fixturePayload(), key);
+    expect(() => decryptTransitionSnapshot(nonCanonical, key, nonCanonical.keyId))
+      .toThrow("canonical JSON");
+  });
+
   it("repository/iCloud外へ0600・上書き禁止で暗号化fileだけを保存する", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tank-cutover-envelope-"));
     const output = join(directory, "snapshot.cutover.enc");
@@ -53,6 +90,10 @@ describe("encrypted transition snapshot envelope", () => {
       expect(JSON.parse(await readFile(output, "utf8"))).toEqual(envelope);
       expect(await readEncryptedSnapshotFile(output, { repositoryRoot: process.cwd() }))
         .toEqual(envelope);
+      await chmod(output, 0o400);
+      await expect(readEncryptedSnapshotFile(output, { repositoryRoot: process.cwd() }))
+        .rejects.toThrow("0600");
+      await chmod(output, 0o600);
       await expect(writeEncryptedSnapshotFile(output, envelope, { repositoryRoot: process.cwd() }))
         .rejects.toThrow("上書き");
       await expect(assertSafeSnapshotPath(
@@ -65,6 +106,26 @@ describe("encrypted transition snapshot envelope", () => {
         join(repositoryLink, "snapshot.cutover.enc"),
         { repositoryRoot: process.cwd() },
       )).rejects.toThrow("repository配下");
+
+      const hardLink = join(directory, "snapshot-hard-link.cutover.enc");
+      await link(output, hardLink);
+      await expect(readEncryptedSnapshotFile(output, { repositoryRoot: process.cwd() }))
+        .rejects.toThrow("hard link数");
+      await unlink(hardLink);
+
+      const mobileDocumentsRoot = join(directory, "Mobile Documents");
+      await mkdir(mobileDocumentsRoot);
+      await expect(assertSafeSnapshotPath(
+        join(mobileDocumentsRoot, "snapshot.cutover.enc"),
+        { repositoryRoot: process.cwd(), mobileDocumentsRoot },
+      )).rejects.toThrow("iCloud Mobile Documents配下");
+
+      const oversized = join(directory, "oversized.cutover.enc");
+      await writeFile(oversized, Buffer.alloc(MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES + 1), {
+        mode: 0o600,
+      });
+      await expect(readEncryptedSnapshotFile(oversized, { repositoryRoot: process.cwd() }))
+        .rejects.toThrow("file size上限");
     } finally {
       await rm(directory, { recursive: true, force: true });
     }
@@ -129,5 +190,31 @@ function fixturePayload(): TransitionSnapshotPayloadV1 {
       subcollectionsChecked: 2,
     },
     documents,
+  };
+}
+
+function encryptNonCanonicalPayload(
+  payload: TransitionSnapshotPayloadV1,
+  key: Buffer,
+): EncryptedTransitionSnapshotEnvelopeV1 {
+  const plaintext = Buffer.from(JSON.stringify(payload, null, 2), "utf8");
+  const payloadSha256 = sha256Hex(plaintext);
+  const iv = randomBytes(12);
+  const header = {
+    version: 1 as const,
+    algorithm: "AES-256-GCM" as const,
+    snapshotId: payload.manifest.snapshotId,
+    keyId: payload.manifest.keyId,
+    ivBase64: iv.toString("base64"),
+    payloadSha256,
+  };
+  const cipher = createCipheriv("aes-256-gcm", key, iv);
+  cipher.setAAD(Buffer.from(canonicalStringify(header), "utf8"));
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return {
+    ...header,
+    authTagBase64: cipher.getAuthTag().toString("base64"),
+    ciphertextSha256: sha256Hex(ciphertext),
+    ciphertextBase64: ciphertext.toString("base64"),
   };
 }

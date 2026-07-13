@@ -43,4 +43,15 @@ describe("Firestore REST client safety", () => {
       emulatorHost: "firestore.example.com:8080",
     })).toThrow("loopback");
   });
+
+  it("cutover用clientの本番commitを下位境界でも拒否する", async () => {
+    const client = new FirestoreRestClient({
+      projectId: "okmarine-tankrental",
+      databaseId: "(default)",
+      accessTokenProvider: async () => "unused-test-token",
+    });
+    await expect(client.commit([{
+      delete: "projects/okmarine-tankrental/databases/(default)/documents/tanks/T-001",
+    }])).rejects.toThrow("本番commit");
+  });
 });

@@ -53,7 +53,6 @@ async function main(): Promise<void> {
       snapshotDocumentsSha256: payload.manifest.snapshotDocumentsSha256,
       payloadSha256: envelope.payloadSha256,
       envelopeSha256: snapshotEnvelopeSha256(envelope),
-      outputPath,
     }, null, 2));
   } finally {
     disposeSnapshotKey(key);

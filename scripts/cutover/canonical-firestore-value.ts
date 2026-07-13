@@ -115,8 +115,13 @@ export function normalizeFirestoreValue(value: unknown, fieldPath = "value"): Fi
     case "geoPointValue": {
       const point = objectRecord(record.geoPointValue, `${fieldPath}.geoPointValue`);
       assertOnlyKeys(point, ["latitude", "longitude"], `${fieldPath}.geoPointValue`);
-      const latitude = finiteNumber(point.latitude, `${fieldPath}.geoPointValue.latitude`);
-      const longitude = finiteNumber(point.longitude, `${fieldPath}.geoPointValue.longitude`);
+      // ProtoJSONはdefault scalarの0を省略するため、GeoPoint(0, 0)は{}で返り得る。
+      const latitude = point.latitude === undefined
+        ? 0
+        : finiteNumber(point.latitude, `${fieldPath}.geoPointValue.latitude`);
+      const longitude = point.longitude === undefined
+        ? 0
+        : finiteNumber(point.longitude, `${fieldPath}.geoPointValue.longitude`);
       if (latitude < -90 || latitude > 90) throw new Error(`${fieldPath}のlatitudeが範囲外です`);
       if (longitude < -180 || longitude > 180) throw new Error(`${fieldPath}のlongitudeが範囲外です`);
       return { geoPointValue: { latitude, longitude } };

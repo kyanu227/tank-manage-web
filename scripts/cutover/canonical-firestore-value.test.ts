@@ -53,6 +53,18 @@ describe("Firestore REST Value canonicalization", () => {
     expect(normalizeFirestoreValue({ doubleValue: -0 })).toEqual({ doubleValue: 0 });
   });
 
+  it("ProtoJSONで省略されたGeoPointの0軸をcanonical化する", () => {
+    expect(normalizeFirestoreValue({ geoPointValue: {} })).toEqual({
+      geoPointValue: { latitude: 0, longitude: 0 },
+    });
+    expect(normalizeFirestoreValue({ geoPointValue: { latitude: 35 } })).toEqual({
+      geoPointValue: { latitude: 35, longitude: 0 },
+    });
+    expect(normalizeFirestoreValue({ geoPointValue: { longitude: 139 } })).toEqual({
+      geoPointValue: { latitude: 0, longitude: 139 },
+    });
+  });
+
   it("map key順に依存せず決定的なhashを生成する", () => {
     const left = { b: { stringValue: "b" }, a: { integerValue: "1" } };
     const right = { a: { integerValue: "1" }, b: { stringValue: "b" } };

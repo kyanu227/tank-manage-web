@@ -160,6 +160,11 @@ export class FirestoreRestClient {
   }
 
   async commit(writes: FirestoreWrite[]): Promise<FirestoreCommitResponse> {
+    if (!this.emulatorHost) {
+      throw new Error(
+        "cutover用Firestore REST clientの本番commitはfreeze/runbook完了まで無効です",
+      );
+    }
     if (writes.length === 0) throw new Error("commit writeが空です");
     return this.request<FirestoreCommitResponse>(
       "POST",
@@ -168,7 +173,7 @@ export class FirestoreRestClient {
     );
   }
 
-  async request<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
+  private async request<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (body !== undefined) headers["Content-Type"] = "application/json";
     if (this.emulatorHost) {
@@ -184,7 +189,7 @@ export class FirestoreRestClient {
     });
     const text = await response.text();
     if (!response.ok) {
-      throw new Error(`Firestore REST ${method} ${url} failed (${response.status}): ${text.slice(0, 2_000)}`);
+      throw new Error(`Firestore REST request failed (${method}, status=${response.status})`);
     }
     if (!text.trim()) return {} as T;
     try {

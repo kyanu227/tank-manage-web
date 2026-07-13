@@ -60,6 +60,13 @@ try {
     tankField(firstPayload, "T-001", "negativeZero", "doubleValue") === 0,
     "snapshot preserves the double type while normalizing Firestore -0.0 to 0.0",
   );
+  const zeroGeoPoint = tankValue(firstPayload, "T-001", "zeroGeoPoint");
+  assert(
+    zeroGeoPoint && "geoPointValue" in zeroGeoPoint
+      && zeroGeoPoint.geoPointValue.latitude === 0
+      && zeroGeoPoint.geoPointValue.longitude === 0,
+    "snapshot canonicalizes omitted ProtoJSON GeoPoint zero axes",
+  );
 
   await applyFixtureReset(firstPayload, firstEnvelope.payloadSha256, "2026-07-13T02:00:00Z");
   await changeMarkerSnapshotId("wrong-snapshot-id");
@@ -147,6 +154,7 @@ async function seedProductionShapeFixture(): Promise<void> {
           referenceValue: `${DATABASE_PREFIX}/documents/customers/customer-001`,
         },
         geoPointValue: { geoPointValue: { latitude: 35.6812, longitude: 139.7671 } },
+        zeroGeoPoint: { geoPointValue: { latitude: 0, longitude: 0 } },
         nestedValue: {
           mapValue: {
             fields: {
@@ -454,6 +462,15 @@ function tankField(
   const tank = payload.documents.find((document) => document.name.endsWith(`/tanks/${tankId}`));
   const value = tank?.fields[fieldName];
   return value && unionKey in value ? value[unionKey] : undefined;
+}
+
+function tankValue(
+  payload: TransitionSnapshotPayloadV1,
+  tankId: string,
+  fieldName: string,
+): FirestoreRestValue | undefined {
+  const tank = payload.documents.find((document) => document.name.endsWith(`/tanks/${tankId}`));
+  return tank?.fields[fieldName];
 }
 
 function assert(condition: unknown, label: string): asserts condition {
