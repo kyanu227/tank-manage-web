@@ -24,6 +24,8 @@
 .DS_Store
 *.pem
 .codex-logs/
+/.cutover-backups/
+*.cutover.enc
 
 # debug
 npm-debug.log*
@@ -54,4 +56,5 @@ firestore-debug.log*
 !next-env.d.ts
 !firebase.json
 !firebase.rules-test.json
+!firebase.cutover-core-test.json
 !.firebaserc
