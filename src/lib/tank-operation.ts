@@ -747,6 +747,7 @@ function assertRecoveryRequirementCanBeConfirmed(
 function buildRecoveryRequirementDetails(
   requirement: TankRecoveryRequirement,
 ): string {
+  const finalStep = requirement.plan.steps.at(-1)!;
   const previousCustomerStep = requirement.plan.steps.find(
     (step) => step.businessEffect === "rental_close",
   );
@@ -772,6 +773,7 @@ function buildRecoveryRequirementDetails(
     `現在holder customer: ${formatCustomer(requirement.currentCustomerId, requirement.currentCustomerName, "なし")}`,
     `旧貸出先customer: ${formatCustomer(previousCustomerStep?.customerId, previousCustomerStep?.customerName, "該当なし")}`,
     `新貸出先customer: ${formatCustomer(newCustomerStep?.customerId, newCustomerStep?.customerName, "該当なし")}`,
+    `最終状態: ${tankStatusCodeToLegacyStatus(finalStep.toStatus)} (${finalStep.toStatus})`,
     "",
     "内部で記録するtransition steps:",
     ...stepDetails,
