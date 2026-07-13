@@ -14,8 +14,10 @@ import {
   assertRestoreIdentity,
   buildRestoreWrites,
   executeTransitionSnapshotRestore,
+  planTransitionSnapshotRestore,
   resetProjectionFieldsFromSnapshot,
 } from "./transition-snapshot-service";
+import { createTransitionResetContract } from "./transition-reset-contract";
 
 const PROJECT_ID = "demo-cutover";
 const DATABASE_ID = "(default)";
@@ -188,6 +190,32 @@ describe("transition snapshot restore core", () => {
     })).rejects.toThrow("read-backで完全復元も確認できません");
     expect(client.runCollectionQuery).toHaveBeenCalledTimes(12);
   });
+
+  it.each(["statusCounts", "resetPlanSha256"])(
+    "marker.%s改ざんをrestore前に拒否する",
+    async (fieldName) => {
+      const payload = fixturePayload();
+      const client = ambiguousCommitClient(
+        payload,
+        { commitTime: "2026-07-13T01:00:10Z", writeResults: [{}, {}, {}] },
+        true,
+        (fields) => {
+          fields[fieldName] = fieldName === "statusCounts"
+            ? { mapValue: { fields: { lent: { integerValue: "999" } } } }
+            : { stringValue: "e".repeat(64) };
+        },
+      );
+      await expect(planTransitionSnapshotRestore({
+        client,
+        payload,
+        snapshotPayloadSha256: "f".repeat(64),
+        expectedProjectId: PROJECT_ID,
+        expectedDatabaseId: DATABASE_ID,
+        expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
+        expectedMainCommit: "a".repeat(40),
+      })).rejects.toThrow("reset契約");
+    },
+  );
 });
 
 function fixturePayload(): TransitionSnapshotPayloadV1 {
@@ -246,6 +274,7 @@ function ambiguousCommitClient(
   payload: TransitionSnapshotPayloadV1,
   commitResponse: { commitTime?: string; writeResults?: Array<Record<string, never>> } | Error,
   commitApplied = true,
+  tamperMarker?: (fields: NonNullable<FirestoreRestDocument["fields"]>) => void,
 ): FirestoreRestClient {
   const client = new FirestoreRestClient({
     projectId: PROJECT_ID,
@@ -254,16 +283,15 @@ function ambiguousCommitClient(
   });
   const resetAt = "2026-07-13T01:00:00Z";
   const tank = payload.documents.find((document) => document.kind === "tank")!;
+  const markerFields = createTransitionResetContract(
+    payload,
+    "f".repeat(64),
+    resetAt,
+  ).markerFields;
+  tamperMarker?.(markerFields);
   const marker: FirestoreRestDocument = {
     name: `${DATABASE_PREFIX}/documents/migrationMarkers/transitionPlanRequiredV1`,
-    fields: {
-      status: { stringValue: "completed" },
-      snapshotId: { stringValue: payload.manifest.snapshotId },
-      snapshotPayloadSha256: { stringValue: "f".repeat(64) },
-      snapshotDocumentsSha256: { stringValue: payload.manifest.snapshotDocumentsSha256 },
-      sourceCensusSha256: { stringValue: payload.manifest.sourceCensusSha256 },
-      resetAt: { timestampValue: resetAt },
-    },
+    fields: markerFields,
     createTime: resetAt,
     updateTime: "2026-07-13T01:00:01Z",
   };

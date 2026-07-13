@@ -28,6 +28,7 @@ import type {
   TransitionSnapshotPayloadV1,
   TransitionSourceCensus,
 } from "./firestore-rest-types";
+import { createTransitionResetContract } from "./transition-reset-contract";
 
 export const MAX_CUTOVER_COMMIT_WRITES = 400;
 export const MAX_CUTOVER_COMMIT_BYTES = 8 * 1024 * 1024;
@@ -493,12 +494,13 @@ function assertRestoreCurrentState(
   if (restString(markerFields.snapshotPayloadSha256) !== snapshotPayloadSha256) {
     throw new Error("migration markerのsnapshot payload SHA-256が一致しません");
   }
-  if (restString(markerFields.snapshotDocumentsSha256)
-    !== payload.manifest.snapshotDocumentsSha256) {
-    throw new Error("migration markerのsnapshot documents SHA-256が一致しません");
-  }
-  if (restString(markerFields.sourceCensusSha256) !== payload.manifest.sourceCensusSha256) {
-    throw new Error("migration markerのsource census SHA-256が一致しません");
+  const expectedMarkerFields = createTransitionResetContract(
+    payload,
+    snapshotPayloadSha256,
+    resetAt,
+  ).markerFields;
+  if (canonicalStringify(markerFields) !== canonicalStringify(expectedMarkerFields)) {
+    throw new Error("migration markerがsnapshot由来のreset契約と一致しません");
   }
 }
 
