@@ -7,11 +7,13 @@ import {
   deleteDoc,
   deleteField,
   doc,
+  getDoc,
   runTransaction,
   serverTimestamp,
   setDoc,
   updateDoc,
 } from "firebase/firestore";
+import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 
 const PROJECT_ID = "tank-transition-rules-test";
@@ -287,16 +289,43 @@ try {
     });
   });
 
-  await succeeds("valid void", async () => {
+  await succeeds("valid direct log void", async () => {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
     await seedActiveDirectLog();
     await executeVoid();
   });
 
-  await succeeds("valid correction", async () => {
+  await succeeds("valid direct log correction", async () => {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
     await seedActiveDirectLog();
     await executeCorrection();
+  });
+
+  await succeeds("latest active recovery log may be voided", async () => {
+    await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
+    await seedActiveRecoveryLog();
+    await executeVoid();
+  });
+
+  await succeeds("voided recovery is re-executed as a distinct pending log", async () => {
+    await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
+    await seedActiveRecoveryLog();
+    await executeVoid();
+    await executeRecoveryAfterVoid();
+
+    const firestore = contextFor(ADMIN);
+    const [oldLog, rerunLog, tank] = await Promise.all([
+      getDoc(doc(firestore, "logs", "active-log")),
+      getDoc(doc(firestore, "logs", "rerun-recovery-log")),
+      getDoc(doc(firestore, "tanks", "T001")),
+    ]);
+    assert.equal(oldLog.data()?.logStatus, "voided");
+    assert.equal(rerunLog.data()?.transitionPlan?.kind, "recovery");
+    assert.equal(rerunLog.data()?.transitionReviewStatus, "pending");
+    assert.equal(rerunLog.data()?.recoveryConfirmationFingerprint?.length, 64);
+    assert.equal(rerunLog.data()?.recoveryEvidence?.physicalTankConfirmed, true);
+    assert.equal(tank.data()?.latestLogId, rerunLog.id);
+    assert.notEqual(rerunLog.id, oldLog.id);
   });
 
   await succeeds("recent worker correction remains allowed", async () => {
@@ -550,6 +579,18 @@ async function runDenialCases() {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
     await seedActiveDirectLog();
     await executeCorrection({ timestamp: new Date(2_000) });
+  });
+
+  await fails("recovery log cannot be corrected directly", async () => {
+    await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
+    await seedActiveRecoveryLog();
+    await executeCorrection();
+  });
+
+  await fails("past recovery log with a later active log cannot be voided", async () => {
+    await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
+    await seedActiveRecoveryLog({ withLaterActiveLog: true });
+    await executeVoid();
   });
 
   await fails("worker cannot correct a log after 72 hours", async () => {
@@ -1364,6 +1405,50 @@ async function seedActiveDirectLog({ revisionCreatedAt = new Date(1_000) } = {})
   });
 }
 
+async function seedActiveRecoveryLog({ withLaterActiveLog = false } = {}) {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    const id = "T001";
+    const recoveryLog = {
+      ...buildOperationLog({
+        id,
+        kind: "recovery",
+        policyMode: "advisory",
+        policyRevision: 2,
+      }),
+      rootLogId: "active-log",
+      timestamp: new Date(1_000),
+      originalAt: new Date(1_000),
+      revisionCreatedAt: new Date(1_000),
+    };
+    const laterLog = {
+      ...buildOperationLog({
+        id,
+        kind: "direct",
+        policyMode: "advisory",
+        policyRevision: 2,
+      }),
+      ...directReturnOverrides(CUSTOMER),
+      rootLogId: "later-log",
+      timestamp: new Date(2_000),
+      originalAt: new Date(2_000),
+      revisionCreatedAt: new Date(2_000),
+      previousLogIdOnSameTank: "active-log",
+    };
+    const writes = [
+      setDoc(doc(firestore, "logs", "active-log"), recoveryLog),
+      setDoc(doc(firestore, "tanks", id), {
+        ...(withLaterActiveLog ? laterLog.nextTankSnapshot : recoveryLog.nextTankSnapshot),
+        latestLogId: withLaterActiveLog ? "later-log" : "active-log",
+      }),
+    ];
+    if (withLaterActiveLog) {
+      writes.push(setDoc(doc(firestore, "logs", "later-log"), laterLog));
+    }
+    await Promise.all(writes);
+  });
+}
+
 async function seedCrossTankCorrectionFixture() {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore();
@@ -1421,6 +1506,10 @@ function executeVoid(actor = ADMIN) {
       transaction.get(tankRef),
       transaction.get(revisionRef),
     ]);
+    const log = logSnapshot.data();
+    const officialChanged = ["not_required", "approved"].includes(
+      log.transitionReviewStatus,
+    );
     transaction.update(logRef, {
       logStatus: "voided",
       voidReason: "Rules取消操作確認",
@@ -1437,12 +1526,53 @@ function executeVoid(actor = ADMIN) {
     });
     transaction.set(revisionRef, revisionDocument({
       tankDataRevision: 6,
-      officialAggregationRevision: 4,
+      officialAggregationRevision: officialChanged ? 4 : 3,
       revisionChangeKind: "void",
       changedLogIds: [logRef.id],
-      officialAggregationLogIds: [logRef.id],
+      officialAggregationLogIds: officialChanged ? [logRef.id] : [],
       timestamp: serverTimestamp(),
     }));
+  });
+}
+
+function executeRecoveryAfterVoid() {
+  const firestore = contextFor(ADMIN);
+  return runTransaction(firestore, async (transaction) => {
+    const policyRef = doc(firestore, "settings", "tankOperationPolicy");
+    const revisionRef = doc(firestore, "settings", "tankAggregationRevision");
+    const tankRef = doc(firestore, "tanks", "T001");
+    const logRef = doc(firestore, "logs", "rerun-recovery-log");
+    await Promise.all([
+      transaction.get(policyRef),
+      transaction.get(revisionRef),
+      transaction.get(tankRef),
+    ]);
+    const log = buildOperationLog({
+      id: "T001",
+      kind: "recovery",
+      policyMode: "advisory",
+      policyRevision: 2,
+      overrides: {
+        rootLogId: logRef.id,
+        previousLogIdOnSameTank: null,
+        recoveryConfirmationFingerprint: "b".repeat(64),
+      },
+    });
+    transaction.set(revisionRef, revisionDocument({
+      tankDataRevision: 7,
+      officialAggregationRevision: 3,
+      revisionChangeKind: "operation",
+      changedLogIds: [logRef.id],
+      officialAggregationLogIds: [],
+      affectedCustomerIds: [CUSTOMER.customerId],
+      timestamp: serverTimestamp(),
+    }));
+    transaction.set(logRef, log);
+    transaction.update(tankRef, {
+      ...log.nextTankSnapshot,
+      latestLogId: logRef.id,
+      updatedAt: serverTimestamp(),
+    });
   });
 }
 

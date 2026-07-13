@@ -528,8 +528,9 @@ service cloud.firestore {
         );
     }
 
-    // correctionは必ずdirect plan。recovery recipe全分岐を再評価せず、
-    // 同じ不変条件を1-step directに限定してRules式数上限内で検証する。
+    // correctionは訂正元・訂正後ともにdirect planだけを許可する。
+    // recoveryは最新active logをvoidして正しい操作を再実行するため、ここでは扱わない。
+    // directの同じ不変条件を1-stepに限定してRules式数上限内で検証する。
     function isValidCorrectedTankTransitionLogCreate(logId) {
       let data = request.resource.data;
       let plan = data.get("transitionPlan", {});
