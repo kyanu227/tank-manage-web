@@ -82,7 +82,6 @@ function toLogDoc(snap: QueryDocumentSnapshot): LogDoc {
     ),
     policyMode: policyModeOrUndefined(data.policyMode),
     policyRevision: numberOrUndefined(data.policyRevision),
-    recoveryReason: stringOrUndefined(data.recoveryReason),
     recoveryEvidence: data.recoveryEvidence as LogDoc["recoveryEvidence"],
     affectedCustomerIds: stringArrayOrUndefined(data.affectedCustomerIds),
     hasUnknownAffectedCustomer:

@@ -19,12 +19,56 @@ describe("assertRecoveryConfirmationsMatchReplannedState", () => {
       expectedFingerprint: "a".repeat(64),
       confirmation: {
         fingerprint: "b".repeat(64),
-        recoveryReason: "現物確認済み",
         recoveryEvidence: {
           physicalTankConfirmed: true,
           fillStateConfirmed: true,
         },
       },
     }])).toThrow("確認後にタンク状態");
+  });
+
+  it("理由なしでもplanner要求の証跡とfingerprintが一致すれば確認済みとする", () => {
+    const result = planTankTransition({
+      policyMode: "advisory",
+      current: { status: "empty", location: "倉庫" },
+      requestedAction: "lend",
+      targetCustomer: { customerId: "customer-a", customerName: "A社" },
+      targetLocation: "A社",
+    });
+    if (!result.ok) throw new Error(result.reason);
+
+    expect(assertRecoveryConfirmationsMatchReplannedState([{
+      tankId: "A-01",
+      plan: result.plan,
+      expectedFingerprint: "a".repeat(64),
+      confirmation: {
+        fingerprint: "a".repeat(64),
+        recoveryEvidence: {
+          physicalTankConfirmed: true,
+          fillStateConfirmed: true,
+        },
+      },
+    }])).toBe(true);
+  });
+
+  it("理由を要求せずplanner要求の証跡不足だけをhard abortする", () => {
+    const result = planTankTransition({
+      policyMode: "advisory",
+      current: { status: "empty", location: "倉庫" },
+      requestedAction: "lend",
+      targetCustomer: { customerId: "customer-a", customerName: "A社" },
+      targetLocation: "A社",
+    });
+    if (!result.ok) throw new Error(result.reason);
+
+    expect(() => assertRecoveryConfirmationsMatchReplannedState([{
+      tankId: "A-01",
+      plan: result.plan,
+      expectedFingerprint: "a".repeat(64),
+      confirmation: {
+        fingerprint: "a".repeat(64),
+        recoveryEvidence: { physicalTankConfirmed: true },
+      },
+    }])).toThrow("plannerが要求した確認項目");
   });
 });

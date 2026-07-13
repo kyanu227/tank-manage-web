@@ -395,11 +395,6 @@ function ReviewCard({
 
       {expanded && (
         <div style={{ padding: "18px", borderTop: "1px solid #e2e8f0", background: "#f8fafc" }}>
-          <DetailLabel>現場で入力された理由</DetailLabel>
-          <p style={{ fontSize: 13, lineHeight: 1.65, color: "#334155", marginBottom: 18 }}>
-            {item.recoveryReason || "記録なし"}
-          </p>
-
           <DetailLabel>自動補完された経路</DetailLabel>
           {plan && plan.steps.length > 0 ? (
             <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 18 }}>

@@ -714,6 +714,15 @@ async function runDenialCases() {
     });
   });
 
+  await fails("deprecated recoveryReason is rejected", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { recoveryReason: "廃止済みのスタッフ理由" },
+    });
+  });
+
   await fails("recovery step with malformed businessEffect is rejected", async () => {
     await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
     const plan = recoveryPlan();
@@ -1212,7 +1221,6 @@ function buildOperationLog({
     ...(!direct ? {
       source: "manual",
       workflow: "tank_operation",
-      recoveryReason: "Rules自動補完確認",
       recoveryEvidence: {
         physicalTankConfirmed: true,
         fillStateConfirmed: true,

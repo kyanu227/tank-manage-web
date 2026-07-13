@@ -58,7 +58,6 @@ export interface LogDoc {
   transitionReviewStatus?: TransitionReviewStatus;
   policyMode?: TransitionEnforcementMode;
   policyRevision?: number;
-  recoveryReason?: string;
   recoveryEvidence?: RecoveryEvidence;
   affectedCustomerIds?: string[];
   hasUnknownAffectedCustomer?: boolean;
