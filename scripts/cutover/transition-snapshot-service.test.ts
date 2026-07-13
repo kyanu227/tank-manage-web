@@ -156,6 +156,38 @@ describe("transition snapshot restore core", () => {
     expect(result.commitResponse).toBe("verified_after_ambiguous_response");
     expect(client.runCollectionQuery).toHaveBeenCalledTimes(12);
   });
+
+  it("commit通信例外でも書込み済みなら完全read-back後に成功とする", async () => {
+    const payload = fixturePayload();
+    const client = ambiguousCommitClient(payload, new Error("connection lost"), true);
+    const result = await executeTransitionSnapshotRestore({
+      client,
+      payload,
+      snapshotPayloadSha256: "f".repeat(64),
+      expectedProjectId: PROJECT_ID,
+      expectedDatabaseId: DATABASE_ID,
+      expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
+      expectedMainCommit: "a".repeat(40),
+    });
+    expect(result.commitResponse).toBe("verified_after_ambiguous_response");
+    expect(result.commitTime).toBeNull();
+    expect(client.runCollectionQuery).toHaveBeenCalledTimes(12);
+  });
+
+  it("commit通信例外かつ完全read-back不可なら成功扱いにしない", async () => {
+    const payload = fixturePayload();
+    const client = ambiguousCommitClient(payload, new Error("connection lost"), false);
+    await expect(executeTransitionSnapshotRestore({
+      client,
+      payload,
+      snapshotPayloadSha256: "f".repeat(64),
+      expectedProjectId: PROJECT_ID,
+      expectedDatabaseId: DATABASE_ID,
+      expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
+      expectedMainCommit: "a".repeat(40),
+    })).rejects.toThrow("read-backで完全復元も確認できません");
+    expect(client.runCollectionQuery).toHaveBeenCalledTimes(12);
+  });
 });
 
 function fixturePayload(): TransitionSnapshotPayloadV1 {
@@ -212,7 +244,8 @@ function fixturePayload(): TransitionSnapshotPayloadV1 {
 
 function ambiguousCommitClient(
   payload: TransitionSnapshotPayloadV1,
-  commitResponse: { commitTime?: string; writeResults?: Array<Record<string, never>> },
+  commitResponse: { commitTime?: string; writeResults?: Array<Record<string, never>> } | Error,
+  commitApplied = true,
 ): FirestoreRestClient {
   const client = new FirestoreRestClient({
     projectId: PROJECT_ID,
@@ -262,7 +295,8 @@ function ambiguousCommitClient(
     return { documents, readTime: "2026-07-13T01:00:03Z" };
   });
   client.commit = vi.fn(async () => {
-    restored = true;
+    restored = commitApplied;
+    if (commitResponse instanceof Error) throw commitResponse;
     return commitResponse;
   });
   return client;

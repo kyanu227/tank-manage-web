@@ -46,20 +46,22 @@ export function encryptTransitionSnapshot(
   assertEncryptionKey(key);
   const payload = validateTransitionSnapshotPayload(payloadInput);
   const plaintext = Buffer.from(canonicalStringify(payload), "utf8");
-  const payloadSha256 = sha256Hex(plaintext);
-  const iv = randomBytes(IV_BYTES);
-  const header = {
-    version: 1 as const,
-    algorithm: "AES-256-GCM" as const,
-    snapshotId: payload.manifest.snapshotId,
-    keyId: payload.manifest.keyId,
-    ivBase64: iv.toString("base64"),
-    payloadSha256,
-  };
-  const aad = Buffer.from(canonicalStringify(header), "utf8");
+  let iv: Buffer | null = null;
+  let aad: Buffer | null = null;
   let ciphertext: Buffer | null = null;
   let authTag: Buffer | null = null;
   try {
+    const payloadSha256 = sha256Hex(plaintext);
+    iv = randomBytes(IV_BYTES);
+    const header = {
+      version: 1 as const,
+      algorithm: "AES-256-GCM" as const,
+      snapshotId: payload.manifest.snapshotId,
+      keyId: payload.manifest.keyId,
+      ivBase64: iv.toString("base64"),
+      payloadSha256,
+    };
+    aad = Buffer.from(canonicalStringify(header), "utf8");
     const cipher = createCipheriv(ALGORITHM, key, iv);
     cipher.setAAD(aad);
     ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
@@ -72,7 +74,8 @@ export function encryptTransitionSnapshot(
     };
   } finally {
     plaintext.fill(0);
-    aad.fill(0);
+    iv?.fill(0);
+    aad?.fill(0);
     ciphertext?.fill(0);
     authTag?.fill(0);
   }
