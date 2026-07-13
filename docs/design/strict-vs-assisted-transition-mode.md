@@ -183,12 +183,13 @@ rollout順序:
 
 ```text
 PR merge（Hosting未反映）
-→ Rules最終レビュー
-→ backup検証方式のレビュー・backup取得
-→ maintenance window開始（スタッフ操作停止）
-→ Data Reset dry-run・本実行・schema verification
-→ Rules deploy・Rules smoke
-→ runtime strict固定のHosting deploy・strict smoke
+→ snapshot / restore・atomic Reset実装のmerge（production executeは無効）
+→ freeze Rules・credential・writer停止・runbookのレビュー
+→ maintenance window開始（全clientとRules迂回writerを停止）
+→ dedicated freeze Rules deploy・反映待ち・deny smoke
+→ 本番暗号化snapshot取得・Reset dry-run・本実行・schema verification
+→ runtime strict固定のHosting deploy
+→ 通常Rules deploy・Rules smoke・strict smoke
 → maintenance window終了
 → Firestoreの保存済みpolicyがstrictであることを再確認（advisoryならgate build前にstrictへ戻す）
 → rollout gateをtrueにしたbuild
@@ -197,26 +198,36 @@ PR merge（Hosting未反映）
 
 ## 初回Data Reset
 
-`scripts/reset-transition-plan-v1.mts`はdry-runが既定で、`--project`を常に必須とする。
-tank documentと基本情報を保持し、
-全tankの操作projectionを`empty / 倉庫 / customerなし / latestLogIdなし / staffなし / logNoteなし`
-へ初期化する。旧tank operation logsと開発用order/return/uncharged_report transactionを削除する。
-damaged/defective/disposedも今回だけemptyへ戻す。
+暗号化snapshotを唯一の正本として、`scripts/reset-transition-cutover-snapshot.mts`が
+summary-only dry-runを行う。tank documentと分類済みの基本情報を保持し、全tankの操作projectionを
+`empty / 倉庫 / customerなし / latestLogIdなし / staffなし / logNoteなし`へ初期化する。
+旧tank operation logsと開発用order/return/uncharged_report transactionを削除し、
+damaged/defective/disposedも今回だけemptyへ戻す。未知tank field、unknown logKind / transaction type、
+snapshot後のpath・updateTime・field hash・inventory差分、subcollection、既存markerがあれば停止する。
 
 ```bash
-npm run reset:transition-plan-v1 -- --project=<explicit-project-id>
-
-# バックアップとdry-run確認後だけ
-npm run reset:transition-plan-v1 -- \
+npm run --silent reset:transition-plan-v1 -- \
   --project=<explicit-project-id> \
-  --execute \
-  --confirm=RESET_TRANSITION_PLAN_V1 \
-  --backup-ref=<verified-backup-reference>
+  --database=<explicit-database-id> \
+  --expected-database-uid=<database-uid> \
+  --expected-main-commit=<40-character-main-sha> \
+  --key-id=<keychain-key-id> \
+  --snapshot=<absolute-encrypted-snapshot-path>
 ```
 
-現リポジトリにはbackup referenceを対象project・作成時刻まで機械検証できるregistry/manifestが
-存在しない。この検証方式を導入するまでは`--execute`をfail closedで停止し、文字列の
-`backupRef`だけで実行可能にしない。検証方式導入後は開始時に
-`migrationMarkers/transitionPlanRequiredV1`を`in_progress`で取得し、成功時`completed`、
-失敗時`failed`として記録する。completed/in_progressの再実行は拒否する。
+Reset計画は、tank full overwrite、tank log / transaction delete、`completed` migration marker作成を
+一つのFirestore REST Commitへまとめる。各既存documentにはsnapshot時の`updateTime`、markerには
+`exists:false`をpreconditionとして使用し、400 writes / 8 MiBの内部上限を検査する。
+dry-run stdoutには件数、status集計、write数、request bytes、hashだけを出す。
+`resetPlanSha256`は実行時刻の`resetAt`だけを除いた正規化済み契約から生成し、
+別processで行うdry-runとexecuteが同じsnapshot・同じreset計画であることを比較できるようにする。
+
+本PR段階ではproduction `--execute`をCLI、service、REST clientの全境界で停止する。
+freeze Rules、Rulesを迂回するwriter停止、credential/principal照合、runbookが別PRで完了するまで
+本番Resetは実行できない。失敗時に`failed` markerを別writeで残さず、曖昧なcommit応答は
+完全なread-back検証に成功した場合だけ成功扱いにする。
+反復read-backでsnapshot時点の原状態を観測しても未適用とは断定せず、maintenanceを維持したまま
+後続runbookのverify-only手順で適用状態を確定する。自動再commitは行わない。
+commit直前の再照合後に新規対象documentを追加するwriterまでは既存documentのpreconditionだけで
+排除できないため、production executeの解放条件にはdedicated freeze RulesとRules迂回writer停止を含める。
 strict/advisory切替ではresetを実行しない。
