@@ -18,6 +18,12 @@ import {
 } from "firebase/firestore";
 import { db } from "./firebase/config";
 import {
+  getTankAggregationRevisionRef,
+  nextTankAggregationRevisions,
+  normalizeTankAggregationRevisions,
+} from "./firebase/tank-aggregation-revision-service";
+import { getTankOperationPolicyInTransaction } from "./firebase/tank-operation-policy-service";
+import {
   getNextStatusCode,
   validateTransitionCode,
   type TankAction,
@@ -37,6 +43,25 @@ import type {
   OperationActor,
   OperationContext,
 } from "./operation-context";
+import {
+  createRecoveryConfirmationFingerprint,
+  deriveAffectedCustomers,
+  normalizeTransitionPlan,
+  normalizeTransitionAction,
+  pickRequiredRecoveryEvidence,
+  planTankTransition,
+  resolvePlannerPolicyMode,
+  type RecoveryEvidence,
+  type RecoveryEvidenceKey,
+  type TransitionEnforcementMode,
+  type TransitionPlan,
+} from "./tank-transition-policy";
+import {
+  assertAtomicTankOperationCount,
+} from "./tank-operation-limits";
+
+export { MAX_ATOMIC_TANK_OPERATIONS } from "./tank-operation-limits";
+import { assertRecoveryConfirmationsMatchReplannedState } from "./tank-recovery-confirmation-validation";
 
 /* ════════════════════════════════════════════
    型定義
@@ -51,6 +76,10 @@ export type TankSnapshot = {
   location?: string;
   staff?: string;
   logNote?: string;
+  /** 耐圧検査操作で更新されるため、取消・訂正時に復元する。 */
+  maintenanceDate?: unknown;
+  /** 耐圧検査操作で更新されるため、取消・訂正時に復元する。 */
+  nextMaintenanceDate?: unknown;
 };
 
 type TankCustomerProjection = Pick<TankSnapshot, "customerId" | "customerName">;
@@ -87,9 +116,15 @@ export interface TankOperationInput {
   /** タンクドキュメントに追加したい任意フィールド */
   tankExtra?: Record<string, unknown>;
 
-  /** バリデーションをスキップする（旧データ救済など特殊ケース用） */
-  skipValidation?: boolean;
+  /** advisory recoveryの確認結果。通常は確認ダイアログから内部的に付与される。 */
+  recoveryConfirmation?: TankRecoveryConfirmation;
 }
+
+export type TankRecoveryConfirmation = {
+  fingerprint: string;
+  recoveryReason: string;
+  recoveryEvidence: RecoveryEvidence;
+};
 
 export interface TankOperationResult {
   tankId: string;
@@ -156,6 +191,10 @@ type TankLogData = DocumentData & {
   prevTankSnapshot?: unknown;
   nextTankSnapshot?: unknown;
   previousLogIdOnSameTank?: unknown;
+  transitionPlan?: unknown;
+  transitionReviewStatus?: unknown;
+  affectedCustomerIds?: unknown;
+  hasUnknownAffectedCustomer?: unknown;
 };
 
 type TankLogContent = {
@@ -170,6 +209,8 @@ type TankLogContent = {
   customerName?: string;
   note: string;
   logNote: string;
+  maintenanceDate?: unknown;
+  nextMaintenanceDate?: unknown;
   extraFields: Record<string, unknown>;
 };
 
@@ -178,6 +219,39 @@ type PlannedTankOperation = {
   logRef: DocumentReference;
   tankRef: DocumentReference;
 };
+
+type PreparedTankOperation = PlannedTankOperation & {
+  prevSnapshot: TankSnapshot;
+  latestLogId: string | null;
+  transitionAction: TankActionCode;
+  logAction: TankActionCode;
+  transitionPlan: TransitionPlan;
+  policyMode: TransitionEnforcementMode;
+  policyRevision: number;
+};
+
+export type TankRecoveryRequirement = {
+  tankId: string;
+  currentStatus: TankStatusCode;
+  currentLocation: string | null;
+  currentCustomerId: string | null;
+  currentCustomerName: string | null;
+  requestedAction: TankActionCode;
+  plan: TransitionPlan;
+};
+
+/** transaction外のUIにだけ確認を要求するための制御用error。 */
+export class TankRecoveryConfirmationRequiredError extends Error {
+  readonly fingerprint: string;
+  readonly requirements: TankRecoveryRequirement[];
+
+  constructor(fingerprint: string, requirements: TankRecoveryRequirement[]) {
+    super("正規の状態遷移へ自動補完するため、現物確認と理由入力が必要です。");
+    this.name = "TankRecoveryConfirmationRequiredError";
+    this.fingerprint = fingerprint;
+    this.requirements = requirements;
+  }
+}
 
 const META_LOG_FIELDS = new Set([
   "logStatus",
@@ -206,6 +280,22 @@ const META_LOG_FIELDS = new Set([
   "voided",
   "prevStatus",
   "newStatus",
+  "transitionPlan",
+  "transitionReviewStatus",
+  "policyMode",
+  "policyRevision",
+  "recoveryReason",
+  "recoveryEvidence",
+  "recoveryConfirmationFingerprint",
+  "affectedCustomerIds",
+  "hasUnknownAffectedCustomer",
+  "reviewedAt",
+  "reviewedByStaffId",
+  "reviewedByStaffName",
+  "reviewedByUid",
+  "reviewedByEmail",
+  "reviewEventId",
+  "reviewReason",
 ]);
 
 const RESERVED_LOG_EXTRA_FIELDS = new Set([
@@ -227,11 +317,24 @@ const RESERVED_LOG_EXTRA_FIELDS = new Set([
   "returnCondition",
   "note",
   "logNote",
+  "transitionPlan",
+  "transitionReviewStatus",
+  "policyMode",
+  "policyRevision",
+  "recoveryReason",
+  "recoveryEvidence",
+  "recoveryConfirmationFingerprint",
+  "affectedCustomerIds",
+  "hasUnknownAffectedCustomer",
+  "reviewEventId",
 ]);
 
 const PRIVILEGED_CORRECTION_ROLES: StaffCorrectionRole[] = ["管理者", "準管理者"];
 const CORRECTION_LIMIT_MS = 72 * 60 * 60 * 1000;
-
+const TANK_OPERATION_EXTRA_FIELDS = [
+  "maintenanceDate",
+  "nextMaintenanceDate",
+] as const;
 /* ════════════════════════════════════════════
    新規ログ作成
    ════════════════════════════════════════════ */
@@ -261,10 +364,7 @@ export async function applyTankOperation(
     tankRef,
   };
 
-  const result = await runTransaction(db, async (tx) => {
-    const [operationResult] = await commitPlannedOperations(tx, [planned]);
-    return operationResult;
-  });
+  const [result] = await runPlannedOperationsWithRecoveryConfirmation([planned]);
 
   return { ...result, logId: logRef.id };
 }
@@ -275,9 +375,10 @@ export async function applyTankOperation(
  */
 export async function applyBulkTankOperations(
   inputs: TankOperationInput[],
-  extraOps?: (writer: TankOperationWriter) => void
+  extraOps?: (writer: TankOperationWriter) => void,
 ): Promise<TankOperationResult[]> {
   if (inputs.length === 0) return [];
+  assertAtomicTankOperationCount(inputs.length);
 
   assertNoDuplicateTankIds(inputs);
 
@@ -290,22 +391,52 @@ export async function applyBulkTankOperations(
     };
   });
 
-  return runTransaction(db, async (tx) => {
-    const results = await commitPlannedOperations(tx, planned);
-    if (extraOps) extraOps(tx as unknown as TankOperationWriter);
-    return results;
-  });
+  return runPlannedOperationsWithRecoveryConfirmation(planned, extraOps);
+}
+
+async function runPlannedOperationsWithRecoveryConfirmation(
+  initialPlanned: PlannedTankOperation[],
+  extraOps?: (writer: TankOperationWriter) => void,
+): Promise<TankOperationResult[]> {
+  let planned = initialPlanned;
+
+  for (;;) {
+    try {
+      return await runTransaction(db, async (tx) => {
+        const results = await commitPlannedOperations(tx, planned);
+        // callbackはtransaction writerへの宣言的な追加だけに限定する。
+        if (extraOps) extraOps(tx as unknown as TankOperationWriter);
+        return results;
+      });
+    } catch (error) {
+      const requirement = asRecoveryConfirmationRequiredError(error);
+      if (!requirement) throw error;
+
+      const confirmation = requestRecoveryConfirmation(requirement);
+      planned = planned.map((operation) => ({
+        ...operation,
+        input: {
+          ...operation.input,
+          recoveryConfirmation: confirmation,
+        },
+      }));
+    }
+  }
 }
 
 async function commitPlannedOperations(
   tx: Transaction,
   planned: PlannedTankOperation[]
 ): Promise<TankOperationResult[]> {
-  const tankSnaps = await Promise.all(planned.map((op) => tx.get(op.tankRef)));
+  // policy read失敗はstrictとして続行せず、transaction全体をfail closedにする。
+  const policy = await getTankOperationPolicyInTransaction(tx);
+  const aggregationRevisionRef = getTankAggregationRevisionRef();
+  const [tankSnaps, aggregationRevisionSnapshot] = await Promise.all([
+    Promise.all(planned.map((op) => tx.get(op.tankRef))),
+    tx.get(aggregationRevisionRef),
+  ]);
 
-  const results: TankOperationResult[] = [];
-
-  planned.forEach((op, index) => {
+  const prepared = planned.map((op, index): PreparedTankOperation => {
     const tankSnap = tankSnaps[index];
     if (!tankSnap.exists()) {
       throw new Error(`[${op.input.tankId}] タンクが存在しません`);
@@ -313,80 +444,369 @@ async function commitPlannedOperations(
 
     const tankData = tankSnap.data();
     const prevSnapshot = snapshotFromTankData(tankData);
-    const transitionAction = requireTankActionCode(
+    const requestedTransitionAction = requireTankActionCode(
       op.input.transitionAction,
       `[${op.input.tankId}] transitionAction`
     );
-
-    if (!op.input.skipValidation) {
-      if (!validateTransitionCode(prevSnapshot.status, transitionAction)) {
-        throw new Error(
-          `[${op.input.tankId}] ${transitionFailureReason(prevSnapshot.status, transitionAction)}`
-        );
-      }
+    const requestedAction = requireTankActionCode(
+      op.input.logAction ?? requestedTransitionAction,
+      `[${op.input.tankId}] logAction`,
+    );
+    assertVisibleActionContext(requestedAction, op.input.context);
+    const expectedTransitionAction = normalizeTransitionAction(requestedTransitionAction);
+    if (!expectedTransitionAction) {
+      throw new Error(`[${op.input.tankId}] 通常のタンク状態遷移ではない操作です。`);
     }
 
-    const nextStatus = requireNextStatusCode(transitionAction, `[${op.input.tankId}] transitionAction`);
-    const location = op.input.location ?? "倉庫";
-    const tankLogNote = op.input.tankNote ?? "";
-    const logNote = op.input.logNote ?? "";
-    const logAction = requireTankActionCode(
-      op.input.logAction ?? transitionAction,
-      `[${op.input.tankId}] logAction`
+    const effectivePolicyMode = resolvePlannerPolicyMode(
+      policy.transitionEnforcement,
+      op.input.context,
+      requestedAction,
     );
-    const actor = op.input.context.actor;
+    const planResult = planTankTransition({
+      policyMode: effectivePolicyMode,
+      current: {
+        status: prevSnapshot.status,
+        customerId: prevSnapshot.customerId,
+        customerName: prevSnapshot.customerName,
+        location: prevSnapshot.location,
+      },
+      requestedAction,
+      targetCustomer: op.input.context.customer ?? null,
+      targetLocation: op.input.location ?? null,
+    });
+    if (!planResult.ok) {
+      throw new Error(`[${op.input.tankId}] ${planResult.reason}`);
+    }
+    if (planResult.transitionAction !== expectedTransitionAction) {
+      throw new Error(`[${op.input.tankId}] 表示操作と状態遷移操作が一致しません。`);
+    }
+
+    return {
+      ...op,
+      prevSnapshot,
+      latestLogId: stringOrNull(tankData.latestLogId),
+      transitionAction: planResult.transitionAction,
+      logAction: requestedAction,
+      transitionPlan: planResult.plan,
+      // policyModeは設定snapshot。contextによるstrict固定はtransitionPlanへ反映する。
+      policyMode: policy.transitionEnforcement,
+      policyRevision: policy.policyRevision,
+    };
+  });
+
+  const recoveries = prepared.filter((operation) => operation.transitionPlan.kind === "recovery");
+  let recoveryFingerprint: string | null = null;
+  if (recoveries.length > 0) {
+    recoveryFingerprint = await createRecoveryConfirmationFingerprint(
+      recoveries.map((operation) => ({
+        tankId: operation.input.tankId,
+        latestLogId: operation.latestLogId,
+        status: operation.prevSnapshot.status,
+        location: operation.prevSnapshot.location,
+        customerId: operation.prevSnapshot.customerId,
+        customerName: operation.prevSnapshot.customerName,
+        requestedAction: operation.logAction,
+        plan: operation.transitionPlan,
+        policyRevision: operation.policyRevision,
+      })),
+    );
+
+    const confirmationWasSupplied = assertRecoveryConfirmationsMatchReplannedState(
+      recoveries.map((operation) => ({
+        tankId: operation.input.tankId,
+        plan: operation.transitionPlan,
+        expectedFingerprint: recoveryFingerprint!,
+        confirmation: operation.input.recoveryConfirmation,
+      })),
+    );
+    if (!confirmationWasSupplied) {
+      throw new TankRecoveryConfirmationRequiredError(
+        recoveryFingerprint,
+        recoveries.map((operation) => ({
+          tankId: operation.input.tankId,
+          currentStatus: operation.prevSnapshot.status,
+          currentLocation: operation.prevSnapshot.location ?? null,
+          currentCustomerId: operation.prevSnapshot.customerId ?? null,
+          currentCustomerName: operation.prevSnapshot.customerName ?? null,
+          requestedAction: operation.logAction,
+          plan: operation.transitionPlan,
+        })),
+      );
+    }
+  }
+
+  const results: TankOperationResult[] = [];
+  const officialAggregationLogIds = prepared
+    .filter((operation) => operation.transitionPlan.kind === "direct")
+    .map((operation) => operation.logRef.id)
+    .sort();
+  const pendingRecoveryLogIds = prepared
+    .filter((operation) => operation.transitionPlan.kind === "recovery")
+    .map((operation) => operation.logRef.id)
+    .sort();
+  // Rulesは先頭logをrequest.time anchorにする。正式集計が変わる混在batchではdirectを必ず先頭に置く。
+  const changedLogIds = [...officialAggregationLogIds, ...pendingRecoveryLogIds];
+  const affectedCustomerIds = new Set<string>();
+  let hasUnknownAffectedCustomer = false;
+  prepared.forEach((operation) => {
+    const affected = deriveAffectedCustomers(
+      operation.transitionPlan,
+      operation.input.context.customer?.customerId,
+    );
+    affected.affectedCustomerIds.forEach((customerId) => affectedCustomerIds.add(customerId));
+    if (affected.hasUnknownAffectedCustomer) hasUnknownAffectedCustomer = true;
+  });
+  const nextAggregationRevisions = nextTankAggregationRevisions(
+    normalizeTankAggregationRevisions(
+      aggregationRevisionSnapshot.exists() ? aggregationRevisionSnapshot.data() : null,
+    ),
+    {
+      dataChanged: true,
+      officialChanged: officialAggregationLogIds.length > 0,
+    },
+  );
+  tx.set(aggregationRevisionRef, {
+    ...nextAggregationRevisions,
+    updatedAt: serverTimestamp(),
+    revisionChangeKind: "operation",
+    changedLogIds,
+    officialAggregationLogIds,
+    reviewEventId: null,
+    reviewDecision: null,
+    affectedCustomerIds: [...affectedCustomerIds].sort(),
+    hasUnknownAffectedCustomer,
+  });
+
+  prepared.forEach((operation) => {
+    const { input, transitionAction, transitionPlan, logAction } = operation;
+    const finalStep = transitionPlan.steps.at(-1)!;
+    const nextStatus = finalStep.toStatus;
+    const location = finalStep.location ?? input.location ?? "倉庫";
+    const tankLogNote = input.tankNote ?? "";
+    const logNote = input.logNote ?? "";
+    const actor = input.context.actor;
     const nextCustomerProjection = resolveNextTankCustomerProjection({
       action: transitionAction,
-      previous: prevSnapshot,
-      customer: op.input.context.customer,
+      previous: operation.prevSnapshot,
+      customer: input.context.customer,
       mode: "operation",
     });
-    const nextSnapshot: TankSnapshot = {
+    const nextSnapshot = applyTankExtraToSnapshot({
+      // 操作projection以外（耐圧日等）は通常操作で失わない。
+      ...operation.prevSnapshot,
       status: nextStatus,
       location,
       staff: actor.staffName,
       logNote: tankLogNote,
       ...nextCustomerProjection,
-    };
+    }, input.tankExtra, transitionAction);
+    const reviewStatus = transitionPlan.kind === "recovery" ? "pending" : "not_required";
+    const affectedCustomers = deriveAffectedCustomers(
+      transitionPlan,
+      input.context.customer?.customerId,
+    );
+    const confirmation = input.recoveryConfirmation;
     const now = serverTimestamp();
 
-    tx.set(op.logRef, {
-      ...sanitizeLogExtra(op.input.logExtra),
-      tankId: op.input.tankId,
+    tx.set(operation.logRef, {
+      ...sanitizeLogExtra(input.logExtra),
+      tankId: input.tankId,
       action: logAction,
       transitionAction,
-      prevStatus: prevSnapshot.status,
+      prevStatus: operation.prevSnapshot.status,
       newStatus: nextStatus,
       location,
-      ...operationIdentityFields(op.input.context),
+      ...operationIdentityFields(input.context),
       note: logNote,
       logNote: tankLogNote,
+      transitionPlan,
+      transitionReviewStatus: reviewStatus,
+      policyMode: operation.policyMode,
+      policyRevision: operation.policyRevision,
+      affectedCustomerIds: affectedCustomers.affectedCustomerIds,
+      hasUnknownAffectedCustomer: affectedCustomers.hasUnknownAffectedCustomer,
+      ...(transitionPlan.kind === "recovery" && confirmation
+        ? {
+            recoveryReason: confirmation.recoveryReason.trim(),
+            recoveryEvidence: pickRequiredRecoveryEvidence(
+              transitionPlan.requiredEvidence,
+              confirmation.recoveryEvidence,
+            ),
+            recoveryConfirmationFingerprint: recoveryFingerprint,
+          }
+        : {}),
       timestamp: now,
       originalAt: now,
       revisionCreatedAt: now,
       logStatus: "active",
       logKind: "tank",
-      rootLogId: op.logRef.id,
+      rootLogId: operation.logRef.id,
       revision: 1,
-      prevTankSnapshot: prevSnapshot,
+      prevTankSnapshot: operation.prevSnapshot,
       nextTankSnapshot: nextSnapshot,
-      previousLogIdOnSameTank: stringOrNull(tankData.latestLogId),
+      previousLogIdOnSameTank: operation.latestLogId,
     });
 
-    tx.update(op.tankRef, {
-      ...(op.input.tankExtra ?? {}),
-      ...tankUpdateFromSnapshot(nextSnapshot, op.logRef.id),
+    tx.update(operation.tankRef, {
+      ...tankUpdateFromSnapshot(nextSnapshot, operation.logRef.id),
     });
 
     results.push({
-      tankId: op.input.tankId,
+      tankId: input.tankId,
       nextStatus,
-      logRef: op.logRef,
-      tankRef: op.tankRef,
+      logRef: operation.logRef,
+      tankRef: operation.tankRef,
     });
   });
 
   return results;
+}
+
+function asRecoveryConfirmationRequiredError(
+  error: unknown,
+): TankRecoveryConfirmationRequiredError | null {
+  if (error instanceof TankRecoveryConfirmationRequiredError) return error;
+  if (!error || typeof error !== "object") return null;
+  const candidate = error as Partial<TankRecoveryConfirmationRequiredError>;
+  if (
+    candidate.name !== "TankRecoveryConfirmationRequiredError"
+    || typeof candidate.fingerprint !== "string"
+    || !Array.isArray(candidate.requirements)
+  ) {
+    return null;
+  }
+  return new TankRecoveryConfirmationRequiredError(
+    candidate.fingerprint,
+    candidate.requirements,
+  );
+}
+
+/** native dialogはtransaction callbackの外でだけ呼び出す。 */
+function requestRecoveryConfirmation(
+  error: TankRecoveryConfirmationRequiredError,
+): TankRecoveryConfirmation {
+  if (typeof window === "undefined") {
+    throw new Error(
+      "自動補完には画面上での現物確認が必要です。ブラウザから操作してください。",
+    );
+  }
+
+  error.requirements.forEach(assertRecoveryRequirementCanBeConfirmed);
+
+  // 一括操作でもタンクごとに全stepと確認対象を読めるよう、1本ずつ確認する。
+  for (const [index, requirement] of error.requirements.entries()) {
+    const accepted = window.confirm([
+      `状態遷移の自動補完を実行します（${index + 1}/${error.requirements.length}）。`,
+      "画面上は指定操作として確定しますが、内部では下記の正規手順を一括記録します。",
+      "補完操作は管理者レビュー完了まで請求・売上・スタッフ実績へ算入されません。",
+      "表示された現物・貸出先・充填状態等をすべて確認した場合だけ［OK］を押してください。",
+      "",
+      buildRecoveryRequirementDetails(requirement),
+    ].join("\n"));
+    if (!accepted) {
+      throw new Error("自動補完操作をキャンセルしました。");
+    }
+  }
+
+  let recoveryReason = "";
+  for (;;) {
+    const entered = window.prompt(
+      "この不一致操作を行う理由を5文字以上で入力してください。監査ログへ保存されます。",
+      recoveryReason,
+    );
+    if (entered === null) {
+      throw new Error("自動補完操作をキャンセルしました。");
+    }
+    recoveryReason = entered.trim();
+    if (recoveryReason.length >= 5) break;
+    window.alert("理由は5文字以上で入力してください。");
+  }
+
+  const recoveryEvidence: RecoveryEvidence = {};
+  error.requirements.forEach((requirement) => {
+    requirement.plan.requiredEvidence.forEach((key) => {
+      recoveryEvidence[key] = true;
+    });
+  });
+
+  return {
+    fingerprint: error.fingerprint,
+    recoveryReason,
+    recoveryEvidence,
+  };
+}
+
+const RECOVERY_EVIDENCE_LABELS: Record<RecoveryEvidenceKey, string> = {
+  physicalTankConfirmed: "目の前の現物と、表示されたタンクID/番号が一致する",
+  possessionConfirmed: "現物を回収済みで、表示された現在holderが実際に占有していない",
+  previousCustomerConfirmed: "表示された旧貸出先が、このタンクの直前の貸出先である",
+  fillStateConfirmed: "現物のガス充填状態が、表示された充填stepの実行内容と一致する",
+  damageStateConfirmed: "現物の破損・故障・不良状態を目視し、表示状態と一致する",
+};
+
+function assertRecoveryRequirementCanBeConfirmed(
+  requirement: TankRecoveryRequirement,
+): void {
+  if (!requirement.plan.requiredEvidence.includes("previousCustomerConfirmed")) return;
+  const previousCustomerStep = requirement.plan.steps.find(
+    (step) => step.businessEffect === "rental_close",
+  );
+  if (!previousCustomerStep?.customerId?.trim() || !previousCustomerStep.customerName?.trim()) {
+    throw new Error(
+      `[${requirement.tankId}] 旧貸出先customerId/customerNameを表示できないため、自動補完を確認完了にできません。`,
+    );
+  }
+}
+
+function buildRecoveryRequirementDetails(
+  requirement: TankRecoveryRequirement,
+): string {
+  const previousCustomerStep = requirement.plan.steps.find(
+    (step) => step.businessEffect === "rental_close",
+  );
+  const newCustomerStep = [...requirement.plan.steps].reverse().find(
+    (step) => step.businessEffect === "rental_open",
+  );
+  const stepDetails = requirement.plan.steps.flatMap((step, index) => [
+    `step ${index + 1}: ${tankActionCodeToLegacyAction(step.action)} (${step.action})`,
+    `  状態: ${tankStatusCodeToLegacyStatus(step.fromStatus)} (${step.fromStatus}) → ${tankStatusCodeToLegacyStatus(step.toStatus)} (${step.toStatus})`,
+    `  実行者: ${step.actorType === "system" ? "システム補完" : "担当者操作"} (${step.actorType})`,
+    `  顧客: ${formatCustomer(step.customerId, step.customerName, "該当なし")}`,
+    `  場所: ${step.location?.trim() || "未設定"}`,
+  ]);
+  const evidence = requirement.plan.requiredEvidence.map(
+    (key) => `・${RECOVERY_EVIDENCE_LABELS[key]} [${key}]`,
+  );
+
+  return [
+    `タンクID/番号: ${requirement.tankId}`,
+    `表示操作: ${tankActionCodeToLegacyAction(requirement.requestedAction)} (${requirement.requestedAction})`,
+    `現在status: ${tankStatusCodeToLegacyStatus(requirement.currentStatus)} (${requirement.currentStatus})`,
+    `現在location: ${requirement.currentLocation?.trim() || "未設定"}`,
+    `現在holder customer: ${formatCustomer(requirement.currentCustomerId, requirement.currentCustomerName, "なし")}`,
+    `旧貸出先customer: ${formatCustomer(previousCustomerStep?.customerId, previousCustomerStep?.customerName, "該当なし")}`,
+    `新貸出先customer: ${formatCustomer(newCustomerStep?.customerId, newCustomerStep?.customerName, "該当なし")}`,
+    "",
+    "内部で記録するtransition steps:",
+    ...stepDetails,
+    "",
+    "plannerが要求した確認項目:",
+    ...evidence,
+  ].join("\n");
+}
+
+function formatCustomer(
+  customerId: string | null | undefined,
+  customerName: string | null | undefined,
+  emptyLabel: string,
+): string {
+  const id = customerId?.trim();
+  const name = customerName?.trim();
+  if (id && name) return `${name} (customerId: ${id})`;
+  if (id) return `名称不明 (customerId: ${id})`;
+  if (name) return `${name} (customerId不明)`;
+  return emptyLabel;
 }
 
 /* ════════════════════════════════════════════
@@ -406,8 +826,13 @@ export async function applyLogCorrection(
 
   const targetRef = doc(db, "logs", input.targetLogId);
   const newLogRef = doc(collection(db, "logs"));
+  const aggregationRevisionRef = getTankAggregationRevisionRef();
 
   await runTransaction(db, async (tx) => {
+    const [policy, aggregationRevisionSnapshot] = await Promise.all([
+      getTankOperationPolicyInTransaction(tx),
+      tx.get(aggregationRevisionRef),
+    ]);
     const targetSnap = await tx.get(targetRef);
     if (!targetSnap.exists()) {
       throw new Error("対象ログが存在しません");
@@ -415,6 +840,16 @@ export async function applyLogCorrection(
 
     const oldLog = targetSnap.data() as TankLogData;
     assertActiveTankLog(oldLog);
+    const oldTransitionPlan = normalizeTransitionPlan(oldLog.transitionPlan);
+    if (!oldTransitionPlan) {
+      throw new Error("対象ログのtransitionPlanを検証できません");
+    }
+    if (oldTransitionPlan.kind === "recovery") {
+      throw new Error("自動補完ログは直接編集できません。取消後に正しい操作を再実行してください");
+    }
+    if (oldLog.transitionReviewStatus !== "not_required") {
+      throw new Error("直接操作ログの集計状態が不正なため編集できません");
+    }
     if (oldLog.supersededByLogId) {
       throw new Error("このログはすでに置換されています");
     }
@@ -446,6 +881,13 @@ export async function applyLogCorrection(
       if (sourceLog.logStatus === "voided") {
         throw new Error("取消済み revision には戻せません");
       }
+      const sourceTransitionPlan = normalizeTransitionPlan(sourceLog.transitionPlan);
+      if (!sourceTransitionPlan || sourceTransitionPlan.kind === "recovery") {
+        throw new Error("自動補完されたrevisionへは直接復元できません");
+      }
+      if (sourceLog.transitionReviewStatus !== "not_required") {
+        throw new Error("正式集計状態を確認できないrevisionへは復元できません");
+      }
       if (requireString(sourceLog.rootLogId, "復元元ログのrootLogId") !== requireString(oldLog.rootLogId, "対象ログのrootLogId")) {
         throw new Error("同一チェーン内のログだけ復元できます");
       }
@@ -454,6 +896,7 @@ export async function applyLogCorrection(
     const content = input.mode === "revert" && sourceLog
       ? tankLogContentFromSource(sourceLog)
       : mergeTankLogContent(oldLog, input.patch ?? {});
+    assertVisibleActionContext(content.action, content.extraFields);
     const newTankId = normalizeTankId(content.tankId);
     const sameTank = newTankId === oldTankId;
 
@@ -473,6 +916,43 @@ export async function applyLogCorrection(
       );
     }
 
+    const correctionPlanResult = planTankTransition({
+      policyMode: policy.transitionEnforcement,
+      current: {
+        status: prevSnapshot.status,
+        customerId: prevSnapshot.customerId,
+        customerName: prevSnapshot.customerName,
+        location: prevSnapshot.location,
+      },
+      requestedAction: content.action,
+      targetCustomer: customerSnapshotFromTankLogContent(content) ?? null,
+      targetLocation: content.location,
+    });
+    const expectedTransitionAction = normalizeTransitionAction(content.transitionAction);
+    if (
+      !correctionPlanResult.ok
+      || correctionPlanResult.plan.kind !== "direct"
+      || correctionPlanResult.transitionAction !== expectedTransitionAction
+    ) {
+      throw new Error(
+        `[${newTankId}] 訂正後の正規状態遷移を構成できません${correctionPlanResult.ok ? "" : `: ${correctionPlanResult.reason}`}`,
+      );
+    }
+    const affectedCustomers = deriveAffectedCustomers(
+      correctionPlanResult.plan,
+      content.customerId,
+    );
+    const invalidatedCustomerIds = Array.from(new Set([
+      ...normalizeStringArray(oldLog.affectedCustomerIds),
+      ...affectedCustomers.affectedCustomerIds,
+    ])).sort();
+    const nextAggregationRevisions = nextTankAggregationRevisions(
+      normalizeTankAggregationRevisions(
+        aggregationRevisionSnapshot.exists() ? aggregationRevisionSnapshot.data() : null,
+      ),
+      { dataChanged: true, officialChanged: true },
+    );
+
     const nextSnapshot = nextSnapshotFromContent(prevSnapshot, content);
     const revision = requireNumber(oldLog.revision, "対象ログのrevision") + 1;
     const rootLogId = requireString(oldLog.rootLogId, "対象ログのrootLogId");
@@ -490,6 +970,20 @@ export async function applyLogCorrection(
       supersededByLogId: newLogRef.id,
     });
 
+    tx.set(aggregationRevisionRef, {
+      ...nextAggregationRevisions,
+      updatedAt: serverTimestamp(),
+      revisionChangeKind: "correction",
+      changedLogIds: [newLogRef.id, input.targetLogId],
+      officialAggregationLogIds: [newLogRef.id, input.targetLogId],
+      reviewEventId: null,
+      reviewDecision: null,
+      affectedCustomerIds: invalidatedCustomerIds,
+      hasUnknownAffectedCustomer:
+        oldLog.hasUnknownAffectedCustomer === true
+        || affectedCustomers.hasUnknownAffectedCustomer,
+    });
+
     tx.set(newLogRef, {
       ...content.extraFields,
       tankId: newTankId,
@@ -499,6 +993,12 @@ export async function applyLogCorrection(
       ...tankLogContentIdentityFields(content),
       note: content.note,
       logNote: content.logNote,
+      transitionPlan: correctionPlanResult.plan,
+      transitionReviewStatus: "not_required",
+      policyMode: policy.transitionEnforcement,
+      policyRevision: policy.policyRevision,
+      affectedCustomerIds: affectedCustomers.affectedCustomerIds,
+      hasUnknownAffectedCustomer: affectedCustomers.hasUnknownAffectedCustomer,
       prevStatus: prevSnapshot.status,
       newStatus: nextSnapshot.status,
       logStatus: "active",
@@ -539,9 +1039,13 @@ export async function voidLog(input: VoidLogInput): Promise<void> {
   }
 
   const logRef = doc(db, "logs", input.logId);
+  const aggregationRevisionRef = getTankAggregationRevisionRef();
 
   await runTransaction(db, async (tx) => {
-    const logSnap = await tx.get(logRef);
+    const [logSnap, aggregationRevisionSnapshot] = await Promise.all([
+      tx.get(logRef),
+      tx.get(aggregationRevisionRef),
+    ]);
     if (!logSnap.exists()) {
       throw new Error("対象ログが存在しません");
     }
@@ -561,11 +1065,29 @@ export async function voidLog(input: VoidLogInput): Promise<void> {
     }
 
     const prevSnapshot = requireTankSnapshot(log.prevTankSnapshot, "対象ログのprevTankSnapshot");
+    const officialAggregationChanged = isOfficialAggregationTankLog(log);
+    const nextAggregationRevisions = nextTankAggregationRevisions(
+      normalizeTankAggregationRevisions(
+        aggregationRevisionSnapshot.exists() ? aggregationRevisionSnapshot.data() : null,
+      ),
+      { dataChanged: true, officialChanged: officialAggregationChanged },
+    );
     tx.update(logRef, {
       logStatus: "voided",
       voidReason: reason,
       voidedAt: serverTimestamp(),
       ...voiderAuditFields(input.voider),
+    });
+    tx.set(aggregationRevisionRef, {
+      ...nextAggregationRevisions,
+      updatedAt: serverTimestamp(),
+      revisionChangeKind: "void",
+      changedLogIds: [input.logId],
+      officialAggregationLogIds: officialAggregationChanged ? [input.logId] : [],
+      reviewEventId: null,
+      reviewDecision: null,
+      affectedCustomerIds: normalizeStringArray(log.affectedCustomerIds),
+      hasUnknownAffectedCustomer: log.hasUnknownAffectedCustomer === true,
     });
     tx.update(tankRef, tankUpdateFromSnapshot(prevSnapshot, stringOrNull(log.previousLogIdOnSameTank)));
   });
@@ -579,6 +1101,21 @@ function normalizeTankId(tankId: string): string {
   return tankId.trim().toUpperCase();
 }
 
+function assertVisibleActionContext(
+  action: TankActionCode,
+  context: Pick<OperationContext, "source" | "workflow" | "transactionId">
+    | Record<string, unknown>,
+): void {
+  if (action !== "order_lend") return;
+  if (
+    context.source !== "order_fulfillment"
+    || context.workflow !== "order"
+    || !stringOrUndefined(context.transactionId)
+  ) {
+    throw new Error("受注貸出は受注transactionの完了処理でだけ実行できます");
+  }
+}
+
 function snapshotFromTankData(data: DocumentData): TankSnapshot {
   const snapshot: TankSnapshot = {
     status: requireTankStatusCode(data.status, "タンクのstatus"),
@@ -590,6 +1127,10 @@ function snapshotFromTankData(data: DocumentData): TankSnapshot {
   if (data.location != null) snapshot.location = String(data.location);
   if (data.staff != null) snapshot.staff = String(data.staff);
   if (data.logNote != null) snapshot.logNote = String(data.logNote);
+  if (data.maintenanceDate !== undefined) snapshot.maintenanceDate = data.maintenanceDate;
+  if (data.nextMaintenanceDate !== undefined) {
+    snapshot.nextMaintenanceDate = data.nextMaintenanceDate;
+  }
   return snapshot;
 }
 
@@ -602,15 +1143,50 @@ function tankUpdateFromSnapshot(
     location: snapshot.location ?? deleteField(),
     staff: snapshot.staff ?? deleteField(),
     logNote: snapshot.logNote ?? deleteField(),
-    ...(snapshot.customerId !== undefined
-      ? { customerId: snapshot.customerId }
-      : {}),
-    ...(snapshot.customerName !== undefined
-      ? { customerName: snapshot.customerName }
-      : {}),
+    customerId: snapshot.customerId !== undefined
+      ? snapshot.customerId
+      : deleteField(),
+    customerName: snapshot.customerName !== undefined
+      ? snapshot.customerName
+      : deleteField(),
+    maintenanceDate: snapshot.maintenanceDate !== undefined
+      ? snapshot.maintenanceDate
+      : deleteField(),
+    nextMaintenanceDate: snapshot.nextMaintenanceDate !== undefined
+      ? snapshot.nextMaintenanceDate
+      : deleteField(),
     latestLogId,
     updatedAt: serverTimestamp(),
   };
+}
+
+function applyTankExtraToSnapshot(
+  snapshot: TankSnapshot,
+  tankExtra: Record<string, unknown> | undefined,
+  transitionAction: TankActionCode,
+): TankSnapshot {
+  if (!tankExtra) return snapshot;
+
+  const unsupportedKeys = Object.keys(tankExtra).filter(
+    (key) => !(TANK_OPERATION_EXTRA_FIELDS as readonly string[]).includes(key),
+  );
+  if (unsupportedKeys.length > 0) {
+    throw new Error(`tankExtraに未対応のfieldがあります: ${unsupportedKeys.join(", ")}`);
+  }
+  if (Object.keys(tankExtra).length > 0 && transitionAction !== "inspection") {
+    throw new Error("耐圧日情報は耐圧検査操作でだけ更新できます");
+  }
+
+  const next = { ...snapshot };
+  for (const key of TANK_OPERATION_EXTRA_FIELDS) {
+    if (!Object.prototype.hasOwnProperty.call(tankExtra, key)) continue;
+    const value = tankExtra[key];
+    if (value === undefined) {
+      throw new Error(`tankExtra.${key}にundefinedは保存できません`);
+    }
+    next[key] = value;
+  }
+  return next;
 }
 
 function optionalNullableString(value: unknown): string | null | undefined {
@@ -851,6 +1427,12 @@ function nextSnapshotFromContent(
     location: content.location,
     staff: content.staffName,
     logNote: content.logNote,
+    ...(content.maintenanceDate !== undefined
+      ? { maintenanceDate: content.maintenanceDate }
+      : {}),
+    ...(content.nextMaintenanceDate !== undefined
+      ? { nextMaintenanceDate: content.nextMaintenanceDate }
+      : {}),
     ...nextCustomerProjection,
   };
 }
@@ -886,6 +1468,10 @@ function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch): Ta
     patch.customer === undefined
       ? identity.customer
       : patch.customer ?? undefined;
+  const oldNextSnapshot = requireTankSnapshot(
+    oldLog.nextTankSnapshot,
+    "対象ログのnextTankSnapshot",
+  );
 
   return {
     tankId,
@@ -900,6 +1486,12 @@ function mergeTankLogContent(oldLog: TankLogData, patch: LogCorrectionPatch): Ta
       : {}),
     note: patch.note ?? stringOrDefault(oldLog.note, ""),
     logNote: patch.logNote ?? stringOrDefault(oldLog.logNote, ""),
+    ...(oldNextSnapshot.maintenanceDate !== undefined
+      ? { maintenanceDate: oldNextSnapshot.maintenanceDate }
+      : {}),
+    ...(oldNextSnapshot.nextMaintenanceDate !== undefined
+      ? { nextMaintenanceDate: oldNextSnapshot.nextMaintenanceDate }
+      : {}),
     extraFields: copyBodyExtraFields(oldLog),
   };
 }
@@ -910,6 +1502,10 @@ function tankLogContentFromSource(sourceLog: TankLogData): TankLogContent {
     "復元元ログのtransitionAction"
   );
   const identity = tankLogIdentityFromLog(sourceLog, "復元元ログ");
+  const sourceNextSnapshot = requireTankSnapshot(
+    sourceLog.nextTankSnapshot,
+    "復元元ログのnextTankSnapshot",
+  );
   return {
     tankId: requireString(sourceLog.tankId, "復元元ログのtankId"),
     action: optionalTankActionCode(sourceLog.action) ?? transitionAction,
@@ -923,6 +1519,12 @@ function tankLogContentFromSource(sourceLog: TankLogData): TankLogContent {
       : {}),
     note: stringOrDefault(sourceLog.note, ""),
     logNote: stringOrDefault(sourceLog.logNote, ""),
+    ...(sourceNextSnapshot.maintenanceDate !== undefined
+      ? { maintenanceDate: sourceNextSnapshot.maintenanceDate }
+      : {}),
+    ...(sourceNextSnapshot.nextMaintenanceDate !== undefined
+      ? { nextMaintenanceDate: sourceNextSnapshot.nextMaintenanceDate }
+      : {}),
     extraFields: copyBodyExtraFields(sourceLog),
   };
 }
@@ -963,6 +1565,16 @@ function assertActiveTankLog(log: TankLogData): void {
   if (log.logStatus !== "active") {
     throw new Error("有効なログだけ編集・取消できます");
   }
+  if (!normalizeTransitionPlan(log.transitionPlan)) {
+    throw new Error("transitionPlanを検証できないログは編集・取消できません");
+  }
+}
+
+function isOfficialAggregationTankLog(log: TankLogData): boolean {
+  const plan = normalizeTransitionPlan(log.transitionPlan);
+  if (!plan) return false;
+  if (plan.kind === "direct") return log.transitionReviewStatus === "not_required";
+  return log.transitionReviewStatus === "approved";
 }
 
 function enforceCorrectionWindow(log: TankLogData, role: StaffCorrectionRole | undefined): void {
@@ -1005,6 +1617,12 @@ function requireTankSnapshot(value: unknown, label: string): TankSnapshot {
     ...(raw.location != null ? { location: String(raw.location) } : {}),
     ...(raw.staff != null ? { staff: String(raw.staff) } : {}),
     ...(raw.logNote != null ? { logNote: String(raw.logNote) } : {}),
+    ...(raw.maintenanceDate !== undefined
+      ? { maintenanceDate: raw.maintenanceDate }
+      : {}),
+    ...(raw.nextMaintenanceDate !== undefined
+      ? { nextMaintenanceDate: raw.nextMaintenanceDate }
+      : {}),
   };
 }
 
@@ -1034,6 +1652,14 @@ function stringOrUndefined(value: unknown): string | undefined {
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function normalizeStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return Array.from(new Set(value.flatMap((item) => {
+    const normalized = stringOrUndefined(item);
+    return normalized ? [normalized] : [];
+  }))).sort();
 }
 
 function requireTankActionCode(value: unknown, label: string): TankActionCode {

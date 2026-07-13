@@ -6,14 +6,18 @@ import type { Timestamp } from "firebase/firestore";
 import { logsRepository } from "@/lib/firebase/repositories";
 import { useStaffProfile } from "@/hooks/useStaffProfile";
 import { useStaffLocale } from "@/hooks/useStaffSession";
+import { useTankDataRevision } from "@/hooks/useTankDataRevision";
 import { updateOwnStaffLocale } from "@/lib/firebase/staff-locale-service";
 import { normalizeLocale, SUPPORTED_LOCALES, type Locale } from "@/lib/locale";
 import {
-  coerceTankActionCode,
   isFillActionCode,
   isLendActionCode,
   isReturnActionCode,
 } from "@/lib/tank-action-status-codes";
+import {
+  getOperationOccurredAt,
+  projectOfficialAggregationEvent,
+} from "@/lib/tank-transition-projections";
 import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
 import {
   getStaffLocaleSaveFailureMessage,
@@ -33,6 +37,7 @@ const LOCALE_LABELS: Record<Locale, string> = {
 };
 
 export default function MyPage() {
+  const tankDataRevision = useTankDataRevision();
   const {
     profile,
     session,
@@ -71,16 +76,17 @@ export default function MyPage() {
         const counts = { lend: 0, return: 0, fill: 0, other: 0 };
         fetched.forEach((log) => {
           const action = log.action ?? "";
-          const actionCode = coerceTankActionCode(action);
+          const officialEvent = projectOfficialAggregationEvent(log);
           entries.push({
             tankId: log.tankId ?? "",
             action,
-            timestamp: log.timestamp,
+            timestamp: getOperationOccurredAt(log),
             location: log.location ?? "",
           });
-          if (isLendActionCode(actionCode)) counts.lend++;
-          else if (isReturnActionCode(actionCode)) counts.return++;
-          else if (isFillActionCode(actionCode)) counts.fill++;
+          if (!officialEvent) return;
+          if (isLendActionCode(officialEvent.action)) counts.lend++;
+          else if (isReturnActionCode(officialEvent.action)) counts.return++;
+          else if (isFillActionCode(officialEvent.action)) counts.fill++;
           else counts.other++;
         });
         if (cancelled) return;
@@ -95,7 +101,7 @@ export default function MyPage() {
     return () => {
       cancelled = true;
     };
-  }, [profileLoading, staffId]);
+  }, [profileLoading, staffId, tankDataRevision]);
 
   const formatTime = (ts?: Timestamp) => {
     if (!ts?.toDate) return "—";

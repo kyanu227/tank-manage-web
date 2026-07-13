@@ -17,6 +17,8 @@ export interface QueueItem {
   tankId: string;
   status?: string;
   valid: boolean;
+  /** strictでは不一致だが、現在のruntime policyで固定recoveryを計画できる候補。 */
+  recoveryCandidate?: boolean;
   error?: string;
   tag: TagType;
 }

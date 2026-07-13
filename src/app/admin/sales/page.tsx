@@ -9,6 +9,10 @@ export default function SalesPage() {
   const {
     dailyStats,
     groupedMonthly,
+    staleMonthlyCount,
+    unknownMonthlyCount,
+    dailyError,
+    monthlyError,
     loadingDaily,
     loadingMonthly,
     todayStat,
@@ -55,7 +59,11 @@ export default function SalesPage() {
 
       {tab === "daily" && (
         <>
-          {loadingDaily ? (
+          {dailyError ? (
+            <div style={{ padding: "12px 14px", borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", fontSize: 12, lineHeight: 1.6 }}>
+              正式集計を表示できません: {dailyError.message}
+            </div>
+          ) : loadingDaily ? (
             <div style={{ padding: 60, textAlign: "center", color: "#94a3b8" }}>読み込み中…</div>
           ) : (
             <>
@@ -128,7 +136,27 @@ export default function SalesPage() {
             ※毎月15日に前々月の統計データが自動集計されてここに追加されます。
           </p>
 
-          {loadingMonthly ? (
+          {monthlyError && (
+            <div style={{ padding: "12px 14px", marginBottom: 18, borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", fontSize: 12, lineHeight: 1.6 }}>
+              月次集計を表示できません: {monthlyError.message}
+            </div>
+          )}
+
+          {staleMonthlyCount > 0 && (
+            <div style={{ padding: "10px 12px", marginBottom: 18, borderRadius: 10, background: "#fffbeb", border: "1px solid #fde68a", color: "#92400e", fontSize: 12, lineHeight: 1.6 }}>
+              例外操作レビュー後に再生成されていない月次アーカイブが {staleMonthlyCount}件あります。
+              古い集計値は表示から除外しています。
+            </div>
+          )}
+
+          {unknownMonthlyCount > 0 && (
+            <div style={{ padding: "10px 12px", marginBottom: 18, borderRadius: 10, background: "#eff6ff", border: "1px solid #bfdbfe", color: "#1e40af", fontSize: 12, lineHeight: 1.6 }}>
+              正式集計revisionを確認できない月次アーカイブが {unknownMonthlyCount}件あります。
+              現在の正式集計との一致を確認できないため、値は表示から除外しています。
+            </div>
+          )}
+
+          {monthlyError ? null : loadingMonthly ? (
             <div style={{ padding: 60, textAlign: "center", color: "#94a3b8" }}>アーカイブを読み込み中…</div>
           ) : groupedMonthly.length === 0 ? (
             <div style={{ padding: 60, textAlign: "center", color: "#cbd5e1" }}>

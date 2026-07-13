@@ -4,14 +4,18 @@ import { Award } from "lucide-react";
 import { useStaffAnalyticsStats } from "@/hooks/useStaffAnalyticsStats";
 
 export default function StaffAnalyticsPage() {
-  const { stats, loading } = useStaffAnalyticsStats();
+  const { stats, loading, error } = useStaffAnalyticsStats();
 
   return (
     <div>
       <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", marginBottom: 4 }}>スタッフ実績</h1>
       <p style={{ fontSize: 14, color: "#94a3b8", marginBottom: 24 }}>スタッフごとの操作件数ランキング</p>
 
-      {loading ? (
+      {error ? (
+        <div style={{ padding: "12px 14px", borderRadius: 10, background: "#fef2f2", border: "1px solid #fecaca", color: "#991b1b", fontSize: 12, lineHeight: 1.6 }}>
+          正式集計を表示できません: {error.message}
+        </div>
+      ) : loading ? (
         <div style={{ padding: 60, textAlign: "center", color: "#94a3b8" }}>読み込み中…</div>
       ) : stats.length === 0 ? (
         <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 40, textAlign: "center", color: "#cbd5e1" }}>ログがありません</div>

@@ -22,6 +22,7 @@ import {
   ExternalLink,
   Workflow,
   ShieldCheck,
+  ClipboardCheck,
 } from "lucide-react";
 import AdminAuthGuard from "@/components/AdminAuthGuard";
 import { auth } from "@/lib/firebase/config";
@@ -43,6 +44,7 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
     label: "確認・分析",
     items: [
       { href: "/admin", label: "ダッシュボード", icon: LayoutDashboard },
+      { href: "/admin/operation-reviews", label: "例外操作レビュー", icon: ClipboardCheck, adminOnly: true },
       { href: "/admin/sales", label: "売上統計", icon: BarChart3 },
       { href: "/admin/staff-analytics", label: "スタッフ実績", icon: Users },
     ],
@@ -71,6 +73,7 @@ const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
   {
     label: "設定",
     items: [
+      { href: "/admin/settings/tank-operations", label: "状態遷移モード", icon: Workflow, adminOnly: true },
       { href: "/admin/settings/portal", label: "ポータル設定", icon: Settings },
       { href: "/admin/settings/inspection", label: "耐圧検査設定", icon: ShieldCheck },
       { href: "/admin/notifications", label: "通知設定", icon: Bell },

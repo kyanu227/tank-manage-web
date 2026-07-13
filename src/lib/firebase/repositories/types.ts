@@ -8,6 +8,12 @@ import type {
   OperationWorkflow,
   ReturnCondition,
 } from "../../operation-context";
+import type {
+  RecoveryEvidence,
+  TransitionEnforcementMode,
+  TransitionPlan,
+  TransitionReviewStatus,
+} from "../../tank-transition-policy";
 
 // tanks
 export type { TankDoc } from "../../tank-types";
@@ -46,6 +52,23 @@ export interface LogDoc {
   source?: OperationSource;
   workflow?: OperationWorkflow;
   returnCondition?: ReturnCondition;
+  /** tank logの正規状態遷移列。logKind === "tank"で必須。 */
+  transitionPlan?: TransitionPlan;
+  /** revision/voidとは独立した、recoveryの正式集計レビュー状態。 */
+  transitionReviewStatus?: TransitionReviewStatus;
+  policyMode?: TransitionEnforcementMode;
+  policyRevision?: number;
+  recoveryReason?: string;
+  recoveryEvidence?: RecoveryEvidence;
+  affectedCustomerIds?: string[];
+  hasUnknownAffectedCustomer?: boolean;
+  reviewedByStaffId?: string;
+  reviewedByStaffName?: string;
+  reviewedByUid?: string;
+  reviewedByEmail?: string;
+  reviewEventId?: string;
+  reviewReason?: string;
+  reviewedAt?: Timestamp;
   billable?: boolean;
   note?: string;
   logNote?: string;
@@ -66,6 +89,8 @@ export interface LogDoc {
   logExtra?: Record<string, unknown>;
   /** 操作発生時刻。表示・期間集計の主軸。 */
   timestamp?: Timestamp;
+  /** 編集revisionの前後で不変の元操作日時。 */
+  originalAt?: Timestamp;
   createdAt?: Timestamp;
   revisionCreatedAt?: Timestamp;
 }

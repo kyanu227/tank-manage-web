@@ -5,11 +5,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
   LayoutDashboard, Wrench, ShoppingCart, User,
-  Menu, X, Hand, Building2, Inbox
+  Menu, X, Hand, Building2, Inbox, AlertTriangle
 } from "lucide-react";
 import StaffAuthGuard from "@/components/StaffAuthGuard";
 import { PROCUREMENT_PATHS } from "@/features/procurement/constants";
 import { usePendingOrderCount } from "@/hooks/usePendingOrderCount";
+import { useTankOperationPolicy } from "@/hooks/useTankOperationPolicy";
 
 /* ── Side menu ──
    破損報告/修理完了/耐圧検査完了の3画面は「メンテナンス」グループとして
@@ -154,6 +155,8 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
           )}
         </header>
 
+        <TankOperationPolicyBanner />
+
         {/* Slide-over menu */}
         {menuOpen && (
           <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 40 }} />
@@ -229,5 +232,57 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
         </main>
       </div>
     </StaffAuthGuard>
+  );
+}
+
+function TankOperationPolicyBanner() {
+  const { runtimeTransitionEnforcement, loading, error } = useTankOperationPolicy();
+  if (loading) return null;
+
+  if (error) {
+    return (
+      <div
+        role="status"
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 7,
+          flexShrink: 0,
+          padding: "6px 12px",
+          background: "#fef2f2",
+          borderBottom: "1px solid #fecaca",
+          color: "#991b1b",
+          fontSize: 11,
+          fontWeight: 700,
+        }}
+      >
+        <AlertTriangle size={14} /> 方針を取得できないため厳格モードで動作します
+      </div>
+    );
+  }
+
+  if (runtimeTransitionEnforcement !== "advisory") return null;
+  return (
+    <div
+      role="status"
+      style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+        flexShrink: 0,
+        padding: "7px 12px",
+        background: "#fffbeb",
+        borderBottom: "1px solid #fde68a",
+        color: "#92400e",
+        fontSize: 11,
+        fontWeight: 800,
+        textAlign: "center",
+      }}
+    >
+      <AlertTriangle size={14} />
+      自動補完モード中：不一致操作は現物確認後に正規手順へ展開し、管理者レビューまで正式集計を保留します
+    </div>
   );
 }
