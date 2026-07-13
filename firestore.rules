@@ -515,8 +515,7 @@ service cloud.firestore {
               && data.policyMode == "advisory"
               && isStaffDirectRecoveryData(data)
               && data.get("action", "") != "order_lend"
-              && data.get("recoveryReason", "") is string
-              && data.get("recoveryReason", "").size() >= 5
+              && !data.keys().hasAny(["recoveryReason"])
               && isCompleteRecoveryEvidence(plan, data.get("recoveryEvidence", {}))
               && data.get("recoveryConfirmationFingerprint", "") is string
               && data.get("recoveryConfirmationFingerprint", "").matches("^[0-9a-f]{64}$")

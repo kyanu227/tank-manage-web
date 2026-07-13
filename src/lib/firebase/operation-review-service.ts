@@ -55,7 +55,6 @@ export type OperationReviewItem = {
   occurredAt?: Timestamp;
   transitionPlan: TransitionPlan | null;
   transitionReviewStatus: OperationReviewDecision | "pending" | "unknown";
-  recoveryReason?: string;
   recoveryEvidence: Partial<Record<RecoveryEvidenceKey, true>>;
   affectedCustomerIds: string[];
   hasUnknownAffectedCustomer: boolean;
@@ -344,7 +343,6 @@ function toPendingOperationReviewItem(
       ?? timestampOrUndefined(data.timestamp),
     transitionPlan,
     transitionReviewStatus: status,
-    recoveryReason: optionalNonEmptyString(data.recoveryReason),
     recoveryEvidence,
     affectedCustomerIds: normalizeStringArray(data.affectedCustomerIds),
     hasUnknownAffectedCustomer: data.hasUnknownAffectedCustomer === true,
@@ -399,7 +397,6 @@ function toOperationReviewHistoryItem(
       ?? timestampOrUndefined(logData.timestamp),
     transitionPlan,
     transitionReviewStatus: decision,
-    recoveryReason: optionalNonEmptyString(logData.recoveryReason),
     recoveryEvidence,
     affectedCustomerIds: normalizeStringArray(entry.affectedCustomerIds),
     hasUnknownAffectedCustomer: entry.hasUnknownAffectedCustomer === true,
@@ -461,9 +458,6 @@ function getRecoveryValidationError(
   }
   if (!plan || plan.kind !== "recovery" || plan.steps.length === 0) {
     return "自動補完計画を検証できないためレビューできません。";
-  }
-  if ((optionalNonEmptyString(data.recoveryReason)?.length ?? 0) < 5) {
-    return "実行時の理由が不足しているためレビューできません。";
   }
   if (plan.requiredEvidence.some((key) => evidence[key] !== true)) {
     return "実行時に必要だった確認証跡が不足しています。";

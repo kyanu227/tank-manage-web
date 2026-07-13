@@ -10,7 +10,6 @@ export type RecoveryConfirmationValidationInput = {
   expectedFingerprint: string;
   confirmation?: {
     fingerprint: string;
-    recoveryReason: string;
     recoveryEvidence: RecoveryEvidence;
   };
 };
@@ -43,12 +42,11 @@ export function assertRecoveryConfirmationsMatchReplannedState(
   }
 
   const invalidEvidence = inputs.find(({ plan, confirmation }) => (
-    confirmation!.recoveryReason.trim().length < 5
-    || !validateRecoveryEvidence(plan, confirmation!.recoveryEvidence).ok
+    !validateRecoveryEvidence(plan, confirmation!.recoveryEvidence).ok
   ));
   if (invalidEvidence) {
     throw new Error(
-      `[${invalidEvidence.tankId}] plannerが要求した確認項目または理由を検証できないため、一括操作を中止しました。`,
+      `[${invalidEvidence.tankId}] plannerが要求した確認項目を検証できないため、一括操作を中止しました。`,
     );
   }
 

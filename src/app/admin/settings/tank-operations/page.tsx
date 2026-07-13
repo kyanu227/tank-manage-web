@@ -58,7 +58,7 @@ export default function TankOperationPolicySettingsPage() {
     }
 
     const warning = selectedMode === "advisory"
-      ? "自動補完モードへ変更しますか？\n不一致操作は現物確認・理由入力後に状態へ反映され、管理者レビューまで正式集計されません。"
+      ? "自動補完モードへ変更しますか？\n不一致操作は現物確認後に状態へ反映され、管理者レビューまで正式集計されません。"
       : "厳格モードへ変更しますか？\n既存のpendingレビューは残り、新しい不一致操作だけが停止されます。";
     if (!window.confirm(warning)) return;
 

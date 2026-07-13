@@ -122,7 +122,6 @@ export interface TankOperationInput {
 
 export type TankRecoveryConfirmation = {
   fingerprint: string;
-  recoveryReason: string;
   recoveryEvidence: RecoveryEvidence;
 };
 
@@ -246,7 +245,7 @@ export class TankRecoveryConfirmationRequiredError extends Error {
   readonly requirements: TankRecoveryRequirement[];
 
   constructor(fingerprint: string, requirements: TankRecoveryRequirement[]) {
-    super("正規の状態遷移へ自動補完するため、現物確認と理由入力が必要です。");
+    super("正規の状態遷移へ自動補完するため、現物確認が必要です。");
     this.name = "TankRecoveryConfirmationRequiredError";
     this.fingerprint = fingerprint;
     this.requirements = requirements;
@@ -284,6 +283,7 @@ const META_LOG_FIELDS = new Set([
   "transitionReviewStatus",
   "policyMode",
   "policyRevision",
+  // 廃止済みのスタッフ理由を訂正ログへ引き継がない。
   "recoveryReason",
   "recoveryEvidence",
   "recoveryConfirmationFingerprint",
@@ -321,6 +321,7 @@ const RESERVED_LOG_EXTRA_FIELDS = new Set([
   "transitionReviewStatus",
   "policyMode",
   "policyRevision",
+  // 廃止済みのスタッフ理由をlogExtra経由で再導入させない。
   "recoveryReason",
   "recoveryEvidence",
   "recoveryConfirmationFingerprint",
@@ -628,7 +629,6 @@ async function commitPlannedOperations(
       hasUnknownAffectedCustomer: affectedCustomers.hasUnknownAffectedCustomer,
       ...(transitionPlan.kind === "recovery" && confirmation
         ? {
-            recoveryReason: confirmation.recoveryReason.trim(),
             recoveryEvidence: pickRequiredRecoveryEvidence(
               transitionPlan.requiredEvidence,
               confirmation.recoveryEvidence,
@@ -709,20 +709,6 @@ function requestRecoveryConfirmation(
     }
   }
 
-  let recoveryReason = "";
-  for (;;) {
-    const entered = window.prompt(
-      "この不一致操作を行う理由を5文字以上で入力してください。監査ログへ保存されます。",
-      recoveryReason,
-    );
-    if (entered === null) {
-      throw new Error("自動補完操作をキャンセルしました。");
-    }
-    recoveryReason = entered.trim();
-    if (recoveryReason.length >= 5) break;
-    window.alert("理由は5文字以上で入力してください。");
-  }
-
   const recoveryEvidence: RecoveryEvidence = {};
   error.requirements.forEach((requirement) => {
     requirement.plan.requiredEvidence.forEach((key) => {
@@ -732,7 +718,6 @@ function requestRecoveryConfirmation(
 
   return {
     fingerprint: error.fingerprint,
-    recoveryReason,
     recoveryEvidence,
   };
 }
