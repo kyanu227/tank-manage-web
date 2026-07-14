@@ -188,7 +188,8 @@ npx tsc --noEmit     # 型チェック
 firebase deploy --only hosting  # Firebase Hosting のみデプロイ
 ```
 
-`firebase.json` は `firestore.rules` に接続済みで、baseline Rulesは2026-05-08にdeploy済み。
+`firebase.json` は `firestore.rules` に接続済み。現在の本番Rulesは2026-06-02 release
+（commit `b7e853c8f38071937951b871cbe0e3281dd22876`）としてread-only確認済み。
 ただし、それ以後の状態遷移Rules差分は未deployである。通常作業ではRulesをdeployせず、
 Rules-onlyの専用レビュー・operationでだけ明示project/configを指定して実行する。
 HostingとRulesを同じdeploy commandへ混ぜない。cutoverでは
@@ -435,7 +436,8 @@ service / operation を通すべき例:
 ## deploy / commit 分離ルール
 
 - 通常 deploy は `firebase deploy --only hosting` のみ。
-- `firebase.json` は`firestore.rules`へ接続済みで、baseline Rulesは2026-05-08にdeploy済み。
+- `firebase.json` は`firestore.rules`へ接続済み。現在の本番Rulesは2026-06-02 release
+  （commit `b7e853c8f38071937951b871cbe0e3281dd22876`）としてread-only確認済み。
 - 現行Rules差分のdeployは通常deployに含めず、Rules-onlyの専用レビュー・operationへ分離する。
 - freeze/normal Rulesは専用configと明示projectを使い、Hostingと混ぜない。
 - UI-only commit と Firestore 書き込み / Firebase Auth / schema 変更 commit は分ける。

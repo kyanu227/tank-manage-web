@@ -7,8 +7,9 @@
 ## Deploy 方針
 
 - 通常 deploy は `firebase deploy --only hosting` のみを使う。
-- `firebase.json` は`firestore.rules`へ接続済みで、baseline Rulesは2026-05-08にdeploy済み。
-- baseline以後のRules差分は、自動的に本番反映済みだとみなさない。
+- `firebase.json` は`firestore.rules`へ接続済み。現在の本番Rulesは2026-06-02 release
+  （commit `b7e853c8f38071937951b871cbe0e3281dd22876`）としてread-only確認済み。
+- 2026-06-02 release以後のRules差分は、自動的に本番反映済みだとみなさない。
 - Rules deployは専用レビュー・専用operationに分離し、明示projectとrules-only configを使う。
 - cutover freeze/normal Rulesは`docs/cutover/transition-plan-v1-runbook.md`に従う。
 - Hosting deploy 前は、Firestore Rules / Functions が deploy 対象に含まれていないことを確認する。

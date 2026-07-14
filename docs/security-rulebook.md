@@ -16,8 +16,10 @@
 ## Rules deploy状態
 
 - `firebase.json`は`firestore.rules`へ接続済み。
-- baseline Rulesは2026-05-08に本番deploy済み。結果は`docs/deploy/security-rules-deploy-result.md`を正本とする。
-- baseline以後の状態遷移Rules差分は未deployであり、別のRules-only operationが必要。
+- 現在の本番Rulesは2026-06-02 release（commit
+  `b7e853c8f38071937951b871cbe0e3281dd22876`）としてRules APIでread-only確認済み。
+- 2026-05-08のdeploy結果は履歴記録であり、現在のrollback正本ではない。
+- 2026-06-02 release以後の状態遷移Rules差分は未deployであり、別のRules-only operationが必要。
 - 通常Hosting deployへRulesを混ぜない。
 - `customerUsers.customerId` / `customerUsers.customerName` / `disabled` の管理者運用と Rules 制御は次フェーズでレビューする。
 
@@ -42,7 +44,7 @@
 
 ## 次に必要な作業
 
-1. baseline以後の`firestore.rules`差分を正式レビューし、Rules-only deploy手順を確定する。
+1. 2026-06-02本番release以後の`firestore.rules`差分を正式レビューし、Rules-only deploy手順を確定する。
 2. `customerUsers.customerId` / `customerUsers.customerName` / `disabled` の管理者更新権限を Rules と service 境界で設計する。
 3. 管理画面で `staff` と `staffByEmail` の同期を安定させる。
 4. スタッフのパスコードログインを残す範囲を決める。

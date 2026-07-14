@@ -2,6 +2,10 @@
 
 実施日: 2026-05-08
 
+> 現在状態（2026-07-14追記）: 本書は2026-05-08時点の履歴記録であり、現在のrollback正本ではない。
+> Rules APIで確認した現在の本番Rulesは2026-06-02 release、commit
+> `b7e853c8f38071937951b871cbe0e3281dd22876`である。
+
 対象:
 
 - Firestore Security Rules deploy result

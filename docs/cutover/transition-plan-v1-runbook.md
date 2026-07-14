@@ -21,6 +21,8 @@ fresh clientで確認する。
 参考:
 
 - <https://firebase.google.com/docs/firestore/security/get-started>
+- <https://firebase.google.com/docs/reference/rules/rest/v1/projects.releases/get>
+- <https://firebase.google.com/docs/reference/rules/rest/v1/projects.rulesets/get>
 - <https://docs.cloud.google.com/firestore/docs/security/iam>
 - <https://docs.cloud.google.com/resource-manager/reference/rest/v3/projects/testIamPermissions>
 
@@ -43,10 +45,11 @@ fresh clientで確認する。
    writer不存在の証明に使わず、cutoverを停止する。
 3. Cloud Audit Logsで直近のFirestore write principalを列挙する。
 4. migration専用service account以外のwriterを停止または一時権限剥奪する。
-5. migration用のcustom roleは次の7 permissionだけとし、maintenance直前に期限付きで付与し、
+5. migration用のcustom roleは次の9 permissionだけとし、maintenance直前に期限付きで付与し、
    normal復帰またはrollback完了直後に剥奪して再検査する。
 6. freshな専用service accountのproject/folder/organization実効bindingを確認し、Owner、Editor、
-   Datastore Owner/User等の広いrole、group経由role、7 permission以外の継承権限がないことを記録する。
+   Datastore Owner/User、Firebase Rules Viewer等の広いrole、group経由role、9 permission以外の
+   継承権限がないことを記録する。
    `testIamPermissions`は必要権限の存在だけを確認し、余分な権限の不存在は証明しない。
 7. IAM policy変更後は最低10分待ち、反復したpermission確認が一致するまで進まない。公式には通常約2分、
    7分以上かかる場合もあり、group変更はさらに長いため専用principalをgroupへ入れない。
@@ -59,10 +62,13 @@ fresh clientで確認する。
    - `datastore.entities.create`
    - `datastore.entities.update`
    - `datastore.entities.delete`
+   - `firebaserules.releases.get`
+   - `firebaserules.rulesets.get`
 10. local service-account JSONを使う場合はrepository・同期folder外、owner本人、`0600`、hard link数1とする。
     repository直下の`firebase-service-account.json`や`*-firebase-adminsdk-*.json`は、使用中でなくても
     production CLIをfail closedさせる。使用履歴を確認し、有効な鍵なら失効してから安全な場所へ移すか削除する。
-11. main SHA、現在のHosting release、通常Rules file hash、rollback対象Rules commitを記録する。
+11. main SHA、現在のHosting release、通常Rules file hash、rollback対象Rules commit、live Rulesの
+    release更新日時とruleset IDを記録する。
 
 参考:
 
@@ -90,6 +96,32 @@ local APFSまたは暗号化APFSに保存し、`~/Library/Mobile Documents`と`~
 全利用者へ停止を通知し、staff/admin/portalの全タブを終了する。次のcommandはrunbook例であり、
 このPRでは実行しない。
 
+freeze deployの直前に、productionの`cloud.firestore` releaseをRules APIからread-onlyで再取得する。
+取得順はrelease → immutable ruleset source → releaseとし、途中でreleaseが変化した場合も停止する。
+API sourceはmemory内でだけLF・末尾改行1つへ正規化し、本文をfileやstdoutへ出さない。
+
+```bash
+npm run --silent cutover:rules:verify-baseline -- \
+  --project=okmarine-tankrental \
+  --expected-main-commit='<current-main-sha>' \
+  --expected-principal='<migration-service-account-email>'
+```
+
+この検証は、次の4者が一致した場合だけ成功する。
+
+- live production Rules source
+- `firestore.cutover-baseline.rules`
+- `firestore.cutover-baseline.manifest.json`のhash・release・ruleset metadata
+- commit `b7e853c8f38071937951b871cbe0e3281dd22876`の`firestore.rules`
+
+現在のpinned正本は、release更新`2026-06-02T08:28:53.917518Z`、ruleset
+`5e97d441-b926-473a-a983-b77e41293db4`、正規化SHA-256
+`6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8`である。
+取得不能、hash・metadata・Git・fileの不一致はすべてfreeze deploy前にfail closedとする。
+CLIはlocal `HEAD` / `origin/main`だけでなく、GitHub上の`refs/heads/main`も`git ls-remote`で
+read-only照合する。remote mainを取得できない、または`expected-main-commit`と不一致なら停止する。
+成功後は他のRules deploy権限者・CIを動かさず、直ちに次のfreeze deployへ進む。
+
 ```bash
 firebase --project okmarine-tankrental \
   --config firebase.cutover-freeze.json \
@@ -110,14 +142,15 @@ deploy後:
 
 ```bash
 test "$(shasum -a 256 firestore.cutover-baseline.rules | awk '{print $1}')" = \
-  '8adc5a74aa617f2b0125235319ddf63c016f2ae5dac3fb40b739c452a90a4974'
+  '6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8'
 firebase --project okmarine-tankrental \
   --config firebase.cutover-baseline.json \
   deploy --only firestore:rules
 ```
 
-baseline artifactは2026-05-08本番deploy済み`firestore.rules`最終変更commit
-`c7e58f6952a60dd2ea71590626fe6ead1b191584`の内容をそのまま保持する。hash不一致ならdeployしない。
+baseline artifactはfreeze直前のproduction Rulesと同じsourceを保持する。2026-06-02 releaseの
+最終変更commit `b7e853c8f38071937951b871cbe0e3281dd22876`、上記hash、manifest metadataの
+いずれかが不一致ならdeployしない。これによりabort・rollbackは作業直前のRules sourceへ戻る。
 
 このReset前abortではsnapshot restoreを行わない。Resetは一度も実行されていないため、次の順序で
 pre-cutover状態へ戻し、途中を省略しない。
@@ -153,7 +186,7 @@ npm run --silent cutover:preflight -- \
   --key-id='<snapshot-key-id>'
 ```
 
-出力は件数、status集計、write数、request bytes、hash、必要7 permissionの確認数だけとし、document ID、
+出力は件数、status集計、write数、request bytes、hash、必要9 permissionの確認数だけとし、document ID、
 顧客名、location、field内容、token、credential pathを含めない。
 
 ## 7. SnapshotとReset dry-run
@@ -281,7 +314,7 @@ unexpected `permission-denied`、旧schema error、runtime advisory、mixed stat
 
 - operator / reviewer、開始・完了時刻、main SHA、Hosting release ID
 - snapshot ID、payload/source/reset-plan SHA、verify stable-state SHA
-- baseline / freeze / post-cutover Rules SHAと各deploy結果
+- baseline live照合時のrelease/ruleset metadata、baseline / freeze / post-cutover Rules SHAと各deploy結果
 - staff/admin/portal smoke結果、Audit Logs query期間、確認principal、許可したauth/session更新path
 - migration custom roleの付与・剥奪時刻、実効bindingレビュー結果
 
