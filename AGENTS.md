@@ -188,7 +188,13 @@ npx tsc --noEmit     # 型チェック
 firebase deploy --only hosting  # Firebase Hosting のみデプロイ
 ```
 
-`firestore.rules` は下書き扱いで未deploy。`firebase.json` に firestore rules を接続しない。`firebase deploy --only firestore:rules` は明示指示があっても、Rules 本番化タスクとして別途レビューするまで実行しない。
+`firebase.json` は `firestore.rules` に接続済みで、baseline Rulesは2026-05-08にdeploy済み。
+ただし、それ以後の状態遷移Rules差分は未deployである。通常作業ではRulesをdeployせず、
+Rules-onlyの専用レビュー・operationでだけ明示project/configを指定して実行する。
+HostingとRulesを同じdeploy commandへ混ぜない。cutoverでは
+`docs/cutover/transition-plan-v1-runbook.md`を正本とし、production reset / restore gateを
+運用安全PRだけで開放しない。freeze中止・rollbackにはpinned baseline config、reset完了後の
+通常復帰にはpost-cutover normal configを使い分ける。
 
 Firestore composite index は Firebase Console で手動管理しているものがある。2026-04-29 時点で `logs` の `logStatus` Asc / `location` Asc / `timestamp` Desc / `__name__` Desc index は作成済み。これは `getActiveLogs()` の portal 履歴表示用であり、Rules deploy ではない。
 
@@ -429,7 +435,9 @@ service / operation を通すべき例:
 ## deploy / commit 分離ルール
 
 - 通常 deploy は `firebase deploy --only hosting` のみ。
-- `firestore.rules` は下書き扱い。未deployであり、`firebase.json` に接続しない。
+- `firebase.json` は`firestore.rules`へ接続済みで、baseline Rulesは2026-05-08にdeploy済み。
+- 現行Rules差分のdeployは通常deployに含めず、Rules-onlyの専用レビュー・operationへ分離する。
+- freeze/normal Rulesは専用configと明示projectを使い、Hostingと混ぜない。
 - UI-only commit と Firestore 書き込み / Firebase Auth / schema 変更 commit は分ける。
 - docs-only commit は実装 commit と分ける。
 - icon / PWA画像更新は UI やロジック変更と分ける。

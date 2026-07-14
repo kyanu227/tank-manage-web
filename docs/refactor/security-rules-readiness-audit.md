@@ -2,6 +2,10 @@
 
 作成日: 2026-05-05
 
+> 履歴注記（2026-07-14）: 本書はdeploy前監査時点の記録である。baseline Rulesは
+> 2026-05-08にdeploy済み。現在のdeploy状態とcutover手順は`docs/security-rulebook.md`と
+> `docs/cutover/transition-plan-v1-runbook.md`を参照する。
+
 対象:
 
 - `firestore.rules`

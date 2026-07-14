@@ -638,7 +638,8 @@ erDiagram
 - 新しいフィールドを追加する場合は、この文書を更新する。
 - 既存フィールドを削除・改名する場合は、互換読み込み期間を設ける。
 - 破壊的変更は migration スクリプトを用意する。
-- 新規書き込みは新スキーマへ寄せる。Portal Auth / customerUsers は Phase 0 として本番確認済みだが、Firestore Rules は未deployのため、Rules 本番化は別途レビューする。
+- 新規書き込みは新スキーマへ寄せる。Portal Auth / customerUsers は Phase 0 として本番確認済み。
+  baseline Rulesは2026-05-08にdeploy済みだが、その後のRules差分はRules-only operationで別途レビューする。
 - 読み込みは一定期間、旧スキーマを吸収する正規化関数を通す。
 - 本番データの直接手修正は避け、必要な場合は作業内容を `edit_history` または別途作業記録に残す。
 

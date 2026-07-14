@@ -2,6 +2,10 @@
 
 作成日: 2026-05-05
 
+> 履歴注記（2026-07-14）: 本書はbaseline Rules deploy前の検証台本である。baselineは
+> 2026-05-08にdeploy済みであり、transition cutoverのfreeze/normal切替には
+> `docs/cutover/transition-plan-v1-runbook.md`と専用configを使用する。
+
 対象:
 
 - `customerUsers`

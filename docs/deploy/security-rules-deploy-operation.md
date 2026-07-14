@@ -10,6 +10,11 @@
 
 この document は、Security Rules deploy を安全に実行するための operation 手順である。この PR では deploy は実行しない。
 
+> 2026-07-14追記: 本書は2026-05-08 baseline Rules deployの履歴・通常Rules operationである。
+> transitionPlan v1 cutoverのfreeze/normal Rules切替には再利用せず、
+> [`transition-plan-v1-runbook.md`](../cutover/transition-plan-v1-runbook.md)と専用configを使用する。
+> baseline以後の状態遷移Rules差分は未deployである。
+
 ---
 
 ## 1. Purpose
