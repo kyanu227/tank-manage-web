@@ -9,7 +9,7 @@ const CLOUD_RESOURCE_MANAGER_ROOT = "https://cloudresourcemanager.googleapis.com
 const IAM_REQUEST_TIMEOUT_MS = 30_000;
 
 /**
- * cutoverが実際に使うFirestore REST操作に限定した権限集合。
+ * cutoverが実際に使うFirestore REST操作とfreeze前Rules照合に限定した権限集合。
  * testIamPermissionsは権限の有無を読み取るだけで、IAM policyを変更しない。
  */
 export const MIGRATION_REQUIRED_IAM_PERMISSIONS = [
@@ -20,6 +20,8 @@ export const MIGRATION_REQUIRED_IAM_PERMISSIONS = [
   "datastore.entities.create",
   "datastore.entities.update",
   "datastore.entities.delete",
+  "firebaserules.releases.get",
+  "firebaserules.rulesets.get",
 ] as const;
 
 export type MigrationIamPermission = typeof MIGRATION_REQUIRED_IAM_PERMISSIONS[number];

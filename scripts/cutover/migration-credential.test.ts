@@ -11,7 +11,7 @@ const PRINCIPAL = "tank-cutover@okmarine-tankrental.iam.gserviceaccount.com";
 const TOKEN = "unit-test-secret-access-token";
 
 describe("migration credential verification", () => {
-  it("同一GoogleAuth/AuthClientのservice account・project・7権限を検証する", async () => {
+  it("同一GoogleAuth/AuthClientのservice account・project・9権限を検証する", async () => {
     const client = authClient();
     const auth = googleAuth(client);
     const fetchMock = vi.fn(async (input: string | URL | Request, init?: RequestInit) => {
@@ -103,7 +103,7 @@ describe("migration credential verification", () => {
     )).rejects.toThrow("AuthClient principal");
   });
 
-  it("7権限の1つでも欠落すればfail closedする", async () => {
+  it("9権限の1つでも欠落すればfail closedする", async () => {
     const granted = MIGRATION_REQUIRED_IAM_PERMISSIONS.slice(0, -1);
     await expect(verifyMigrationCredential(
       { expectedPrincipal: PRINCIPAL, expectedProjectId: PROJECT_ID },
@@ -111,7 +111,7 @@ describe("migration credential verification", () => {
         auth: googleAuth(authClient()),
         fetch: async () => jsonResponse({ permissions: granted }),
       },
-    )).rejects.toThrow("datastore.entities.delete");
+    )).rejects.toThrow("firebaserules.rulesets.get");
   });
 
   it("IAM API errorのtokenとresponse bodyを例外に含めない", async () => {
