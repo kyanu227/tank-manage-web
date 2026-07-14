@@ -118,52 +118,32 @@ try {
   assert(executed.commitResponse === "confirmed", "restore commit response");
   await assertRestored(firstPayload);
 
-  // 二回目はstale updateTimeによるreset commit全体のatomic failureを確認する。
-  const secondSnapshotPath = join(tempDirectory, "snapshot-2.cutover.enc");
-  await runSnapshotCreate(secondSnapshotPath);
-  const secondEnvelope = await readEncryptedSnapshotFile(secondSnapshotPath, { repositoryRoot: ROOT });
-  const secondPayload = decryptTransitionSnapshot(secondEnvelope, key, KEY_ID);
-  const stalePlan = await planTransitionSnapshotReset({
-    client,
-    payload: secondPayload,
-    snapshotPayloadSha256: secondEnvelope.payloadSha256,
-    expectedProjectId: PROJECT_ID,
-    expectedDatabaseId: DATABASE_ID,
-    expectedDatabaseUid: DATABASE_UID,
-    expectedMainCommit: MAIN_COMMIT,
-    now: () => new Date("2026-07-13T03:00:00Z"),
+  // snapshot後の各precondition競合で192-write全体が一件も適用されないことを確認する。
+  await assertAtomicResetRaceRejected("stale-tank", async () => {
+    await changeDocumentField("tanks/T-001", "note", { stringValue: "stale reset precondition" });
   });
-  await changeTankNote("tanks/T-001", "stale reset precondition");
-  const beforeStaleCommit = await readTransitionSourceCensus(client);
-  let staleCommitFailed = false;
-  try {
-    await client.commit(stalePlan.writes);
-  } catch {
-    staleCommitFailed = true;
-  }
-  assert(staleCommitFailed, "stale reset commit must fail");
-  const afterStaleCommit = await readTransitionSourceCensus(client);
-  assert(
-    sourceCensusSha256(afterStaleCommit) === sourceCensusSha256(beforeStaleCommit),
-    "stale reset failure must not partially apply any write",
-  );
-  assert(afterStaleCommit.markerDocument === null, "stale reset must not create marker");
-  assert(
-    afterStaleCommit.documents.filter((document) => document.kind === "tank_log").length === 38,
-    "stale reset preserves all target logs",
-  );
-  assert(
-    afterStaleCommit.documents.filter((document) => document.kind === "transaction").length === 8,
-    "stale reset preserves all target transactions",
-  );
+  await assertAtomicResetRaceRejected("stale-log", async () => {
+    await changeDocumentField("logs/L-001", "raceProbe", { stringValue: "stale-log" });
+  });
+  await assertAtomicResetRaceRejected("stale-transaction", async () => {
+    await changeDocumentField("transactions/TX-001", "raceProbe", {
+      stringValue: "stale-transaction",
+    });
+  });
+  await assertAtomicResetRaceRejected("marker-exists", async () => {
+    await client.commit([createWrite(TRANSITION_MIGRATION_MARKER_PATH, {
+      status: { stringValue: "in_progress" },
+    })]);
+  }, true);
+  await client.commit([{ delete: client.fullDocumentName(TRANSITION_MIGRATION_MARKER_PATH) }]);
 
-  const thirdSnapshotPath = join(tempDirectory, "snapshot-3.cutover.enc");
-  await runSnapshotCreate(thirdSnapshotPath);
-  const thirdEnvelope = await readEncryptedSnapshotFile(thirdSnapshotPath, { repositoryRoot: ROOT });
-  const thirdPayload = decryptTransitionSnapshot(thirdEnvelope, key, KEY_ID);
-  await runSnapshotReset(thirdSnapshotPath, true);
-  await runSnapshotRestore(thirdSnapshotPath, true);
-  await assertRestored(thirdPayload);
+  const finalSnapshotPath = join(tempDirectory, "snapshot-final.cutover.enc");
+  await runSnapshotCreate(finalSnapshotPath);
+  const finalEnvelope = await readEncryptedSnapshotFile(finalSnapshotPath, { repositoryRoot: ROOT });
+  const finalPayload = decryptTransitionSnapshot(finalEnvelope, key, KEY_ID);
+  await runSnapshotReset(finalSnapshotPath, true);
+  await runSnapshotRestore(finalSnapshotPath, true);
+  await assertRestored(finalPayload);
   console.log(
     `PASS typed encrypted snapshot -> separate-process atomic reset -> atomic restore `
     + `(145/38/8, 192 writes, reset=${String(resetRequestBytes)} bytes, `
@@ -583,7 +563,60 @@ async function changeResetTimestamp(path: string, updatedAt: string): Promise<vo
   }]);
 }
 
-async function changeTankNote(path: string, note: string): Promise<void> {
+async function assertAtomicResetRaceRejected(
+  label: string,
+  introduceRace: () => Promise<void>,
+  markerExpected = false,
+): Promise<void> {
+  const snapshotPath = join(tempDirectory, `snapshot-${label}.cutover.enc`);
+  await runSnapshotCreate(snapshotPath);
+  const envelope = await readEncryptedSnapshotFile(snapshotPath, { repositoryRoot: ROOT });
+  const payload = decryptTransitionSnapshot(envelope, key, KEY_ID);
+  const stalePlan = await planTransitionSnapshotReset({
+    client,
+    payload,
+    snapshotPayloadSha256: envelope.payloadSha256,
+    expectedProjectId: PROJECT_ID,
+    expectedDatabaseId: DATABASE_ID,
+    expectedDatabaseUid: DATABASE_UID,
+    expectedMainCommit: MAIN_COMMIT,
+    now: () => new Date("2026-07-13T03:00:00Z"),
+  });
+  assert(stalePlan.writes.length === 192, `${label}: reset write count`);
+
+  await introduceRace();
+  const beforeCommit = await readTransitionSourceCensus(client);
+  let commitFailed = false;
+  try {
+    await client.commit(stalePlan.writes);
+  } catch {
+    commitFailed = true;
+  }
+  assert(commitFailed, `${label}: reset commit must fail`);
+  const afterCommit = await readTransitionSourceCensus(client);
+  assert(
+    sourceCensusSha256(afterCommit) === sourceCensusSha256(beforeCommit),
+    `${label}: failed reset must not partially apply any write`,
+  );
+  assert(
+    Boolean(afterCommit.markerDocument) === markerExpected,
+    `${label}: marker state must remain unchanged`,
+  );
+  assert(
+    afterCommit.documents.filter((document) => document.kind === "tank_log").length === 38,
+    `${label}: all target logs remain`,
+  );
+  assert(
+    afterCommit.documents.filter((document) => document.kind === "transaction").length === 8,
+    `${label}: all target transactions remain`,
+  );
+}
+
+async function changeDocumentField(
+  path: string,
+  fieldName: string,
+  value: FirestoreRestValue,
+): Promise<void> {
   const fullName = client.fullDocumentName(path);
   const current = (await client.batchGet([path])).get(fullName);
   if (!current?.updateTime) throw new Error(`${path}がありません`);
@@ -592,7 +625,7 @@ async function changeTankNote(path: string, note: string): Promise<void> {
       name: fullName,
       fields: {
         ...(current.fields ?? {}),
-        note: { stringValue: note },
+        [fieldName]: value,
       },
     },
     currentDocument: { updateTime: current.updateTime },
