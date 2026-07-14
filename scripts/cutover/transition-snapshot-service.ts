@@ -219,10 +219,13 @@ export async function readTransitionSourceCensus(
 export async function planTransitionSnapshotRestore(
   options: RestoreTransitionSnapshotOptions,
 ): Promise<TransitionRestorePlan> {
-  if (!/^[0-9a-f]{64}$/.test(options.snapshotPayloadSha256)) {
+  const payload = validateTransitionSnapshotPayload(options.payload);
+  if (
+    !/^[0-9a-f]{64}$/.test(options.snapshotPayloadSha256)
+    || canonicalSha256(payload) !== options.snapshotPayloadSha256
+  ) {
     throw new Error("snapshot payload SHA-256が不正です");
   }
-  const payload = validateTransitionSnapshotPayload(options.payload);
   assertRestoreIdentity(payload, options);
   await options.client.verifyDatabaseUid(options.expectedDatabaseUid);
 
@@ -261,7 +264,7 @@ export async function executeTransitionSnapshotRestore(
 }> {
   if (!options.client.emulatorHost) {
     throw new Error(
-      "本番restore executeはfreeze Rules・rules bypass writer停止・runbookの実装PRが完了するまで無効です",
+      "本番restore executeは最終production execute解放PRまで無効です",
     );
   }
   const plan = await planTransitionSnapshotRestore(options);

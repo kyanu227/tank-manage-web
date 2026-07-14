@@ -1,6 +1,21 @@
 import { execFileSync } from "node:child_process";
-import { isAbsolute, resolve } from "node:path";
+import {
+  existsSync,
+  readdirSync,
+  realpathSync,
+  statSync,
+} from "node:fs";
+import {
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { FirestoreRestClient } from "./firestore-rest-client";
+import {
+  verifyMigrationCredential,
+  type VerifiedMigrationCredential,
+} from "./migration-credential";
 import type { SnapshotKeySource } from "./snapshot-key-provider";
 
 export type SnapshotCommonArguments = {
@@ -9,6 +24,7 @@ export type SnapshotCommonArguments = {
   databaseUid: string;
   mainCommit: string;
   keyId: string;
+  expectedPrincipal?: string;
   emulatorHost?: string;
   keySource: SnapshotKeySource;
   repositoryRoot: string;
@@ -24,6 +40,7 @@ export function parseSnapshotCommonArguments(
     "--expected-database-uid",
     "--expected-main-commit",
     "--key-id",
+    "--expected-principal",
     "--test-key-stdin",
     ...additionalNames,
   ]);
@@ -40,6 +57,7 @@ export function parseSnapshotCommonArguments(
   const databaseUid = argumentValue(argv, "--expected-database-uid");
   const mainCommit = argumentValue(argv, "--expected-main-commit");
   const keyId = argumentValue(argv, "--key-id");
+  const expectedPrincipal = argumentValue(argv, "--expected-principal") || undefined;
   if (!projectId) throw new Error("--project=<explicit-project-id> は必須です");
   if (!databaseId) throw new Error("--database=<explicit-database-id> は必須です");
   if (!databaseUid) throw new Error("--expected-database-uid=<uid> は必須です");
@@ -60,6 +78,13 @@ export function parseSnapshotCommonArguments(
     throw new Error("Firestore Emulatorではdemo- prefixのproject IDだけを使用できます");
   }
   if (!emulatorHost) {
+    if (!expectedPrincipal) {
+      throw new Error("本番cutoverでは--expected-principal=<service-account-email>が必須です");
+    }
+    assertProductionCredentialHygiene({
+      repositoryRoot,
+      credentialPath: process.env.GOOGLE_APPLICATION_CREDENTIALS,
+    });
     const dirty = gitOutput(["status", "--porcelain"]);
     if (dirty) throw new Error("本番snapshot/restoreはclean worktreeでだけ実行できます");
     const originMain = gitOutput(["rev-parse", "origin/main"]);
@@ -78,18 +103,52 @@ export function parseSnapshotCommonArguments(
     databaseUid,
     mainCommit,
     keyId,
+    expectedPrincipal,
     emulatorHost,
     keySource: testKeyStdin ? "test-stdin" : "keychain",
     repositoryRoot,
   };
 }
 
-export function createSnapshotRestClient(args: SnapshotCommonArguments): FirestoreRestClient {
-  return new FirestoreRestClient({
-    projectId: args.projectId,
-    databaseId: args.databaseId,
-    emulatorHost: args.emulatorHost,
+export type SnapshotRestRuntime = {
+  client: FirestoreRestClient;
+  credential: VerifiedMigrationCredential | null;
+};
+
+export async function createSnapshotRestRuntime(
+  args: SnapshotCommonArguments,
+): Promise<SnapshotRestRuntime> {
+  if (args.emulatorHost) {
+    return {
+      client: new FirestoreRestClient({
+        projectId: args.projectId,
+        databaseId: args.databaseId,
+        emulatorHost: args.emulatorHost,
+      }),
+      credential: null,
+    };
+  }
+  if (!args.expectedPrincipal) {
+    throw new Error("本番cutoverのexpected principalがありません");
+  }
+  const credential = await verifyMigrationCredential({
+    expectedPrincipal: args.expectedPrincipal,
+    expectedProjectId: args.projectId,
   });
+  return {
+    client: new FirestoreRestClient({
+      projectId: args.projectId,
+      databaseId: args.databaseId,
+      accessTokenProvider: credential.accessTokenProvider,
+    }),
+    credential,
+  };
+}
+
+export async function createSnapshotRestClient(
+  args: SnapshotCommonArguments,
+): Promise<FirestoreRestClient> {
+  return (await createSnapshotRestRuntime(args)).client;
 }
 
 export function requiredAbsolutePath(argv: readonly string[], name: string): string {
@@ -104,10 +163,82 @@ export function argumentValue(argv: readonly string[], name: string): string {
   return argv.find((argument) => argument.startsWith(prefix))?.slice(prefix.length).trim() ?? "";
 }
 
+export function reportCutoverCliError(error: unknown): void {
+  console.error(sanitizeCutoverCliErrorMessage(error));
+}
+
+export function sanitizeCutoverCliErrorMessage(error: unknown): string {
+  const code = safeErrorCode(error);
+  return code
+    ? `cutover command failed (${code}); sensitive details were suppressed`
+    : "cutover command failed; sensitive details were suppressed";
+}
+
+function safeErrorCode(error: unknown): string | null {
+  if (!error || typeof error !== "object" || !("code" in error)) return null;
+  const code = (error as { code?: unknown }).code;
+  return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,39}$/.test(code)
+    ? code
+    : null;
+}
+
+export function assertProductionCredentialHygiene(options: {
+  repositoryRoot: string;
+  credentialPath?: string;
+  mobileDocumentsRoot?: string;
+  cloudStorageRoot?: string;
+}): void {
+  const repositoryRoot = realpathSync(options.repositoryRoot);
+  const repositoryCredentialNames = readdirSync(repositoryRoot)
+    .filter((name) => (
+      name === "firebase-service-account.json"
+      || /^.+-firebase-adminsdk-.+\.json$/.test(name)
+    ));
+  if (repositoryCredentialNames.length > 0) {
+    throw new Error("repository直下にservice-account credentialがあるため本番cutoverを停止しました");
+  }
+
+  const credentialPath = options.credentialPath?.trim();
+  if (!credentialPath) return;
+  if (!isAbsolute(credentialPath)) {
+    throw new Error("GOOGLE_APPLICATION_CREDENTIALSはrepository・同期folder外の絶対pathが必要です");
+  }
+  let normalizedCredentialPath: string;
+  try {
+    normalizedCredentialPath = realpathSync(credentialPath);
+  } catch {
+    throw new Error("GOOGLE_APPLICATION_CREDENTIALSを安全に検査できません");
+  }
+  const roots = [
+    repositoryRoot,
+    options.mobileDocumentsRoot
+      ?? (process.env.HOME ? join(process.env.HOME, "Library", "Mobile Documents") : ""),
+    options.cloudStorageRoot
+      ?? (process.env.HOME ? join(process.env.HOME, "Library", "CloudStorage") : ""),
+  ].filter((root) => root && existsSync(root)).map((root) => realpathSync(root));
+  if (roots.some((root) => isInside(normalizedCredentialPath, root))) {
+    throw new Error("GOOGLE_APPLICATION_CREDENTIALSをrepository・同期folder配下から使用できません");
+  }
+  const stats = statSync(normalizedCredentialPath);
+  if (
+    !stats.isFile()
+    || (stats.mode & 0o777) !== 0o600
+    || (typeof process.getuid === "function" && stats.uid !== process.getuid())
+    || stats.nlink !== 1
+  ) {
+    throw new Error("GOOGLE_APPLICATION_CREDENTIALSのowner・permission・hard link条件が不正です");
+  }
+}
+
 function gitOutput(args: string[]): string {
   return execFileSync("git", args, {
     cwd: process.cwd(),
     encoding: "utf8",
     stdio: ["ignore", "pipe", "pipe"],
   }).trim();
+}
+
+function isInside(path: string, root: string): boolean {
+  const value = relative(root, path);
+  return value === "" || (!value.startsWith("..") && !isAbsolute(value));
 }

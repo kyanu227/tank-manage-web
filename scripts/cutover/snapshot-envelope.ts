@@ -37,6 +37,7 @@ export const MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES = 16 * 1024 * 1024;
 export type SnapshotOutputPolicy = {
   repositoryRoot: string;
   mobileDocumentsRoot?: string;
+  cloudStorageRoot?: string;
 };
 
 export function encryptTransitionSnapshot(
@@ -221,11 +222,19 @@ export async function assertSafeSnapshotPath(
       ?? join(process.env.HOME ?? "", "Library", "Mobile Documents"),
     true,
   );
+  const cloudStorageRoot = await normalizeExistingPath(
+    policy.cloudStorageRoot
+      ?? join(process.env.HOME ?? "", "Library", "CloudStorage"),
+    true,
+  );
   if (isInside(normalizedPath, repositoryRoot)) {
     throw new Error("snapshotをrepository配下へ保存・読取できません");
   }
   if (mobileDocumentsRoot && isInside(normalizedPath, mobileDocumentsRoot)) {
     throw new Error("snapshotをiCloud Mobile Documents配下へ保存・読取できません");
+  }
+  if (cloudStorageRoot && isInside(normalizedPath, cloudStorageRoot)) {
+    throw new Error("snapshotを同期CloudStorage配下へ保存・読取できません");
   }
   if (mustExist) {
     await access(normalizedPath, fsConstants.R_OK);

@@ -106,7 +106,7 @@ describe("transition snapshot restore core", () => {
     const valid = {
       client,
       payload,
-      snapshotPayloadSha256: "f".repeat(64),
+      snapshotPayloadSha256: canonicalSha256(payload),
       expectedProjectId: PROJECT_ID,
       expectedDatabaseId: DATABASE_ID,
       expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
@@ -123,7 +123,7 @@ describe("transition snapshot restore core", () => {
     expect(() => assertRestoreIdentity(payload, valid)).not.toThrow();
   });
 
-  it("freeze/runbook実装前はservice境界で本番restore executeを拒否する", async () => {
+  it("最終解放前はservice境界で本番restore executeを拒否する", async () => {
     const productionClient = new FirestoreRestClient({
       projectId: "okmarine-tankrental",
       databaseId: DATABASE_ID,
@@ -132,12 +132,27 @@ describe("transition snapshot restore core", () => {
     await expect(executeTransitionSnapshotRestore({
       client: productionClient,
       payload: fixturePayload(),
-      snapshotPayloadSha256: "f".repeat(64),
+      snapshotPayloadSha256: canonicalSha256(fixturePayload()),
       expectedProjectId: "okmarine-tankrental",
       expectedDatabaseId: DATABASE_ID,
       expectedDatabaseUid: "production-database-uid",
       expectedMainCommit: "a".repeat(40),
     })).rejects.toThrow("本番restore execute");
+  });
+
+  it("service境界でpayloadのcanonical SHA不一致を読取前に拒否する", async () => {
+    const payload = fixturePayload();
+    const client = ambiguousCommitClient(payload, { commitTime: "unused" });
+    await expect(planTransitionSnapshotRestore({
+      client,
+      payload,
+      snapshotPayloadSha256: "0".repeat(64),
+      expectedProjectId: PROJECT_ID,
+      expectedDatabaseId: DATABASE_ID,
+      expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
+      expectedMainCommit: "a".repeat(40),
+    })).rejects.toThrow("payload SHA-256");
+    expect(client.beginReadOnlyTransaction).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -149,7 +164,7 @@ describe("transition snapshot restore core", () => {
     const result = await executeTransitionSnapshotRestore({
       client,
       payload,
-      snapshotPayloadSha256: "f".repeat(64),
+      snapshotPayloadSha256: canonicalSha256(payload),
       expectedProjectId: PROJECT_ID,
       expectedDatabaseId: DATABASE_ID,
       expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
@@ -165,7 +180,7 @@ describe("transition snapshot restore core", () => {
     const result = await executeTransitionSnapshotRestore({
       client,
       payload,
-      snapshotPayloadSha256: "f".repeat(64),
+      snapshotPayloadSha256: canonicalSha256(payload),
       expectedProjectId: PROJECT_ID,
       expectedDatabaseId: DATABASE_ID,
       expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
@@ -182,7 +197,7 @@ describe("transition snapshot restore core", () => {
     await expect(executeTransitionSnapshotRestore({
       client,
       payload,
-      snapshotPayloadSha256: "f".repeat(64),
+      snapshotPayloadSha256: canonicalSha256(payload),
       expectedProjectId: PROJECT_ID,
       expectedDatabaseId: DATABASE_ID,
       expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
@@ -208,7 +223,7 @@ describe("transition snapshot restore core", () => {
       await expect(planTransitionSnapshotRestore({
         client,
         payload,
-        snapshotPayloadSha256: "f".repeat(64),
+        snapshotPayloadSha256: canonicalSha256(payload),
         expectedProjectId: PROJECT_ID,
         expectedDatabaseId: DATABASE_ID,
         expectedDatabaseUid: `emulator:${PROJECT_ID}:${DATABASE_ID}`,
@@ -285,7 +300,7 @@ function ambiguousCommitClient(
   const tank = payload.documents.find((document) => document.kind === "tank")!;
   const markerFields = createTransitionResetContract(
     payload,
-    "f".repeat(64),
+    canonicalSha256(payload),
     resetAt,
   ).markerFields;
   tamperMarker?.(markerFields);

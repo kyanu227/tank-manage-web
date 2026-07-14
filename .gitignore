@@ -57,4 +57,7 @@ firestore-debug.log*
 !firebase.json
 !firebase.rules-test.json
 !firebase.cutover-core-test.json
+!firebase.cutover-baseline.json
+!firebase.cutover-freeze.json
+!firebase.cutover-normal-rules.json
 !.firebaserc

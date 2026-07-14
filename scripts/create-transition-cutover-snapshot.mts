@@ -1,6 +1,7 @@
 import {
   createSnapshotRestClient,
   parseSnapshotCommonArguments,
+  reportCutoverCliError,
   requiredAbsolutePath,
 } from "./cutover/snapshot-cli-common";
 import {
@@ -15,7 +16,7 @@ import {
 import { captureTransitionSnapshot } from "./cutover/transition-snapshot-service";
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  reportCutoverCliError(error);
   process.exitCode = 1;
 });
 
@@ -23,7 +24,7 @@ async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   const args = parseSnapshotCommonArguments(argv, ["--output"]);
   const outputPath = requiredAbsolutePath(argv, "--output");
-  const client = createSnapshotRestClient(args);
+  const client = await createSnapshotRestClient(args);
   const key = await loadSnapshotEncryptionKey({
     projectId: args.projectId,
     keyId: args.keyId,
@@ -49,6 +50,7 @@ async function main(): Promise<void> {
       keyId: payload.manifest.keyId,
       counts: payload.manifest.counts,
       inventory: payload.manifest.inventory,
+      documentPathSha256: payload.manifest.documentPathSha256,
       sourceCensusSha256: payload.manifest.sourceCensusSha256,
       snapshotDocumentsSha256: payload.manifest.snapshotDocumentsSha256,
       payloadSha256: envelope.payloadSha256,

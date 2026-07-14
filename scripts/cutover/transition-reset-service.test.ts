@@ -23,12 +23,12 @@ const DATABASE_ID = "(default)";
 const DATABASE_PREFIX = `projects/${PROJECT_ID}/databases/${DATABASE_ID}`;
 const DATABASE_UID = `emulator:${PROJECT_ID}:${DATABASE_ID}`;
 const MAIN_COMMIT = "a".repeat(40);
-const PAYLOAD_SHA = "f".repeat(64);
 const RESET_AT = "2026-07-13T03:00:00Z";
 
 describe("transition atomic reset service", () => {
   it("snapshot updateTime付きfull overwrite/deleteとexists:false markerを一つのwrite列へ構成する", async () => {
     const payload = fixturePayload();
+    const payloadSha256 = canonicalSha256(payload);
     const client = sourceClient(payload);
     const plan = await planTransitionSnapshotReset(resetOptions(client, payload));
 
@@ -72,7 +72,7 @@ describe("transition atomic reset service", () => {
       "totalWriteCount",
     ].sort());
     expect(markerWrite.update?.fields.status).toEqual({ stringValue: "completed" });
-    expect(markerWrite.update?.fields.snapshotPayloadSha256).toEqual({ stringValue: PAYLOAD_SHA });
+    expect(markerWrite.update?.fields.snapshotPayloadSha256).toEqual({ stringValue: payloadSha256 });
     expect(markerWrite.update?.fields.sourceCensusSha256).toEqual({
       stringValue: payload.manifest.sourceCensusSha256,
     });
@@ -81,7 +81,7 @@ describe("transition atomic reset service", () => {
       counts: { tanks: 2, tankLogs: 1, transactions: 1 },
       statusCounts: { filled: 1, lent: 1 },
       writes: 5,
-      snapshotPayloadSha256: PAYLOAD_SHA,
+      snapshotPayloadSha256: payloadSha256,
     });
     expect(client.runCollectionQuery).toHaveBeenCalledTimes(12);
     expect(client.listCollectionIds).toHaveBeenCalledTimes(10);
@@ -93,6 +93,16 @@ describe("transition atomic reset service", () => {
       undefined,
     ]);
     expect(statusCountsFromSnapshot(payload)).toEqual({ missing: 1, unknown: 1 });
+  });
+
+  it("service境界でpayloadのcanonical SHA不一致を読取前に拒否する", async () => {
+    const payload = fixturePayload();
+    const client = sourceClient(payload);
+    await expect(planTransitionSnapshotReset({
+      ...resetOptions(client, payload),
+      snapshotPayloadSha256: "0".repeat(64),
+    })).rejects.toThrow("payload SHA-256");
+    expect(client.beginReadOnlyTransaction).not.toHaveBeenCalled();
   });
 
   it("snapshot後のfield/updateTime/inventory差分またはmarker存在をfail closedにする", async () => {
@@ -115,7 +125,7 @@ describe("transition atomic reset service", () => {
       .rejects.toThrow("分類できない");
   });
 
-  it("freeze/runbook前はservice境界で本番reset executeを読取前に拒否する", async () => {
+  it("最終解放前はservice境界で本番reset executeを読取前に拒否する", async () => {
     const payload = fixturePayload();
     const client = new FirestoreRestClient({
       projectId: "production-reset",
@@ -189,7 +199,7 @@ function resetOptions(client: FirestoreRestClient, payload: TransitionSnapshotPa
   return {
     client,
     payload,
-    snapshotPayloadSha256: PAYLOAD_SHA,
+    snapshotPayloadSha256: canonicalSha256(payload),
     expectedProjectId: client.projectId,
     expectedDatabaseId: DATABASE_ID,
     expectedDatabaseUid: client.emulatorHost ? DATABASE_UID : "production-uid",
