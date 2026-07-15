@@ -1,17 +1,19 @@
 # Deploy / Firestore change rules
 
-最終更新: 2026-04-27
+最終更新: 2026-07-14
 
 この文書は、UI 系変更と Firestore 書き込み・認証・schema 変更を混在させないための開発ルールをまとめる。Codex / Claude Code / その他の AI エージェントは、実装前に本ルールを確認する。
 
 ## Deploy 方針
 
 - 通常 deploy は `firebase deploy --only hosting` のみを使う。
-- `firestore.rules` は現時点では deploy しない。
-- `firestore.rules` は下書き扱い。
-- `firebase.json` に `firestore.rules` を接続しない。
-- `firebase deploy --only firestore:rules` は禁止。
+- `firebase.json` は`firestore.rules`へ接続済み。現在の本番Rulesは2026-06-02 release
+  （commit `b7e853c8f38071937951b871cbe0e3281dd22876`）としてread-only確認済み。
+- 2026-06-02 release以後のRules差分は、自動的に本番反映済みだとみなさない。
+- Rules deployは専用レビュー・専用operationに分離し、明示projectとrules-only configを使う。
+- cutover freeze/normal Rulesは`docs/cutover/transition-plan-v1-runbook.md`に従う。
 - Hosting deploy 前は、Firestore Rules / Functions が deploy 対象に含まれていないことを確認する。
+- 無指定`firebase deploy`とHosting/Rules同時deployは禁止する。
 
 ## Commit 分離ルール
 

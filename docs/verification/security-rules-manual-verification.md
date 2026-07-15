@@ -2,6 +2,11 @@
 
 作成日: 2026-05-05
 
+> 履歴注記（2026-07-14）: 本書は2026-05-08 Rules deploy前の検証台本である。
+> 現在の本番Rulesは2026-06-02 releaseとしてread-only確認済みであり、
+> transition cutoverのfreeze/normal切替には
+> `docs/cutover/transition-plan-v1-runbook.md`と専用configを使用する。
+
 対象:
 
 - `customerUsers`

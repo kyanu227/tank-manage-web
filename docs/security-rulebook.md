@@ -13,20 +13,22 @@
 - `portal/order` は旧 `customerSession` 方式のまま、`deliveryType` / `deliveryTargetName` / `note` などの delivery metadata を `transactions` に保存する。
 - `customerUsers` の create/read/update は 2026-04-29 の本番確認で通過済み。
 
-## 未実装 / 未deploy
+## Rules deploy状態
 
-- `firestore.rules` は下書き扱いで未deploy。
-- `firebase.json` に `firestore.rules` を接続しない。
-- `firebase deploy --only firestore:rules` は実行しない。
-- `customerUsers` のセキュリティ制御は、現時点では本番 Rules として正式レビュー・deploy していない。
+- `firebase.json`は`firestore.rules`へ接続済み。
+- 現在の本番Rulesは2026-06-02 release（commit
+  `b7e853c8f38071937951b871cbe0e3281dd22876`）としてRules APIでread-only確認済み。
+- 2026-05-08のdeploy結果は履歴記録であり、現在のrollback正本ではない。
+- 2026-06-02 release以後の状態遷移Rules差分は未deployであり、別のRules-only operationが必要。
+- 通常Hosting deployへRulesを混ぜない。
 - `customerUsers.customerId` / `customerUsers.customerName` / `disabled` の管理者運用と Rules 制御は次フェーズでレビューする。
 
 ## Firestore Rules 方針
 
 - 通常 deploy は `firebase deploy --only hosting` のみ。
-- Rules 本番化は、スタッフのパスコードログイン、portal Auth、customerUsers、管理者権限の設計をまとめてレビューしてから行う。
-- 現行のまま厳格な Rules を有効化すると、Firebase Auth を通らないスタッフ/顧客フローが permission-denied になる可能性がある。
-- Rules 案を docs や下書きとして管理する場合も、deploy 済みと書かない。
+- Rules変更はstaff、portal、customerUsers、管理者権限のEmulator testと専用deploy手順をセットでレビューする。
+- code上のRulesと本番releaseを同一視せず、deploy日時・commit・smoke結果を記録する。
+- transition cutoverではdedicated freeze Rulesを一時利用するが、server/Admin/REST writerはIAMで別停止する。
 
 ## 2026-04-29 本番確認メモ
 
@@ -42,8 +44,8 @@
 
 ## 次に必要な作業
 
-1. `firestore.rules` の正式レビューと本番 deploy 手順を確定する。
+1. 2026-06-02本番release以後の`firestore.rules`差分を正式レビューし、Rules-only deploy手順を確定する。
 2. `customerUsers.customerId` / `customerUsers.customerName` / `disabled` の管理者更新権限を Rules と service 境界で設計する。
 3. 管理画面で `staff` と `staffByEmail` の同期を安定させる。
 4. スタッフのパスコードログインを残す範囲を決める。
-5. Rules 本番化前に `firebase.json` の接続方針と deploy 手順をレビューする。
+5. transition cutoverは`docs/cutover/transition-plan-v1-runbook.md`に従い、freeze/normal RulesとHostingを分離する。

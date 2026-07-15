@@ -10,6 +10,12 @@
 
 この document は、Security Rules deploy を安全に実行するための operation 手順である。この PR では deploy は実行しない。
 
+> 2026-07-14追記: 本書は2026-05-08 Rules deployの履歴・通常Rules operationである。
+> transitionPlan v1 cutoverのfreeze/normal Rules切替には再利用せず、
+> [`transition-plan-v1-runbook.md`](../cutover/transition-plan-v1-runbook.md)と専用configを使用する。
+> 現在の本番rollback正本は、Rules APIで確認した2026-06-02 release
+> （commit `b7e853c8f38071937951b871cbe0e3281dd22876`）である。
+
 ---
 
 ## 1. Purpose

@@ -1,4 +1,3 @@
-import { applicationDefault } from "firebase-admin/app";
 import { canonicalStringify, compareCanonicalStrings } from "./canonical-firestore-value";
 import type {
   FirestoreBatchGetResult,
@@ -37,9 +36,10 @@ export class FirestoreRestClient {
     this.apiRoot = this.emulatorHost
       ? `http://${this.emulatorHost}/v1`
       : "https://firestore.googleapis.com/v1";
-    this.accessTokenProvider = this.emulatorHost
-      ? undefined
-      : (options.accessTokenProvider ?? createApplicationDefaultTokenProvider());
+    if (!this.emulatorHost && !options.accessTokenProvider) {
+      throw new Error("本番cutover REST clientには検証済みaccess token providerが必須です");
+    }
+    this.accessTokenProvider = this.emulatorHost ? undefined : options.accessTokenProvider;
   }
 
   get documentsRoot(): string {
@@ -162,7 +162,7 @@ export class FirestoreRestClient {
   async commit(writes: FirestoreWrite[]): Promise<FirestoreCommitResponse> {
     if (!this.emulatorHost) {
       throw new Error(
-        "cutover用Firestore REST clientの本番commitはfreeze/runbook完了まで無効です",
+        "cutover用Firestore REST clientの本番commitは最終production execute解放PRまで無効です",
       );
     }
     if (writes.length === 0) throw new Error("commit writeが空です");
@@ -195,7 +195,7 @@ export class FirestoreRestClient {
     try {
       return JSON.parse(text) as T;
     } catch {
-      throw new Error(`Firestore REST responseがJSONではありません: ${text.slice(0, 500)}`);
+      throw new Error("Firestore REST responseがJSONではありません");
     }
   }
 }
@@ -207,21 +207,6 @@ export function emulatorDatabaseUid(projectId: string, databaseId: string): stri
 /** Firestore doubleValue=-0をJSON.stringifyで0へ変換せず、送信とsize計測を同一化する。 */
 export function serializeFirestoreRestBody(body: unknown): string {
   return canonicalStringify(body);
-}
-
-function createApplicationDefaultTokenProvider(): AccessTokenProvider {
-  const credential = applicationDefault();
-  let cached: { token: string; expiresAt: number } | null = null;
-  return async () => {
-    if (cached && cached.expiresAt - Date.now() > 60_000) return cached.token;
-    const accessToken = await credential.getAccessToken();
-    if (!accessToken.access_token) throw new Error("Application Default Credentialsからtokenを取得できません");
-    cached = {
-      token: accessToken.access_token,
-      expiresAt: Date.now() + Math.max(60, accessToken.expires_in ?? 300) * 1_000,
-    };
-    return cached.token;
-  };
 }
 
 function normalizeEmulatorHost(value: string | undefined): string | undefined {

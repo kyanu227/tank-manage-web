@@ -120,6 +120,13 @@ describe("encrypted transition snapshot envelope", () => {
         { repositoryRoot: process.cwd(), mobileDocumentsRoot },
       )).rejects.toThrow("iCloud Mobile Documents配下");
 
+      const cloudStorageRoot = join(directory, "CloudStorage");
+      await mkdir(cloudStorageRoot);
+      await expect(assertSafeSnapshotPath(
+        join(cloudStorageRoot, "snapshot.cutover.enc"),
+        { repositoryRoot: process.cwd(), cloudStorageRoot },
+      )).rejects.toThrow("同期CloudStorage配下");
+
       const oversized = join(directory, "oversized.cutover.enc");
       await writeFile(oversized, Buffer.alloc(MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES + 1), {
         mode: 0o600,

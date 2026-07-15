@@ -68,6 +68,41 @@ try {
     "snapshot canonicalizes omitted ProtoJSON GeoPoint zero axes",
   );
 
+  const preflight = await runCutoverPreflight();
+  assert(preflight.output.mode === "read-only-preflight", "read-only preflight mode");
+  assert(preflight.output.writes === 192, "read-only preflight write count");
+  assertSafeCutoverStdout(preflight.stdout, firstPayload, [
+    "mode", "credential", "counts", "inventory", "statusCounts", "writes", "requestBytes", "hashes",
+  ]);
+  const preflightCredential = objectValue(preflight.output.credential, "preflight credential");
+  assertExactKeys(
+    preflightCredential,
+    [
+      "kind",
+      "expectedDataPrincipalConfirmed",
+      "requiredPermissionsConfirmed",
+      "requiredPermissionCount",
+    ],
+    "preflight credential",
+  );
+  assert(
+    preflightCredential.kind === "emulator"
+      && preflightCredential.expectedDataPrincipalConfirmed === false,
+    "emulator credential is not production verified",
+  );
+  assert(
+    preflightCredential.requiredPermissionsConfirmed === false
+      && preflightCredential.requiredPermissionCount === 0,
+    "emulator skips production IAM confirmation",
+  );
+  const resetNotObserved = await runCutoverVerify(firstSnapshotPath, "reset", false);
+  assert(resetNotObserved.output.targetStateConfirmed === false, "source is not reset target");
+  assert(resetNotObserved.output.safeToRetry === false, "verify never permits retry");
+  assertSafeCutoverStdout(resetNotObserved.stdout, firstPayload, [
+    "mode", "operation", "observedState", "targetStateConfirmed", "safeToRetry", "observations",
+    "stableStateSha256",
+  ]);
+
   await verifyResetPreflightFailClosed(firstSnapshotPath);
   const beforeResetDryRunSha = sourceCensusSha256(await readTransitionSourceCensus(client));
   const resetDryRun = await runSnapshotResetViaNpmSilent(firstSnapshotPath);
@@ -91,6 +126,9 @@ try {
   );
   assertSafeResetStdout(resetExecuted.stdout, firstPayload);
   await assertResetStillPresent();
+  const resetVerified = await runCutoverVerify(firstSnapshotPath, "reset", true);
+  assert(resetVerified.output.targetStateConfirmed === true, "reset target verified");
+  assert(resetVerified.output.observedState === "reset_applied", "exact reset observed");
   const firstResetAt = await resetTimestampFromMarker();
 
   await changeMarkerSnapshotId("wrong-snapshot-id");
@@ -117,6 +155,12 @@ try {
   assert(typeof executed.commitTime === "string", "restore commit time");
   assert(executed.commitResponse === "confirmed", "restore commit response");
   await assertRestored(firstPayload);
+  const restoreVerified = await runCutoverVerify(firstSnapshotPath, "restore", true);
+  assert(restoreVerified.output.targetStateConfirmed === true, "restore target verified");
+  assert(
+    restoreVerified.output.observedState === "source_or_restored_observed",
+    "exact restored source observed",
+  );
 
   // snapshot後の各precondition競合で192-write全体が一件も適用されないことを確認する。
   await assertAtomicResetRaceRejected("stale-tank", async () => {
@@ -237,7 +281,7 @@ async function verifySubcollectionFailClosed(): Promise<void> {
     [...commonArguments(), `--output=${blockedOutput}`],
     false,
   );
-  assert(failed.stderr.includes("subcollection"), "subcollection preflight failure");
+  assertSanitizedFailure(failed, "subcollection preflight failure");
   await client.commit([{ delete: client.fullDocumentName("tanks/T-001/notes/N-001") }]);
 
   await client.commit([createWrite(`${TRANSITION_MIGRATION_MARKER_PATH}/notes/N-001`, {
@@ -249,7 +293,7 @@ async function verifySubcollectionFailClosed(): Promise<void> {
     [...commonArguments(), `--output=${markerBlockedOutput}`],
     false,
   );
-  assert(markerFailed.stderr.includes("subcollection"), "marker subcollection preflight failure");
+  assertSanitizedFailure(markerFailed, "marker subcollection preflight failure");
   await client.commit([{
     delete: client.fullDocumentName(`${TRANSITION_MIGRATION_MARKER_PATH}/notes/N-001`),
   }]);
@@ -373,29 +417,72 @@ async function runSnapshotResetViaNpmSilent(
   return { output: parseJsonOutput(result.stdout), stdout: result.stdout };
 }
 
+async function runCutoverPreflight(): Promise<{
+  output: Record<string, unknown>;
+  stdout: string;
+}> {
+  const result = await runChild(
+    "npm",
+    ["run", "--silent", "cutover:preflight", "--", ...commonArguments()],
+    true,
+  );
+  return { output: parseJsonOutput(result.stdout), stdout: result.stdout };
+}
+
+async function runCutoverVerify(
+  snapshotPath: string,
+  operation: "reset" | "restore",
+  expectSuccess: boolean,
+): Promise<{ output: Record<string, unknown>; stdout: string }> {
+  const result = await runChild(
+    "npm",
+    [
+      "run",
+      "--silent",
+      "cutover:verify",
+      "--",
+      ...commonArguments(),
+      `--snapshot=${snapshotPath}`,
+      `--operation=${operation}`,
+    ],
+    expectSuccess,
+  );
+  return { output: parseJsonOutput(result.stdout), stdout: result.stdout };
+}
+
 async function runSnapshotResetExpectFailure(
   snapshotPath: string,
-  expectedMessage: string,
+  failureLabel: string,
 ): Promise<void> {
   const result = await runCli(
     "scripts/reset-transition-cutover-snapshot.mts",
     [...commonArguments(), `--snapshot=${snapshotPath}`],
     false,
   );
-  assert(result.stdout === "", "failed reset must not write stdout");
-  assert(result.stderr.includes(expectedMessage), `reset failure: ${expectedMessage}`);
+  assertSanitizedFailure(result, `reset failure: ${failureLabel}`);
 }
 
 async function runSnapshotRestoreExpectFailure(
   snapshotPath: string,
-  expectedMessage: string,
+  failureLabel: string,
 ): Promise<void> {
   const result = await runCli(
     "scripts/restore-transition-cutover-snapshot.mts",
     [...commonArguments(), `--snapshot=${snapshotPath}`],
     false,
   );
-  assert(result.stderr.includes(expectedMessage), `restore failure: ${expectedMessage}`);
+  assertSanitizedFailure(result, `restore failure: ${failureLabel}`);
+}
+
+function assertSanitizedFailure(
+  result: { stdout: string; stderr: string },
+  label: string,
+): void {
+  assert(result.stdout === "", `${label}: failed command must not write stdout`);
+  assert(
+    result.stderr.trim() === "cutover command failed; sensitive details were suppressed",
+    `${label}: stderr must contain only the fixed safe message`,
+  );
 }
 
 function commonArguments(): string[] {
@@ -431,29 +518,11 @@ async function assertSourceStillPresent(expectedSourceCensusSha256: string): Pro
 }
 
 function assertSafeResetStdout(stdout: string, payload: TransitionSnapshotPayloadV1): void {
-  const forbidden = [
-    "T-001",
-    "L-001",
-    "TX-001",
-    "テスト顧客",
-    "倉庫",
-    "typed-snapshot",
-    "steel",
-    payload.manifest.snapshotId,
-    payload.manifest.keyId,
-    tempDirectory,
-  ];
-  forbidden.forEach((value) => {
-    assert(!stdout.includes(value), `reset stdout must not include ${value}`);
-  });
-  const output = parseJsonOutput(stdout);
-  const allowedTopLevelKeys = new Set([
+  assertSafeCutoverStdout(stdout, payload, [
     "mode", "counts", "statusCounts", "writes", "requestBytes", "hashes",
     "commitTime", "commitResponse",
   ]);
-  Object.keys(output).forEach((keyName) => {
-    assert(allowedTopLevelKeys.has(keyName), `reset stdout top-level key: ${keyName}`);
-  });
+  const output = parseJsonOutput(stdout);
   const counts = objectValue(output.counts, "reset stdout counts");
   assertExactKeys(counts, ["tanks", "tankLogs", "transactions"], "reset stdout counts");
   Object.values(counts).forEach((value) => {
@@ -471,6 +540,33 @@ function assertSafeResetStdout(stdout: string, payload: TransitionSnapshotPayloa
   );
   Object.values(hashes).forEach((value) => {
     assert(typeof value === "string" && /^[0-9a-f]{64}$/.test(value), "reset stdout hash value");
+  });
+}
+
+function assertSafeCutoverStdout(
+  stdout: string,
+  payload: TransitionSnapshotPayloadV1,
+  allowedKeys: string[],
+): void {
+  const forbidden = [
+    "T-001",
+    "L-001",
+    "TX-001",
+    "テスト顧客",
+    "倉庫",
+    "typed-snapshot",
+    "steel",
+    payload.manifest.snapshotId,
+    payload.manifest.keyId,
+    tempDirectory,
+  ];
+  forbidden.forEach((value) => {
+    assert(!stdout.includes(value), `cutover stdout must not include ${value}`);
+  });
+  const output = parseJsonOutput(stdout);
+  const allowedTopLevelKeys = new Set(allowedKeys);
+  Object.keys(output).forEach((keyName) => {
+    assert(allowedTopLevelKeys.has(keyName), `cutover stdout top-level key: ${keyName}`);
   });
 }
 

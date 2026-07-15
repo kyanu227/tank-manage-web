@@ -1,10 +1,14 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   FirestoreRestClient,
   serializeFirestoreRestBody,
 } from "./firestore-rest-client";
 
 describe("Firestore REST client safety", () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it("request serializerはFirestore doubleValue=-0を保持する", () => {
     const body = serializeFirestoreRestBody({
       writes: [{
@@ -53,5 +57,28 @@ describe("Firestore REST client safety", () => {
     await expect(client.commit([{
       delete: "projects/okmarine-tankrental/databases/(default)/documents/tanks/T-001",
     }])).rejects.toThrow("本番commit");
+  });
+
+  it("本番readでも暗黙ADCへfallbackせず明示providerを必須にする", () => {
+    expect(() => new FirestoreRestClient({
+      projectId: "okmarine-tankrental",
+      databaseId: "(default)",
+    })).toThrow("検証済みaccess token provider");
+  });
+
+  it("不正な本番response本文をerrorへ再掲しない", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(
+      "sensitive-customer-document",
+      { status: 200 },
+    ));
+    const client = new FirestoreRestClient({
+      projectId: "okmarine-tankrental",
+      databaseId: "(default)",
+      accessTokenProvider: async () => "unused-test-token",
+    });
+    await expect(client.verifyDatabaseUid("expected-uid"))
+      .rejects.toThrow("Firestore REST responseがJSONではありません");
+    await expect(client.verifyDatabaseUid("expected-uid"))
+      .rejects.not.toThrow("sensitive-customer-document");
   });
 });

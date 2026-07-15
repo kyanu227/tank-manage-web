@@ -198,6 +198,9 @@ PR merge（Hosting未反映）
 
 ## 初回Data Reset
 
+実運用手順、Rules迂回writer停止、credential、freeze/normal Rules、ambiguous outcome、rollbackは
+[`transitionPlan v1 cutover runbook`](../cutover/transition-plan-v1-runbook.md)を正本とする。
+
 暗号化snapshotを唯一の正本として、`scripts/reset-transition-cutover-snapshot.mts`が
 summary-only dry-runを行う。tank documentと分類済みの基本情報を保持し、全tankの操作projectionを
 `empty / 倉庫 / customerなし / latestLogIdなし / staffなし / logNoteなし`へ初期化する。

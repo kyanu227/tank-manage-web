@@ -2,6 +2,7 @@ import {
   argumentValue,
   createSnapshotRestClient,
   parseSnapshotCommonArguments,
+  reportCutoverCliError,
   requiredAbsolutePath,
 } from "./cutover/snapshot-cli-common";
 import {
@@ -20,7 +21,7 @@ import {
 const EXECUTE_CONFIRMATION = "RESET_TRANSITION_PLAN_V1";
 
 main().catch((error) => {
-  console.error(error instanceof Error ? error.message : String(error));
+  reportCutoverCliError(error);
   process.exitCode = 1;
 });
 
@@ -34,7 +35,7 @@ async function main(): Promise<void> {
   }
   if (execute && !args.emulatorHost) {
     throw new Error(
-      "本番reset executeはfreeze Rules・rules bypass writer停止・runbookの実装PRが完了するまで無効です",
+      "本番reset executeは最終production execute解放PRまで無効です",
     );
   }
 
@@ -49,7 +50,7 @@ async function main(): Promise<void> {
   });
   try {
     const payload = decryptTransitionSnapshot(envelope, key, args.keyId);
-    const client = createSnapshotRestClient(args);
+    const client = await createSnapshotRestClient(args);
     const resetOptions = {
       client,
       payload,

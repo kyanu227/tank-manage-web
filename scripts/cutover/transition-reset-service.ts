@@ -1,5 +1,6 @@
 import { TANK_OPERATION_PROJECTION_FIELDS } from "../reset-transition-plan-v1-core";
 import {
+  canonicalSha256,
   canonicalStringify,
   compareCanonicalStrings,
   relativeDocumentPath,
@@ -83,8 +84,8 @@ const KNOWN_TANK_BASIC_INFORMATION_FIELDS = new Set([
 export async function planTransitionSnapshotReset(
   options: TransitionSnapshotResetOptions,
 ): Promise<TransitionResetPlan> {
-  assertPayloadSha256(options.snapshotPayloadSha256);
   const payload = validateTransitionSnapshotPayload(options.payload);
+  assertPayloadSha256(options.snapshotPayloadSha256, payload);
   assertKnownTankResetFields(payload);
   assertRestoreIdentity(payload, options);
   await options.client.verifyDatabaseUid(options.expectedDatabaseUid);
@@ -148,7 +149,7 @@ export async function executeTransitionSnapshotReset(
 }> {
   if (!options.client.emulatorHost) {
     throw new Error(
-      "本番reset executeはfreeze Rules・rules bypass writer停止・runbookの実装PRが完了するまで無効です",
+      "本番reset executeは最終production execute解放PRまで無効です",
     );
   }
   const plan = await planTransitionSnapshotReset(options);
@@ -195,8 +196,8 @@ function buildTransitionResetWrites(
   resetAt: string,
   client: FirestoreRestClient,
 ): FirestoreWrite[] {
-  assertPayloadSha256(snapshotPayloadSha256);
   const payload = validateTransitionSnapshotPayload(payloadInput);
+  assertPayloadSha256(snapshotPayloadSha256, payload);
   assertKnownTankResetFields(payload);
   const writes = payload.documents.map((document): FirestoreWrite => {
     if (document.kind === "tank") {
@@ -386,8 +387,8 @@ function resetInspectionPaths(
   ].sort(compareCanonicalStrings);
 }
 
-function assertPayloadSha256(value: string): void {
-  if (!/^[0-9a-f]{64}$/.test(value)) {
+function assertPayloadSha256(value: string, payload: TransitionSnapshotPayloadV1): void {
+  if (!/^[0-9a-f]{64}$/.test(value) || canonicalSha256(payload) !== value) {
     throw new Error("snapshot payload SHA-256が不正です");
   }
 }
