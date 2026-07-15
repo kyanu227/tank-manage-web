@@ -13,8 +13,8 @@ import {
 } from "node:path";
 import { FirestoreRestClient } from "./firestore-rest-client";
 import {
-  verifyMigrationCredential,
-  type VerifiedMigrationCredential,
+  verifyDataMigrationCredential,
+  type VerifiedDataMigrationCredential,
 } from "./migration-credential";
 import type { SnapshotKeySource } from "./snapshot-key-provider";
 
@@ -24,7 +24,7 @@ export type SnapshotCommonArguments = {
   databaseUid: string;
   mainCommit: string;
   keyId: string;
-  expectedPrincipal?: string;
+  expectedDataPrincipal?: string;
   emulatorHost?: string;
   keySource: SnapshotKeySource;
   repositoryRoot: string;
@@ -40,14 +40,14 @@ export function parseSnapshotCommonArguments(
     "--expected-database-uid",
     "--expected-main-commit",
     "--key-id",
-    "--expected-principal",
+    "--expected-data-principal",
     "--test-key-stdin",
     ...additionalNames,
   ]);
   const seenNames = new Set<string>();
   argv.forEach((argument) => {
     const name = argument.split("=", 1)[0];
-    if (!knownNames.has(name)) throw new Error(`未知の引数です: ${argument}`);
+    if (!knownNames.has(name)) throw new Error(`未知の引数です: ${name}`);
     if (seenNames.has(name)) throw new Error(`引数を重複指定できません: ${name}`);
     seenNames.add(name);
   });
@@ -57,7 +57,7 @@ export function parseSnapshotCommonArguments(
   const databaseUid = argumentValue(argv, "--expected-database-uid");
   const mainCommit = argumentValue(argv, "--expected-main-commit");
   const keyId = argumentValue(argv, "--key-id");
-  const expectedPrincipal = argumentValue(argv, "--expected-principal") || undefined;
+  const expectedDataPrincipal = argumentValue(argv, "--expected-data-principal") || undefined;
   if (!projectId) throw new Error("--project=<explicit-project-id> は必須です");
   if (!databaseId) throw new Error("--database=<explicit-database-id> は必須です");
   if (!databaseUid) throw new Error("--expected-database-uid=<uid> は必須です");
@@ -78,8 +78,10 @@ export function parseSnapshotCommonArguments(
     throw new Error("Firestore Emulatorではdemo- prefixのproject IDだけを使用できます");
   }
   if (!emulatorHost) {
-    if (!expectedPrincipal) {
-      throw new Error("本番cutoverでは--expected-principal=<service-account-email>が必須です");
+    if (!expectedDataPrincipal) {
+      throw new Error(
+        "本番cutoverでは--expected-data-principal=<data-migration-service-account>が必須です",
+      );
     }
     assertProductionCredentialHygiene({
       repositoryRoot,
@@ -103,7 +105,7 @@ export function parseSnapshotCommonArguments(
     databaseUid,
     mainCommit,
     keyId,
-    expectedPrincipal,
+    expectedDataPrincipal,
     emulatorHost,
     keySource: testKeyStdin ? "test-stdin" : "keychain",
     repositoryRoot,
@@ -112,11 +114,16 @@ export function parseSnapshotCommonArguments(
 
 export type SnapshotRestRuntime = {
   client: FirestoreRestClient;
-  credential: VerifiedMigrationCredential | null;
+  credential: VerifiedDataMigrationCredential | null;
+};
+
+export type SnapshotRestRuntimeDependencies = {
+  verifyDataCredential?: typeof verifyDataMigrationCredential;
 };
 
 export async function createSnapshotRestRuntime(
   args: SnapshotCommonArguments,
+  dependencies: SnapshotRestRuntimeDependencies = {},
 ): Promise<SnapshotRestRuntime> {
   if (args.emulatorHost) {
     return {
@@ -128,21 +135,34 @@ export async function createSnapshotRestRuntime(
       credential: null,
     };
   }
-  if (!args.expectedPrincipal) {
-    throw new Error("本番cutoverのexpected principalがありません");
+  if (!args.expectedDataPrincipal) {
+    throw new Error("本番cutoverのexpected data principalがありません");
   }
-  const credential = await verifyMigrationCredential({
-    expectedPrincipal: args.expectedPrincipal,
+  const credential = await (
+    dependencies.verifyDataCredential ?? verifyDataMigrationCredential
+  )({
+    expectedDataPrincipal: args.expectedDataPrincipal,
     expectedProjectId: args.projectId,
   });
   return {
-    client: new FirestoreRestClient({
-      projectId: args.projectId,
-      databaseId: args.databaseId,
-      accessTokenProvider: credential.accessTokenProvider,
-    }),
+    client: createDataMigrationFirestoreRestClient(args, credential),
     credential,
   };
+}
+
+/** Firestore document clientへRules reader credentialが混入するのをruntimeでも拒否する。 */
+export function createDataMigrationFirestoreRestClient(
+  args: Pick<SnapshotCommonArguments, "projectId" | "databaseId">,
+  credential: Pick<VerifiedDataMigrationCredential, "kind" | "accessTokenProvider">,
+): FirestoreRestClient {
+  if (credential.kind !== "data_migration") {
+    throw new Error("Firestore data処理にはdata migration credentialが必要です");
+  }
+  return new FirestoreRestClient({
+    projectId: args.projectId,
+    databaseId: args.databaseId,
+    accessTokenProvider: credential.accessTokenProvider,
+  });
 }
 
 export async function createSnapshotRestClient(

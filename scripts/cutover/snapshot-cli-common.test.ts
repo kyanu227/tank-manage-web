@@ -1,9 +1,13 @@
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { DATA_MIGRATION_REQUIRED_IAM_PERMISSIONS } from "./migration-credential";
 import {
   assertProductionCredentialHygiene,
+  createDataMigrationFirestoreRestClient,
+  createSnapshotRestRuntime,
+  parseSnapshotCommonArguments,
   sanitizeCutoverCliErrorMessage,
 } from "./snapshot-cli-common";
 
@@ -16,6 +20,53 @@ afterEach(async () => {
 });
 
 describe("cutover CLI production safety", () => {
+  it("旧--expected-principalをnetwork・Git検査より前に拒否する", () => {
+    expect(() => parseSnapshotCommonArguments([
+      "--expected-principal=legacy@example-project.iam.gserviceaccount.com",
+    ], [])).toThrow("未知の引数");
+  });
+
+  it("production data runtimeは7権限のdata credentialだけを受け取る", async () => {
+    const accessTokenProvider = vi.fn(async () => "data-only-token");
+    const verifyDataCredential = vi.fn(async () => ({
+      kind: "data_migration" as const,
+      principal: "data@example-project.iam.gserviceaccount.com",
+      projectId: "example-project",
+      permissions: DATA_MIGRATION_REQUIRED_IAM_PERMISSIONS,
+      accessTokenProvider,
+    }));
+    const runtime = await createSnapshotRestRuntime({
+      projectId: "example-project",
+      databaseId: "(default)",
+      databaseUid: "database-uid",
+      mainCommit: "a".repeat(40),
+      keyId: "key-id",
+      expectedDataPrincipal: "data@example-project.iam.gserviceaccount.com",
+      keySource: "keychain",
+      repositoryRoot: "/unused",
+    }, { verifyDataCredential });
+
+    expect(verifyDataCredential).toHaveBeenCalledWith({
+      expectedDataPrincipal: "data@example-project.iam.gserviceaccount.com",
+      expectedProjectId: "example-project",
+    });
+    expect(runtime.credential?.kind).toBe("data_migration");
+    expect(runtime.credential?.permissions).toHaveLength(7);
+    expect(accessTokenProvider).not.toHaveBeenCalled();
+  });
+
+  it("Rules reader token providerをFirestore REST clientへ渡さない", () => {
+    const rulesTokenProvider = vi.fn(async () => "rules-only-token");
+    expect(() => createDataMigrationFirestoreRestClient({
+      projectId: "example-project",
+      databaseId: "(default)",
+    }, {
+      kind: "rules_reader",
+      accessTokenProvider: rulesTokenProvider,
+    } as never)).toThrow("data migration credential");
+    expect(rulesTokenProvider).not.toHaveBeenCalled();
+  });
+
   it("空白を含むdocument ID、CLI path、absolute pathを固定安全文へ置換する", () => {
     const sensitive = [
       "projects/example/databases/(default)/documents/tanks/TANK SECRET",

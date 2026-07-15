@@ -8,11 +8,8 @@ const CLOUD_PLATFORM_SCOPE = "https://www.googleapis.com/auth/cloud-platform";
 const CLOUD_RESOURCE_MANAGER_ROOT = "https://cloudresourcemanager.googleapis.com/v3";
 const IAM_REQUEST_TIMEOUT_MS = 30_000;
 
-/**
- * cutoverが実際に使うFirestore REST操作とfreeze前Rules照合に限定した権限集合。
- * testIamPermissionsは権限の有無を読み取るだけで、IAM policyを変更しない。
- */
-export const MIGRATION_REQUIRED_IAM_PERMISSIONS = [
+/** data migration credentialがFirestore document処理に使う権限だけを列挙する。 */
+export const DATA_MIGRATION_REQUIRED_IAM_PERMISSIONS = [
   "datastore.databases.get",
   "datastore.databases.getMetadata",
   "datastore.entities.get",
@@ -20,12 +17,19 @@ export const MIGRATION_REQUIRED_IAM_PERMISSIONS = [
   "datastore.entities.create",
   "datastore.entities.update",
   "datastore.entities.delete",
+] as const;
+
+/** Rules reader credentialがfreeze前のlive Rules照合に使う権限だけを列挙する。 */
+export const RULES_READER_REQUIRED_IAM_PERMISSIONS = [
   "firebaserules.releases.get",
   "firebaserules.rulesets.get",
 ] as const;
 
-export type MigrationIamPermission = typeof MIGRATION_REQUIRED_IAM_PERMISSIONS[number];
-export type MigrationAccessTokenProvider = () => Promise<string>;
+export type DataMigrationIamPermission =
+  typeof DATA_MIGRATION_REQUIRED_IAM_PERMISSIONS[number];
+export type RulesReaderIamPermission =
+  typeof RULES_READER_REQUIRED_IAM_PERMISSIONS[number];
+export type CutoverAccessTokenProvider = () => Promise<string>;
 
 type MigrationAuthClient = Pick<AuthClient, "getAccessToken"> & {
   email?: unknown;
@@ -39,76 +43,158 @@ type MigrationGoogleAuth = {
   getCredentials(): Promise<CredentialBody>;
 };
 
-export type MigrationCredentialDependencies = {
+export type ServiceAccountCredentialDependencies = {
   auth?: MigrationGoogleAuth;
   fetch?: typeof fetch;
 };
 
-export type VerifiedMigrationCredential = {
+type VerifiedServiceAccountCredential<
+  Kind extends "data_migration" | "rules_reader",
+  Permission extends string,
+> = {
+  kind: Kind;
   principal: string;
   projectId: string;
-  permissions: readonly MigrationIamPermission[];
-  accessTokenProvider: MigrationAccessTokenProvider;
+  permissions: readonly Permission[];
+  accessTokenProvider: CutoverAccessTokenProvider;
 };
 
-export async function verifyMigrationCredential(
+export type VerifiedDataMigrationCredential = VerifiedServiceAccountCredential<
+  "data_migration",
+  DataMigrationIamPermission
+>;
+
+export type VerifiedRulesReaderCredential = VerifiedServiceAccountCredential<
+  "rules_reader",
+  RulesReaderIamPermission
+>;
+
+export async function verifyDataMigrationCredential(
+  input: {
+    expectedDataPrincipal: string;
+    expectedProjectId: string;
+  },
+  dependencies: ServiceAccountCredentialDependencies = {},
+): Promise<VerifiedDataMigrationCredential> {
+  return verifyServiceAccountCredential({
+    expectedPrincipal: input.expectedDataPrincipal,
+    expectedProjectId: input.expectedProjectId,
+    requiredPermissions: DATA_MIGRATION_REQUIRED_IAM_PERMISSIONS,
+    credentialKind: "data_migration",
+    credentialLabel: "data migration credential",
+  }, dependencies);
+}
+
+export async function verifyRulesReaderCredential(
+  input: {
+    expectedRulesPrincipal: string;
+    expectedProjectId: string;
+  },
+  dependencies: ServiceAccountCredentialDependencies = {},
+): Promise<VerifiedRulesReaderCredential> {
+  return verifyServiceAccountCredential({
+    expectedPrincipal: input.expectedRulesPrincipal,
+    expectedProjectId: input.expectedProjectId,
+    requiredPermissions: RULES_READER_REQUIRED_IAM_PERMISSIONS,
+    credentialKind: "rules_reader",
+    credentialLabel: "Rules reader credential",
+  }, dependencies);
+}
+
+export function assertDistinctCutoverPrincipals(input: {
+  expectedDataPrincipal: string;
+  expectedRulesPrincipal: string;
+}): {
+  expectedDataPrincipal: string;
+  expectedRulesPrincipal: string;
+} {
+  const expectedDataPrincipal = requireServiceAccountPrincipal(input.expectedDataPrincipal);
+  const expectedRulesPrincipal = requireServiceAccountPrincipal(input.expectedRulesPrincipal);
+  if (expectedDataPrincipal === expectedRulesPrincipal) {
+    throw new Error("data migration principalとRules reader principalは分離してください");
+  }
+  return { expectedDataPrincipal, expectedRulesPrincipal };
+}
+
+async function verifyServiceAccountCredential<
+  Kind extends "data_migration" | "rules_reader",
+  Permission extends string,
+>(
   input: {
     expectedPrincipal: string;
     expectedProjectId: string;
+    requiredPermissions: readonly Permission[];
+    credentialKind: Kind;
+    credentialLabel: string;
   },
-  dependencies: MigrationCredentialDependencies = {},
-): Promise<VerifiedMigrationCredential> {
+  dependencies: ServiceAccountCredentialDependencies,
+): Promise<VerifiedServiceAccountCredential<Kind, Permission>> {
   const expectedPrincipal = requireServiceAccountPrincipal(input.expectedPrincipal);
   const expectedProjectId = requireProjectId(input.expectedProjectId);
   const auth = dependencies.auth ?? createDefaultGoogleAuth();
-  const authClient = await loadAuthClient(auth);
-  const actualProjectId = await loadCredentialProjectId(auth);
+  const authClient = await loadAuthClient(auth, input.credentialLabel);
+  const actualProjectId = await loadCredentialProjectId(auth, input.credentialLabel);
   if (actualProjectId !== expectedProjectId) {
-    throw new Error("migration credentialのproject IDがexpected projectと一致しません");
+    throw new Error(`${input.credentialLabel}のproject IDがexpected projectと一致しません`);
   }
 
-  const actualPrincipal = await loadServiceAccountPrincipal(auth, authClient);
+  const actualPrincipal = await loadServiceAccountPrincipal(
+    auth,
+    authClient,
+    input.credentialLabel,
+  );
   if (actualPrincipal !== expectedPrincipal) {
-    throw new Error("migration credentialのservice-account principalがexpected principalと一致しません");
+    throw new Error(
+      `${input.credentialLabel}のservice-account principalがexpected principalと一致しません`,
+    );
   }
 
-  const accessTokenProvider = createMigrationAccessTokenProvider(authClient);
-  await assertMigrationIamPermissions({
+  const accessTokenProvider = createCutoverAccessTokenProvider(
+    authClient,
+    input.credentialLabel,
+  );
+  await assertRequiredIamPermissions({
     projectId: expectedProjectId,
     accessTokenProvider,
     fetchImpl: dependencies.fetch ?? fetch,
+    requiredPermissions: input.requiredPermissions,
+    credentialLabel: input.credentialLabel,
   });
 
   return {
+    kind: input.credentialKind,
     principal: actualPrincipal,
     projectId: actualProjectId,
-    permissions: MIGRATION_REQUIRED_IAM_PERMISSIONS,
+    permissions: input.requiredPermissions,
     accessTokenProvider,
   };
 }
 
-export function createMigrationAccessTokenProvider(
+export function createCutoverAccessTokenProvider(
   authClient: Pick<AuthClient, "getAccessToken">,
-): MigrationAccessTokenProvider {
+  credentialLabel: string,
+): CutoverAccessTokenProvider {
   return async () => {
     let response: { token?: string | null };
     try {
       response = await authClient.getAccessToken();
     } catch {
-      throw new Error("migration credentialのaccess tokenを取得できません");
+      throw new Error(`${credentialLabel}のaccess tokenを取得できません`);
     }
     const token = response.token?.trim();
     if (!token) {
-      throw new Error("migration credentialのaccess tokenを取得できません");
+      throw new Error(`${credentialLabel}のaccess tokenを取得できません`);
     }
     return token;
   };
 }
 
-async function assertMigrationIamPermissions(input: {
+async function assertRequiredIamPermissions<Permission extends string>(input: {
   projectId: string;
-  accessTokenProvider: MigrationAccessTokenProvider;
+  accessTokenProvider: CutoverAccessTokenProvider;
   fetchImpl: typeof fetch;
+  requiredPermissions: readonly Permission[];
+  credentialLabel: string;
 }): Promise<void> {
   const accessToken = await input.accessTokenProvider();
   let response: Response;
@@ -122,28 +208,36 @@ async function assertMigrationIamPermissions(input: {
           Authorization: `Bearer ${accessToken}`,
           "Content-Type": "application/json",
         },
-        body: JSON.stringify({ permissions: MIGRATION_REQUIRED_IAM_PERMISSIONS }),
+        body: JSON.stringify({ permissions: input.requiredPermissions }),
         signal: AbortSignal.timeout(IAM_REQUEST_TIMEOUT_MS),
       },
     );
   } catch {
-    throw new Error("migration credentialのIAM権限を検査できません");
+    throw new Error(`${input.credentialLabel}のIAM権限を検査できません`);
   }
   if (!response.ok) {
     // Error bodyにはAPI側の詳細が含まれ得るため読み込まない。
-    throw new Error(`migration credentialのIAM権限を検査できません (status=${response.status})`);
+    throw new Error(
+      `${input.credentialLabel}のIAM権限を検査できません (status=${response.status})`,
+    );
   }
 
   let body: unknown;
   try {
     body = await response.json();
   } catch {
-    throw new Error("migration credentialのIAM権限検査responseが不正です");
+    throw new Error(`${input.credentialLabel}のIAM権限検査responseが不正です`);
   }
-  const granted = parseGrantedPermissions(body);
-  const missing = MIGRATION_REQUIRED_IAM_PERMISSIONS.filter((permission) => !granted.has(permission));
+  const granted = parseGrantedPermissions(
+    body,
+    input.requiredPermissions,
+    input.credentialLabel,
+  );
+  const missing = input.requiredPermissions.filter((permission) => !granted.has(permission));
   if (missing.length > 0) {
-    throw new Error(`migration credentialに必要なIAM権限が不足しています (${missing.join(", ")})`);
+    throw new Error(
+      `${input.credentialLabel}に必要なIAM権限が不足しています (${missing.join(", ")})`,
+    );
   }
 }
 
@@ -151,64 +245,76 @@ function createDefaultGoogleAuth(): MigrationGoogleAuth {
   return new GoogleAuth({ scopes: [CLOUD_PLATFORM_SCOPE] });
 }
 
-async function loadAuthClient(auth: MigrationGoogleAuth): Promise<MigrationAuthClient> {
+async function loadAuthClient(
+  auth: MigrationGoogleAuth,
+  credentialLabel: string,
+): Promise<MigrationAuthClient> {
   try {
     return await auth.getClient();
   } catch {
-    throw new Error("migration用Application Default Credentialsを取得できません");
+    throw new Error(`${credentialLabel}用Application Default Credentialsを取得できません`);
   }
 }
 
-async function loadCredentialProjectId(auth: MigrationGoogleAuth): Promise<string> {
+async function loadCredentialProjectId(
+  auth: MigrationGoogleAuth,
+  credentialLabel: string,
+): Promise<string> {
   let projectId: string;
   try {
     projectId = await auth.getProjectId();
   } catch {
-    throw new Error("migration credentialのproject IDを取得できません");
+    throw new Error(`${credentialLabel}のproject IDを取得できません`);
   }
   try {
     return requireProjectId(projectId);
   } catch {
-    throw new Error("migration credentialのproject IDが不正です");
+    throw new Error(`${credentialLabel}のproject IDが不正です`);
   }
 }
 
 async function loadServiceAccountPrincipal(
   auth: MigrationGoogleAuth,
   authClient: MigrationAuthClient,
+  credentialLabel: string,
 ): Promise<string> {
   let credentials: CredentialBody;
   try {
     credentials = await auth.getCredentials();
   } catch {
-    throw new Error("migration credentialのservice-account principalを取得できません");
+    throw new Error(`${credentialLabel}のservice-account principalを取得できません`);
   }
   const principal = credentials.client_email;
   if (!principal) {
     // authorized_user ADCにはclient_emailがない。cutoverではuser ADCを許可しない。
-    throw new Error("migration credentialはservice-account credentialである必要があります");
+    throw new Error(`${credentialLabel}はservice-account credentialである必要があります`);
   }
 
   let normalized: string;
   try {
     normalized = requireServiceAccountPrincipal(principal);
   } catch {
-    throw new Error("migration credentialはservice-account credentialである必要があります");
+    throw new Error(`${credentialLabel}はservice-account credentialである必要があります`);
   }
-  const clientPrincipal = exposedClientPrincipal(authClient);
+  const clientPrincipal = exposedClientPrincipal(authClient, credentialLabel);
   if (clientPrincipal && clientPrincipal !== normalized) {
-    throw new Error("migration credentialのAuthClient principalがcredential principalと一致しません");
+    throw new Error(
+      `${credentialLabel}のAuthClient principalがcredential principalと一致しません`,
+    );
   }
   return normalized;
 }
 
-function exposedClientPrincipal(authClient: MigrationAuthClient): string | null {
+function exposedClientPrincipal(
+  authClient: MigrationAuthClient,
+  credentialLabel: string,
+): string | null {
   let candidate: unknown;
   if (typeof authClient.getTargetPrincipal === "function") {
     try {
       candidate = authClient.getTargetPrincipal();
     } catch {
-      throw new Error("migration credentialのAuthClient principalを取得できません");
+      throw new Error(`${credentialLabel}のAuthClient principalを取得できません`);
     }
   } else if (typeof authClient.email === "string" && authClient.email) {
     candidate = authClient.email;
@@ -225,21 +331,25 @@ function exposedClientPrincipal(authClient: MigrationAuthClient): string | null 
   try {
     return requireServiceAccountPrincipal(String(candidate));
   } catch {
-    throw new Error("migration credentialのAuthClient principalが不正です");
+    throw new Error(`${credentialLabel}のAuthClient principalが不正です`);
   }
 }
 
-function parseGrantedPermissions(body: unknown): Set<MigrationIamPermission> {
+function parseGrantedPermissions<Permission extends string>(
+  body: unknown,
+  requiredPermissions: readonly Permission[],
+  credentialLabel: string,
+): Set<Permission> {
   if (!isObject(body) || !Array.isArray(body.permissions)) {
-    throw new Error("migration credentialのIAM権限検査responseが不正です");
+    throw new Error(`${credentialLabel}のIAM権限検査responseが不正です`);
   }
-  const allowed = new Set<string>(MIGRATION_REQUIRED_IAM_PERMISSIONS);
-  const granted = new Set<MigrationIamPermission>();
+  const allowed = new Set<string>(requiredPermissions);
+  const granted = new Set<Permission>();
   body.permissions.forEach((permission) => {
     if (typeof permission !== "string" || !allowed.has(permission)) {
-      throw new Error("migration credentialのIAM権限検査responseが不正です");
+      throw new Error(`${credentialLabel}のIAM権限検査responseが不正です`);
     }
-    granted.add(permission as MigrationIamPermission);
+    granted.add(permission as Permission);
   });
   return granted;
 }

@@ -1,6 +1,6 @@
 # transitionPlan v1 cutover runbook
 
-更新日: 2026-07-14
+更新日: 2026-07-15
 
 対象project: `okmarine-tankrental`
 状態: **設計・Emulator検証用。production reset / restore executeは無効**
@@ -33,7 +33,7 @@ fresh clientで確認する。
 - reset CLI / service / lower REST client: blocked
 - restore CLI / service / lower REST client: blocked
 - markerへの実行principal保存: 最終execute解放PRへ残す
-- dedicated credentialへの本番IAM付与: 運用時に別承認
+- dedicated data migration / Rules baseline read credentialへの本番IAM付与: 運用時に別承認
 - freeze / normal Rules deploy: 未実施
 - Hosting deploy、snapshot本番取得、Data Reset: 未実施
 
@@ -44,26 +44,65 @@ fresh clientで確認する。
    exemptionがないことを確認する。Data Access logは通常無効なので、未設定・保存期間不足なら
    writer不存在の証明に使わず、cutoverを停止する。
 3. Cloud Audit Logsで直近のFirestore write principalを列挙する。
-4. migration専用service account以外のwriterを停止または一時権限剥奪する。
-5. migration用のcustom roleは次の9 permissionだけとし、maintenance直前に期限付きで付与し、
-   normal復帰またはrollback完了直後に剥奪して再検査する。
-6. freshな専用service accountのproject/folder/organization実効bindingを確認し、Owner、Editor、
-   Datastore Owner/User、Firebase Rules Viewer等の広いrole、group経由role、9 permission以外の
-   継承権限がないことを記録する。
-   `testIamPermissions`は必要権限の存在だけを確認し、余分な権限の不存在は証明しない。
+4. data migration専用service account以外のdata writerを停止または一時権限剥奪する。
+5. data migrationとfreeze前Rules baseline照合は、異なるservice accountとcustom roleに分ける。
+   同じprincipalへ2つのroleを付与すると実効権限が9 permissionになるため禁止する。
+   例として次の2 roleを期限付きで直接付与し、group経由で付与しない。
+   - `transitionCutoverData`: data migration専用の7 permission
+     - `datastore.databases.get`
+     - `datastore.databases.getMetadata`
+     - `datastore.entities.get`
+     - `datastore.entities.list`
+     - `datastore.entities.create`
+     - `datastore.entities.update`
+     - `datastore.entities.delete`
+   - `transitionRulesBaselineRead`: Rules baseline read専用の2 permission
+     - `firebaserules.releases.get`
+     - `firebaserules.rulesets.get`
+   custom role作成commandのレビュー用例は次のとおり。これは実行承認ではなく、作成前にrole ID、
+   project、permission列を二名で照合する。
+
+   ```bash
+   gcloud iam roles create transitionCutoverData \
+     --project=okmarine-tankrental \
+     --title='Transition cutover data' \
+     --description='Temporary Firestore data migration role' \
+     --permissions='datastore.databases.get,datastore.databases.getMetadata,datastore.entities.get,datastore.entities.list,datastore.entities.create,datastore.entities.update,datastore.entities.delete' \
+     --stage=GA
+
+   gcloud iam roles create transitionRulesBaselineRead \
+     --project=okmarine-tankrental \
+     --title='Transition Rules baseline read' \
+     --description='Temporary read-only Firebase Rules baseline role' \
+     --permissions='firebaserules.releases.get,firebaserules.rulesets.get' \
+     --stage=GA
+   ```
+
+   role作成と、service accountへの期限付き直接bindingは別の人間承認とする。このrunbookの
+   command例をそのまま実行せず、作成後にrole descriptionとpermission列をread-onlyで再取得する。
+6. 2つのfreshな専用service accountそれぞれについて、project/folder/organizationのIAM
+   policyをread-onlyで取得し、直接・継承・group経由の実効bindingを記録する。Owner、Editor、
+   Datastore Owner/User、Firebase Rules Viewer等の広いroleと、上記の各permission set以外の
+   権限がないことを別途確認する。`testIamPermissions`は要求したpermissionの存在だけを
+   確認するもので、余分な直接・継承権限の不存在を証明しない。
 7. IAM policy変更後は最低10分待ち、反復したpermission確認が一致するまで進まない。公式には通常約2分、
    7分以上かかる場合もあり、group変更はさらに長いため専用principalをgroupへ入れない。
-8. `GOOGLE_APPLICATION_CREDENTIALS`やuser ADCを暗黙利用せず、`--expected-principal`を照合する。
-9. credentialには次の最小permissionだけをレビューする。
-   - `datastore.databases.get`
-   - `datastore.databases.getMetadata`
-   - `datastore.entities.get`
-   - `datastore.entities.list`
-   - `datastore.entities.create`
-   - `datastore.entities.update`
-   - `datastore.entities.delete`
-   - `firebaserules.releases.get`
-   - `firebaserules.rulesets.get`
+8. `GOOGLE_APPLICATION_CREDENTIALS`やuser ADCを暗黙利用しない。Rules baseline照合では
+   `--expected-rules-principal`、data preflight / snapshot / reset / restore / verifyでは
+   `--expected-data-principal`を照合する。Rules reader credentialをクリアせずにdata操作へ進んだり、
+   data credentialでRules baselineを読んだりしない。
+   credential切替は同じshellの上書きではなく、Rules reader専用のfresh processをbaseline照合後に
+   終了し、そのcredential contextとroleを破棄・剥奪してから、data migration専用の別processを
+   起動する。各processでは用途に対応するexpected principalを明示し、起動前後にprincipalと
+   `GOOGLE_APPLICATION_CREDENTIALS`の有無だけを記録する。credential file pathや内容は証跡へ残さない。
+9. service-account impersonationは、source / target principal、`roles/iam.serviceAccountTokenCreator`、
+   短命token、有効期限、Audit Logsの証跡を別途検証した場合だけ承認する。
+   clientがtarget principalを表示したことや、実装にprincipal照合があることだけでは承認済みとしない。
+   証跡がなければ未承認としてcutoverを停止する。
+   Google Cloudの候補手順は`gcloud auth application-default login --impersonate-service-account=<SA>`だが、
+   現在のcutover CLIでtarget principal照合と7 / 2 permission分離を別々にread-only drillできるまでは
+   production手順として使用しない。drill後もRules用ADCを終了・破棄してからdata用ADCを別processで作り、
+   同一ADC fileやglobal gcloud impersonation設定を二用途で使い回さない。
 10. local service-account JSONを使う場合はrepository・同期folder外、owner本人、`0600`、hard link数1とする。
     repository直下の`firebase-service-account.json`や`*-firebase-adminsdk-*.json`は、使用中でなくても
     production CLIをfail closedさせる。使用履歴を確認し、有効な鍵なら失効してから安全な場所へ移すか削除する。
@@ -75,6 +114,8 @@ fresh clientで確認する。
 - <https://docs.cloud.google.com/logging/docs/audit/configure-data-access>
 - <https://docs.cloud.google.com/firestore/native/docs/audit-logging>
 - <https://docs.cloud.google.com/iam/docs/access-change-propagation>
+- <https://docs.cloud.google.com/sdk/gcloud/reference/iam/roles/create>
+- <https://docs.cloud.google.com/docs/authentication/use-service-account-impersonation>
 
 ## 4. Snapshot鍵の復旧drill
 
@@ -104,8 +145,13 @@ API sourceはmemory内でだけLF・末尾改行1つへ正規化し、本文をf
 npm run --silent cutover:rules:verify-baseline -- \
   --project=okmarine-tankrental \
   --expected-main-commit='<current-main-sha>' \
-  --expected-principal='<migration-service-account-email>'
+  --expected-data-principal='<data-migration-service-account-email>' \
+  --expected-rules-principal='<rules-baseline-reader-service-account-email>'
 ```
+
+このcommandで有効にするのはRules baseline reader credentialだけとする。
+`--expected-data-principal`は2 principalが異なることをnetwork access前に検査するためのidentity参照であり、
+このcommandがdata migration credentialを使用することを意味しない。
 
 この検証は、次の4者が一致した場合だけ成功する。
 
@@ -120,7 +166,9 @@ npm run --silent cutover:rules:verify-baseline -- \
 取得不能、hash・metadata・Git・fileの不一致はすべてfreeze deploy前にfail closedとする。
 CLIはlocal `HEAD` / `origin/main`だけでなく、GitHub上の`refs/heads/main`も`git ls-remote`で
 read-only照合する。remote mainを取得できない、または`expected-main-commit`と不一致なら停止する。
-成功後は他のRules deploy権限者・CIを動かさず、直ちに次のfreeze deployへ進む。
+成功後はRules reader credentialのローカルcontextを破棄し、他のRules deploy権限者・CIを動かさず、
+直ちに次のfreeze deployへ進む。freeze deployを行うRules deploy principalは、Rules baseline readerと
+data migration principalのどちらでもない第三の承認済み主体とする。
 
 ```bash
 firebase --project okmarine-tankrental \
@@ -135,7 +183,12 @@ deploy後:
 3. staff/adminのnormally-allowedな不存在document updateが、`not-found`ではなく
    `permission-denied`になることを確認する。実documentは作成しない。
 4. active listenerも`permission-denied`になり、古いタブが残っていないことを確認する。
-5. Audit Logsにmigration principal以外のwriteがないことを再確認する。
+5. Audit LogsにFirestore data writeがないことを再確認する。この時点でdata migration credentialは
+   まだ有効化・選択しない。
+
+freezeのdeny smoke後、Rules baseline read roleを剥奪し、そのcredential contextが残っていないことを
+確認する。その後にだけdata migration credentialへ切り替え、section 6のpreflightへ進む。
+同一principal、同一credential file、未検証のimpersonationでこの切り替えを代替しない。
 
 一つでも確認できなければ、Reset前の本番artifactとして固定したbaseline Rulesへ戻し、Resetへ進まない。
 現在の`firestore.rules`は未deployの状態遷移差分を含むため、このabortには使用しない。
@@ -160,9 +213,10 @@ pinned baseline Rules deploy
 → 最大10分待機
 → fresh staff/admin/portalでbaseline read smoke
 → Audit Logsで想定外writeがないことを確認
-→ migration custom roleを剥奪
+→ Rules baseline read roleとdata migration roleをそれぞれ剥奪
 → 10分以上待機
-→ cutover:preflightがIAM不足で二回連続fail closedすることを確認
+→ read-only IAM policyと各principalのpermission検査で権限消失を二回連続確認
+→ 各credential contextを破棄
 → maintenance解除・既存writer再開
 ```
 
@@ -175,6 +229,9 @@ baseline Rulesの伝播完了を待ったままincidentとして扱う。
 
 freeze後、production writeを行わずにprincipal、IAM、database UID、main SHA、census、unknown record、
 subcollection、marker、予定write数・request sizeを検査する。
+Rules baseline readerで使用したcredential contextが破棄済み、Rules baseline read roleが剥奪済みであることを
+証跡で確認してから、別のdata migration credentialを明示的に設定する。IAM policyのread-only再取得と
+`testIamPermissions`の反復確認の両方が一致しない限りpreflightを実行しない。
 
 ```bash
 npm run --silent cutover:preflight -- \
@@ -182,11 +239,11 @@ npm run --silent cutover:preflight -- \
   --database='(default)' \
   --expected-database-uid='<database-uid>' \
   --expected-main-commit='<current-main-sha>' \
-  --expected-principal='<migration-service-account-email>' \
+  --expected-data-principal='<data-migration-service-account-email>' \
   --key-id='<snapshot-key-id>'
 ```
 
-出力は件数、status集計、write数、request bytes、hash、必要9 permissionの確認数だけとし、document ID、
+出力は件数、status集計、write数、request bytes、hash、data用の必要7 permissionの確認数だけとし、document ID、
 顧客名、location、field内容、token、credential pathを含めない。
 
 ## 7. SnapshotとReset dry-run
@@ -197,7 +254,7 @@ npm run --silent cutover:snapshot:create -- \
   --database='(default)' \
   --expected-database-uid='<database-uid>' \
   --expected-main-commit='<current-main-sha>' \
-  --expected-principal='<migration-service-account-email>' \
+  --expected-data-principal='<data-migration-service-account-email>' \
   --key-id='<snapshot-key-id>' \
   --output='<local-non-sync-absolute-path>'
 
@@ -206,10 +263,14 @@ npm run --silent cutover:snapshot:reset -- \
   --database='(default)' \
   --expected-database-uid='<database-uid>' \
   --expected-main-commit='<current-main-sha>' \
-  --expected-principal='<migration-service-account-email>' \
+  --expected-data-principal='<data-migration-service-account-email>' \
   --key-id='<snapshot-key-id>' \
   --snapshot='<local-non-sync-absolute-path>'
 ```
+
+上記の実行順は、Rules baseline readerによる照合 → Rules deploy principalによるfreeze →
+Rules reader credential破棄・role剥奪 → data migration credentialへ切り替え → read-only preflight →
+snapshot作成 → reset dry-runとする。後半を前倒ししたり、Rules readerでdata操作を行ったりしない。
 
 preflightとsnapshot作成結果では対象counts、inventory、`sourceCensusSha256`、
 `documentPathSha256`を比較する。preflightと、そのsnapshotを入力したReset dry-runではstatus集計、
@@ -233,7 +294,7 @@ npm run --silent cutover:verify -- \
   --database='(default)' \
   --expected-database-uid='<database-uid>' \
   --expected-main-commit='<current-main-sha>' \
-  --expected-principal='<migration-service-account-email>' \
+  --expected-data-principal='<data-migration-service-account-email>' \
   --key-id='<snapshot-key-id>' \
   --snapshot='<local-non-sync-absolute-path>'
 ```
@@ -303,7 +364,7 @@ firebase --project okmarine-tankrental \
 | admin | review一覧、billing、sales、staff実績がschema errorなく読める | 同上 |
 | portal | setup済み顧客でhome・履歴が読め、transaction submitはしない | 同上 |
 | migration state | `cutover:verify --operation=reset`が`reset_applied`、`targetStateConfirmed=true` | 同上 |
-| audit | DATA_WRITEがmigration principalと事前記録したsmoke auth/session更新だけ | 同上 |
+| audit | DATA_WRITEがdata migration principalと事前記録したsmoke auth/session更新だけ | 同上 |
 
 unexpected `permission-denied`、旧schema error、runtime advisory、mixed state、未記録principal/pathのwriteが
 一つでもあれば、利用者へ開放せずdedicated freeze Rulesを再deployし、10分待ってdeny smokeをやり直す。
@@ -316,9 +377,16 @@ unexpected `permission-denied`、旧schema error、runtime advisory、mixed stat
 - snapshot ID、payload/source/reset-plan SHA、verify stable-state SHA
 - baseline live照合時のrelease/ruleset metadata、baseline / freeze / post-cutover Rules SHAと各deploy結果
 - staff/admin/portal smoke結果、Audit Logs query期間、確認principal、許可したauth/session更新path
-- migration custom roleの付与・剥奪時刻、実効bindingレビュー結果
+- Rules baseline read principal、2-permission role、付与・剥奪時刻、baseline照合結果、
+  project/folder/organizationのread-only IAM policyレビュー結果
+- data migration principal、7-permission role、付与・剥奪時刻、各data commandのprincipal照合結果、
+  project/folder/organizationのread-only IAM policyレビュー結果
+- Rules deploy principal、deploy時刻、Rules reader / data migrationと異なprincipalであることの確認
+- impersonationを使う場合はsource / target principal、Token Creator binding、token有効期限、Audit Logs。
+  これらの証跡がなければ「未承認」と記録する
 
-smoke成功後、migration custom roleを剥奪する。最低10分待ってから同じ`cutover:preflight`を実行し、
+Rules baseline read roleはsection 6へ進む前に剥奪済みとする。smoke成功後、data migration roleを剥奪する。
+最低10分待ってから同じ`cutover:preflight`を実行し、
 data readへ進む前に「必要なIAM権限が不足」とfail closedすることを二回確認する。権限が一つでも残る、
 または結果が揺れる場合はmaintenanceを解除しない。その後にmaintenanceを解除し、writerを再開する。
 
@@ -342,7 +410,7 @@ npm run --silent cutover:snapshot:restore -- \
   --database='(default)' \
   --expected-database-uid='<database-uid>' \
   --expected-main-commit='<recorded-main-sha>' \
-  --expected-principal='<migration-service-account-email>' \
+  --expected-data-principal='<data-migration-service-account-email>' \
   --key-id='<snapshot-key-id>' \
   --snapshot='<local-non-sync-absolute-path>'
 ```
@@ -355,7 +423,7 @@ snapshot restore
 → 最大10分待機
 → baseline rollback smoke
 → Audit Logs確認
-→ migration custom role剥奪・権限消失確認
+→ Rules baseline read roleとdata migration roleをそれぞれ剥奪・権限消失確認
 → maintenance解除・writer再開
 ```
 

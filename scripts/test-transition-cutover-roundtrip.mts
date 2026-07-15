@@ -77,11 +77,17 @@ try {
   const preflightCredential = objectValue(preflight.output.credential, "preflight credential");
   assertExactKeys(
     preflightCredential,
-    ["expectedPrincipalConfirmed", "requiredPermissionsConfirmed", "requiredPermissionCount"],
+    [
+      "kind",
+      "expectedDataPrincipalConfirmed",
+      "requiredPermissionsConfirmed",
+      "requiredPermissionCount",
+    ],
     "preflight credential",
   );
   assert(
-    preflightCredential.expectedPrincipalConfirmed === false,
+    preflightCredential.kind === "emulator"
+      && preflightCredential.expectedDataPrincipalConfirmed === false,
     "emulator credential is not production verified",
   );
   assert(

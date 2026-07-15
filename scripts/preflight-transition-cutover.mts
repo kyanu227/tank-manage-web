@@ -36,7 +36,8 @@ async function main(): Promise<void> {
   console.log(JSON.stringify({
     mode: "read-only-preflight",
     credential: {
-      expectedPrincipalConfirmed: runtime.credential !== null,
+      kind: runtime.credential?.kind ?? "emulator",
+      expectedDataPrincipalConfirmed: runtime.credential !== null,
       requiredPermissionsConfirmed: runtime.credential !== null,
       requiredPermissionCount: runtime.credential?.permissions.length ?? 0,
     },

@@ -97,6 +97,23 @@ describe("Firestore Rules rollback baseline", () => {
     expect(JSON.stringify(result)).not.toContain(TOKEN);
   });
 
+  it("data migration credentialをRules APIへ渡さずproviderも呼ばない", async () => {
+    const dataTokenProvider = vi.fn(async () => "data-token-must-not-be-used");
+    const input = verificationInput();
+    const fetchMock = vi.fn();
+    await expect(verifyLiveFirestoreRulesBaseline({
+      ...input,
+      rulesReaderCredential: {
+        kind: "data_migration",
+        accessTokenProvider: dataTokenProvider,
+      } as unknown as typeof input.rulesReaderCredential,
+    }, {
+      fetch: fetchMock as unknown as typeof fetch,
+    })).rejects.toThrow("Rules reader credential");
+    expect(dataTokenProvider).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
   it("API本文のCRLFと余分な末尾改行だけでは誤判定しない", async () => {
     const apiSource = SOURCE.replaceAll("\n", "\r\n") + "\r\n";
     await expect(verifyLiveFirestoreRulesBaseline(
@@ -212,7 +229,10 @@ describe("Firestore Rules rollback baseline", () => {
 function verificationInput() {
   return {
     projectId: PROJECT_ID,
-    accessTokenProvider: vi.fn(async () => TOKEN),
+    rulesReaderCredential: {
+      kind: "rules_reader" as const,
+      accessTokenProvider: vi.fn(async () => TOKEN),
+    },
     manifest: manifest(),
     baselineSource: SOURCE,
     gitSource: SOURCE,

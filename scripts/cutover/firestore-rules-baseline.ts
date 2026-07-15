@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import type { MigrationAccessTokenProvider } from "./migration-credential";
+import type { VerifiedRulesReaderCredential } from "./migration-credential";
 
 const FIREBASE_RULES_API_ROOT = "https://firebaserules.googleapis.com/v1";
 const FIREBASE_RULES_REQUEST_TIMEOUT_MS = 30_000;
@@ -154,7 +154,10 @@ export function assertPinnedFirestoreRulesArtifact(input: {
 export async function verifyLiveFirestoreRulesBaseline(
   input: {
     projectId: string;
-    accessTokenProvider: MigrationAccessTokenProvider;
+    rulesReaderCredential: Pick<
+      VerifiedRulesReaderCredential,
+      "kind" | "accessTokenProvider"
+    >;
     manifest: FirestoreRulesBaselineManifest;
     baselineSource: string;
     gitSource: string;
@@ -165,11 +168,14 @@ export async function verifyLiveFirestoreRulesBaseline(
   if (input.manifest.projectId !== projectId) {
     throw new Error("live Rulesのprojectがbaseline manifestと一致しません");
   }
+  if (input.rulesReaderCredential.kind !== "rules_reader") {
+    throw new Error("live Rules baseline検証にはRules reader credentialが必要です");
+  }
   assertPinnedFirestoreRulesArtifact(input);
 
   let accessToken: string;
   try {
-    accessToken = (await input.accessTokenProvider()).trim();
+    accessToken = (await input.rulesReaderCredential.accessTokenProvider()).trim();
   } catch {
     throw new Error("live Rules取得用access tokenを取得できません");
   }
