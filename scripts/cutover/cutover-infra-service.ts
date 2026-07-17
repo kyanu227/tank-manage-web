@@ -243,6 +243,7 @@ export async function applyCutoverInfrastructure(
     await createSnapshotKeychainEntry({
       projectId: input.args.projectId,
       keyId: input.args.keyId,
+      repositoryRoot: input.repositoryRoot,
     }, dependencies.local);
   }
 

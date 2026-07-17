@@ -1,8 +1,11 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
+import {
+  decodeCanonicalBase64Key,
+  keychainCommandEnvironment,
+  runLocalCommand,
+  type LocalCommandRunner,
+} from "./local-cutover-environment";
+import { snapshotKeychainIdentity } from "./snapshot-keychain-identity";
 
-const execFileAsync = promisify(execFile);
-const KEYCHAIN_SERVICE = "tank-manage-cutover";
 const KEY_BYTES = 32;
 
 export type SnapshotKeySource = "keychain" | "test-stdin";
@@ -12,7 +15,10 @@ export async function loadSnapshotEncryptionKey(input: {
   keyId: string;
   source: SnapshotKeySource;
   emulatorHost?: string;
-}): Promise<Buffer> {
+}, dependencies: {
+  runCommand?: LocalCommandRunner;
+  platform?: NodeJS.Platform;
+} = {}): Promise<Buffer> {
   if (input.source === "test-stdin") {
     if (!input.emulatorHost) {
       throw new Error("test-stdin key sourceはFirestore Emulatorでだけ使用できます");
@@ -20,32 +26,41 @@ export async function loadSnapshotEncryptionKey(input: {
     return parseSnapshotKey(await readStdin(), "stdin");
   }
 
-  if (process.platform !== "darwin") {
+  if ((dependencies.platform ?? process.platform) !== "darwin") {
     throw new Error("本番snapshot鍵はmacOS Keychainからのみ取得できます");
   }
-  const account = `${input.projectId}:${input.keyId}`;
-  let stdout: string;
+  const identity = snapshotKeychainIdentity(input.projectId, input.keyId);
+  let stdout: Buffer | null = null;
   try {
-    ({ stdout } = await execFileAsync(
-      "/usr/bin/security",
-      ["find-generic-password", "-w", "-s", KEYCHAIN_SERVICE, "-a", account],
-      { encoding: "utf8", maxBuffer: 4_096 },
-    ));
+    const result = await (dependencies.runCommand ?? runLocalCommand)({
+      executable: "/usr/bin/security",
+      args: [
+        "find-generic-password",
+        "-w",
+        "-s",
+        identity.service,
+        "-a",
+        identity.account,
+      ],
+      environment: keychainCommandEnvironment(),
+      sensitiveOutput: true,
+    });
+    if (result.exitCode !== 0 || !Buffer.isBuffer(result.stdout)) {
+      if (Buffer.isBuffer(result.stdout)) result.stdout.fill(0);
+      throw new Error("Keychain read failed");
+    }
+    stdout = result.stdout;
+    return decodeCanonicalBase64Key(stdout);
   } catch {
-    throw new Error(`Keychainからsnapshot keyを取得できません: ${KEYCHAIN_SERVICE}/${account}`);
+    throw new Error(
+      `Keychainからsnapshot keyを取得できません: ${identity.service}/${identity.account}`,
+    );
+  } finally {
+    stdout?.fill(0);
   }
-  return parseSnapshotKey(stdout, `Keychain ${account}`);
 }
 
-export function snapshotKeychainIdentity(projectId: string, keyId: string): {
-  service: string;
-  account: string;
-} {
-  return {
-    service: KEYCHAIN_SERVICE,
-    account: `${projectId}:${keyId}`,
-  };
-}
+export { snapshotKeychainIdentity } from "./snapshot-keychain-identity";
 
 export function disposeSnapshotKey(key: Buffer): void {
   key.fill(0);

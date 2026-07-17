@@ -9,7 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
@@ -18,6 +18,7 @@ import {
   inspectLocalSnapshotDirectory,
   inspectSnapshotKeychainEntry,
   inventoryRepositoryServiceAccountCredentials,
+  keychainCommandEnvironment,
   planLocalSnapshotDirectory,
   type LocalCommandRequest,
 } from "./local-cutover-environment";
@@ -31,6 +32,33 @@ afterEach(async () => {
     rm(directory, { recursive: true, force: true })
   )));
   vi.restoreAllMocks();
+  vi.unstubAllEnvs();
+});
+
+describe("Keychain child environment", () => {
+  it("ambient isolation HOMEをOS homeへ戻し、Google credential環境を継承しない", () => {
+    vi.stubEnv("HOME", "/tmp/untrusted-isolated-home");
+    vi.stubEnv("GOOGLE_APPLICATION_CREDENTIALS", "/tmp/credential.json");
+    vi.stubEnv("CLOUDSDK_CONFIG", "/tmp/gcloud-config");
+    vi.stubEnv("CLOUDSDK_AUTH_ACCESS_TOKEN", "token-canary");
+    vi.stubEnv("DOTDIR", "/tmp/untrusted-expect-dotdir");
+    vi.stubEnv("EXPECT_LIBRARY", "/tmp/untrusted-expect-library");
+    vi.stubEnv("TCL_LIBRARY", "/tmp/untrusted-tcl-library");
+    vi.stubEnv("TCLLIBPATH", "/tmp/untrusted-tcl-path");
+
+    const environment = keychainCommandEnvironment();
+
+    expect(environment.HOME).toBe(userInfo().homedir);
+    expect(environment.PATH).toBe("/usr/bin:/bin:/usr/sbin:/sbin");
+    expect(environment.GOOGLE_APPLICATION_CREDENTIALS).toBeUndefined();
+    expect(environment.CLOUDSDK_CONFIG).toBeUndefined();
+    expect(environment.CLOUDSDK_AUTH_ACCESS_TOKEN).toBeUndefined();
+    expect(environment.DOTDIR).toBeUndefined();
+    expect(environment.EXPECT_LIBRARY).toBeUndefined();
+    expect(environment.TCL_LIBRARY).toBeUndefined();
+    expect(environment.TCLLIBPATH).toBeUndefined();
+    expect(JSON.stringify(environment)).not.toContain("token-canary");
+  });
 });
 
 describe("repository service-account credential inventory", () => {
@@ -406,6 +434,7 @@ describe("snapshot Keychain provisioning", () => {
 
   it("不正・非canonical・32-byte以外のKeychain値を拒否してraw Bufferをzeroizeする", async () => {
     const invalidValues = [
+      Buffer.alloc(0),
       Buffer.from("not-base64\n", "ascii"),
       Buffer.from("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAB=\n", "ascii"),
       Buffer.from("AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \n", "ascii"),
@@ -437,13 +466,14 @@ describe("snapshot Keychain provisioning", () => {
     await expect(createSnapshotKeychainEntry({
       projectId: PROJECT_ID,
       keyId: KEY_ID,
+      repositoryRoot: process.cwd(),
     }, { runCommand: command })).rejects.toThrow("上書きしません");
     expect(command).toHaveBeenCalledTimes(1);
     expect(requests[0].args[0]).toBe("find-generic-password");
     expect(existing.every((value) => value === 0)).toBe(true);
   });
 
-  it("32-byte keyをcanonical Base64のstdinだけへ渡し、Buffer read-back後にzeroizeする", async () => {
+  it("32-byte keyをExpect helperのstdinだけへ渡し、Buffer read-back後にzeroizeする", async () => {
     const generatedKey = Buffer.alloc(32, 7);
     const originalKey = Buffer.from(generatedKey);
     const expectedEncoded = Buffer.from(
@@ -451,6 +481,7 @@ describe("snapshot Keychain provisioning", () => {
       "ascii",
     );
     const requests: Array<{
+      executable: string;
       args: readonly string[];
       stdinSnapshot?: Buffer;
       discardOutput?: boolean;
@@ -462,12 +493,13 @@ describe("snapshot Keychain provisioning", () => {
     let stored = Buffer.alloc(0);
     const command = vi.fn(async (request: LocalCommandRequest) => {
       requests.push({
+        executable: request.executable,
         args: [...request.args],
         stdinSnapshot: request.stdin ? Buffer.from(request.stdin) : undefined,
         discardOutput: request.discardOutput,
         sensitiveOutput: request.sensitiveOutput,
       });
-      if (request.args[0] === "find-generic-password") {
+      if (request.executable === "/usr/bin/security") {
         findCount += 1;
         if (findCount === 1) return { exitCode: 44, stdout: Buffer.alloc(0) };
         readbackOutput = Buffer.from(stored);
@@ -475,29 +507,44 @@ describe("snapshot Keychain provisioning", () => {
       }
       passedStdin = request.stdin;
       if (!request.stdin) throw new Error("expected Keychain stdin");
-      stored = Buffer.from(request.stdin.subarray(0, request.stdin.byteLength - 1));
+      stored = Buffer.from(request.stdin);
       return { exitCode: 0, stdout: "secret echo must be discarded" };
     });
 
     await expect(createSnapshotKeychainEntry({
       projectId: PROJECT_ID,
       keyId: KEY_ID,
+      repositoryRoot: process.cwd(),
     }, {
       runCommand: command,
       randomBytes: () => generatedKey,
+      prepareKeychainWriteHelper: preparedTestKeychainHelper,
     })).resolves.toEqual({ created: true });
 
-    const add = requests.find((request) => request.args[0] === "add-generic-password");
+    const add = requests.find((request) => request.args.includes("add-generic-password"));
     expect(add).toBeDefined();
-    expect(add!.args.at(-1)).toBe("-w");
+    expect(add!.executable).toBe("/tmp/test-keychain-helper");
+    expect(add!.args.slice(0, 2)).toEqual([
+      "-N",
+      "-n",
+    ]);
+    expect(add!.args.slice(2, 5)).toEqual([
+      "-f",
+      "/tmp/test-keychain-helper.exp",
+      "add-generic-password",
+    ]);
+    expect(add!.args.at(-2)).toBe("tank-manage-cutover");
+    expect(add!.args.at(-1)).toBe(`${PROJECT_ID}:${KEY_ID}`);
     expect(add!.args).not.toContain("-U");
-    expect(add!.stdinSnapshot).toEqual(Buffer.concat([expectedEncoded, Buffer.from([0x0a])]));
+    expect(add!.args).not.toContain("-w");
+    expect(add!.args).not.toContain("-X");
+    expect(add!.stdinSnapshot).toEqual(expectedEncoded);
     expect(add!.args).not.toContain(
       "BwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwc=",
     );
     expect(add!.discardOutput).toBe(true);
     const findRequests = requests.filter(
-      (request) => request.args[0] === "find-generic-password",
+      (request) => request.executable === "/usr/bin/security",
     );
     expect(findRequests).toHaveLength(2);
     expect(findRequests.every((request) => request.sensitiveOutput === true)).toBe(true);
@@ -520,12 +567,14 @@ describe("snapshot Keychain provisioning", () => {
     const error = await capturedError(() => createSnapshotKeychainEntry({
       projectId: PROJECT_ID,
       keyId: KEY_ID,
+      repositoryRoot: process.cwd(),
     }, {
       randomBytes: () => generatedKey,
+      prepareKeychainWriteHelper: preparedTestKeychainHelper,
       runCommand: async (request) => {
         call += 1;
         if (call === 1) return { exitCode: 44, stdout: Buffer.alloc(0) };
-        if (request.args[0] === "add-generic-password") {
+        if (request.args.includes("add-generic-password")) {
           return { exitCode: 0, stdout: "" };
         }
         return { exitCode: 0, stdout: mismatchedReadback };
@@ -543,8 +592,10 @@ describe("snapshot Keychain provisioning", () => {
     const error = await capturedError(() => createSnapshotKeychainEntry({
       projectId: PROJECT_ID,
       keyId: KEY_ID,
+      repositoryRoot: process.cwd(),
     }, {
       randomBytes: () => generatedKey,
+      prepareKeychainWriteHelper: preparedTestKeychainHelper,
       runCommand: async () => {
         call += 1;
         return call === 1
@@ -558,6 +609,18 @@ describe("snapshot Keychain provisioning", () => {
     expect(generatedKey.every((value) => value === 0)).toBe(true);
   });
 });
+
+async function preparedTestKeychainHelper(): Promise<{
+  executablePath: string;
+  argumentPrefix: readonly string[];
+  dispose: () => Promise<void>;
+}> {
+  return {
+    executablePath: "/tmp/test-keychain-helper",
+    argumentPrefix: ["-N", "-n", "-f", "/tmp/test-keychain-helper.exp"],
+    dispose: async () => undefined,
+  };
+}
 
 async function temporaryDirectory(prefix: string): Promise<string> {
   const directory = await mkdtemp(join(tmpdir(), prefix));

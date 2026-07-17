@@ -55,7 +55,7 @@ PROJECT='okmarine-tankrental'
 OPERATOR='user:<cutover-operator-email>'
 RULES_DEPLOY='user:<rules-deploy-email>'
 EXPIRES_AT='<RFC3339-UTC-within-24-hours>'
-KEY_ID='<snapshot-key-id>'
+KEY_ID='transition-cutover-20260718-v2'
 SNAPSHOT_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/TankCutover"
 SNAPSHOT_STORAGE_MODE='icloud_encrypted' # or local_encrypted
 MAIN_SHA='<final-main-sha>'
@@ -79,6 +79,22 @@ npm run --silent cutover:infra:plan -- \
 canonical Base64の32-byte値であることを検証後にzeroizeする。本文をstring、stdout、stderr、reportへ残さない。
 Admin SDK JSONはpath、private key、key IDを出力せず、件数、対応SA、active user-managed key数だけを要約する。
 keyの最終利用を自動断定しない。
+
+Keychain登録では`security add-generic-password -w`のTTY promptを使う。review済みのExpect scriptを
+cleanな最新mainのHEAD blobからlocal temporary directoryへ展開し、Apple署名済みの
+`/usr/bin/expect`を`-N -n -f`で起動してsystem／user startup fileを無効化し、
+`/usr/bin/security`をPTY起動する。秘密は44-byte canonical Base64のstdinだけで渡し、
+argv、環境変数、file、stdout、stderrに出さない。`-T /usr/bin/security`だけを設定し、`-U`は使用せず
+既存entryを更新しない。Nodeが所有する生成bufferは実行後にzeroizeし、Expectはログを無効化して
+直ちに終了する（Tcl allocator内の全一時copyのzeroizeまでは保証しない）。temporary scriptは削除する。
+本番readerも秘密を文字列化せずBufferで取得する。Google credential用の隔離`HOME`は親processに維持し、
+`security`／Expectの子processだけへOS accountの
+正規homeを渡す。この子process環境へADC、gcloud、OAuth関連の環境変数を渡さない。
+
+2026-07-18の初回準備では、旧CLIの`-w` stdin誤用によってkey ID
+`transition-cutover-20260718-v1`へ空entryが作成された。暗号化snapshotは1件も作成されていないが、
+このentryを自動削除・上書きせず、cutoverでは新しい`transition-cutover-20260718-v2`を使用する。
+旧entryの削除はcutover完了後の明示的なKeychain cleanupとして分離する。
 
 ### Guarded apply
 
