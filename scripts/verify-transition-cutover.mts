@@ -30,6 +30,7 @@ async function main(): Promise<void> {
   const client = await createSnapshotRestClient(args);
   const envelope = await readEncryptedSnapshotFile(snapshotPath, {
     repositoryRoot: args.repositoryRoot,
+    storageMode: args.snapshotStorageMode,
   });
   const key = await loadSnapshotEncryptionKey({
     projectId: args.projectId,

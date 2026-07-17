@@ -1,8 +1,12 @@
+import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   assessCutoverReadiness,
   formatCutoverReadinessReport,
   isExpectedCutoverOriginRemote,
+  loadReadinessEvidenceFiles,
 } from "./cutover-readiness-service";
 import {
   CUTOVER_INFRA_CONTRACT,
@@ -35,12 +39,17 @@ const RULES_BASELINE: FirestoreRulesBaselineManifest = {
 };
 
 describe("cutover readiness assessment", () => {
-  it("全machine evidenceとhuman confirmationが揃った場合だけGO", () => {
+  it("必須のmachine evidenceとuser confirmationが揃えばwarningがあってもGO", () => {
     const report = assessCutoverReadiness(readyInput());
     expect(report.status).toBe("GO");
     expect(report.blocking).toEqual([]);
     expect(report.humanConfirmationRequired).toEqual([]);
+    expect(report.warnings).toEqual(expect.arrayContaining([
+      "DATA_WRITE_AUDIT_LOGS_NOT_ENABLED",
+      "EXTERNAL_APFS_COPY_AND_SEPARATE_MAC_KEY_DRILL_RECOMMENDED",
+    ]));
     expect(formatCutoverReadinessReport(report)).toContain("Cutover readiness: GO");
+    expect(formatCutoverReadinessReport(report)).toContain("Warnings:");
   });
 
   it.each([
@@ -54,14 +63,40 @@ describe("cutover readiness assessment", () => {
     expect(report.blocking.length).toBeGreaterThan(0);
   });
 
-  it("GAS等を未回答のままabsentと推測しない", () => {
+  it.each([
+    ["externalWritersConfirmedAbsent", null, "EXTERNAL_WRITERS_CONFIRMED_ABSENT_UNCONFIRMED"],
+    ["otherPcAutomationConfirmedAbsent", null, "OTHER_PC_AUTOMATION_CONFIRMED_ABSENT_UNCONFIRMED"],
+    ["maintenanceWindowApproved", null, "MAINTENANCE_WINDOW_APPROVED_UNCONFIRMED"],
+    ["productionUsageStarted", null, "PRODUCTION_USAGE_STARTED_UNCONFIRMED"],
+    ["productionUsageStarted", true, "PRODUCTION_USAGE_STARTED_UNCONFIRMED"],
+  ] as const)("必須user fact %s=%sを未確定のまま推測しない", (key, value, blocker) => {
+    const input = readyInput();
     const report = assessCutoverReadiness({
-      ...readyInput(),
-      human: parseCutoverHumanEvidence(undefined),
+      ...input,
+      human: { ...input.human, [key]: value },
     });
     expect(report.status).toBe("NO-GO");
-    expect(report.blocking).toContain("WRITER_GAS_UNKNOWN");
-    expect(report.humanConfirmationRequired).toContain("confirm gas is absent or stopped");
+    expect(report.blocking).toContain(blocker);
+  });
+
+  it("iCloud modeは暗号化snapshotの承認を必須にする", () => {
+    const input = readyInput("icloud_encrypted");
+    const missingApproval = assessCutoverReadiness({
+      ...input,
+      human: {
+        ...input.human,
+        encryptedICloudSnapshotApproved: null,
+      },
+    });
+    expect(missingApproval.status).toBe("NO-GO");
+    expect(missingApproval.blocking).toContain("ENCRYPTED_ICLOUD_SNAPSHOT_NOT_APPROVED");
+
+    const approved = assessCutoverReadiness(input);
+    expect(approved.status).toBe("GO");
+    expect(approved.warnings).toEqual(expect.arrayContaining([
+      "ICLOUD_SNAPSHOT_REQUIRES_COMPLETE_DOWNLOAD_BEFORE_RESTORE",
+      "SEPARATE_MAC_KEY_RECOVERY_DRILL_RECOMMENDED",
+    ]));
   });
 
   it("stale evidenceとwrite count不整合をNO-GOにする", () => {
@@ -106,7 +141,7 @@ describe("cutover readiness assessment", () => {
     expect(report.blocking).toContain("PRODUCTION_DATA_PREFLIGHT_EVIDENCE_INVALID_OR_STALE");
   });
 
-  it("human evidenceをproject・main・鮮度・別reviewerへ結び付ける", () => {
+  it("human evidenceをproject・main・鮮度へ結び付け、operator本人の確認を受理する", () => {
     const input = readyInput();
     const staleHuman = {
       ...input.human,
@@ -115,14 +150,14 @@ describe("cutover readiness assessment", () => {
     const stale = assessCutoverReadiness({ ...input, human: staleHuman });
     expect(stale.blocking).toContain("HUMAN_EVIDENCE_CONTEXT_INVALID_OR_STALE");
 
-    const selfReviewed = assessCutoverReadiness({
+    const operatorConfirmed = assessCutoverReadiness({
       ...input,
       human: {
         ...input.human,
-        reviewerPrincipal: input.args.expectedOperatorPrincipal,
+        confirmedByPrincipal: input.args.expectedOperatorPrincipal,
       },
     });
-    expect(selfReviewed.blocking).toContain("HUMAN_EVIDENCE_CONTEXT_INVALID_OR_STALE");
+    expect(operatorConfirmed.status).toBe("GO");
   });
 
   it.each([
@@ -174,11 +209,55 @@ describe("cutover origin remote", () => {
   });
 });
 
-function readyInput() {
-  const args = readinessArgs();
+describe("readiness evidence file storage", () => {
+  it("iCloud cutover directory配下の0600 safe-summary evidenceを読み込む", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "cutover-readiness-icloud-")));
+    const repositoryRoot = join(root, "repository");
+    const homeDirectory = join(root, "os-home");
+    const snapshotDirectory = join(
+      homeDirectory,
+      "Library",
+      "Mobile Documents",
+      "com~apple~CloudDocs",
+      "TankCutover",
+    );
+    const humanEvidencePath = join(snapshotDirectory, "human-evidence.json");
+    try {
+      await mkdir(repositoryRoot);
+      await mkdir(snapshotDirectory, { recursive: true, mode: 0o700 });
+      await writeFile(humanEvidencePath, JSON.stringify({
+        version: 1,
+        externalWritersConfirmedAbsent: true,
+      }), { mode: 0o600 });
+      const args: CutoverReadinessArguments = {
+        ...readinessArgs(),
+        snapshotDirectory,
+        snapshotStorageMode: "icloud_encrypted",
+        humanEvidencePath,
+      };
+
+      const loaded = await loadReadinessEvidenceFiles({
+        args,
+        repositoryRoot,
+        homeDirectory,
+      });
+
+      expect(loaded.human.externalWritersConfirmedAbsent).toBe(true);
+      expect(loaded.rules).toBeNull();
+      expect(loaded.data).toBeNull();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+});
+
+function readyInput(
+  snapshotStorageMode: CutoverReadinessArguments["snapshotStorageMode"] = "local_encrypted",
+) {
+  const args = readinessArgs(snapshotStorageMode);
   return {
     args,
-    infra: exactInfraReport(),
+    infra: exactInfraReport(snapshotStorageMode),
     human: parseCutoverHumanEvidence({
       version: 1,
       projectId: CUTOVER_INFRA_CONTRACT.projectId,
@@ -187,31 +266,13 @@ function readyInput() {
       expectedOperatorPrincipal: args.expectedOperatorPrincipal,
       rulesDeployPrincipal: args.rulesDeployPrincipal,
       reviewedAt: "2026-07-17T00:00:00.000Z",
-      reviewerPrincipal: "user:reviewer@example.com",
-      writers: {
-        cloud_functions: "absent",
-        cloud_run_services: "absent",
-        cloud_run_jobs: "absent",
-        app_engine: "absent",
-        cloud_scheduler: "absent",
-        workflows: "absent",
-        pubsub_eventarc_cloud_tasks: "absent",
-        firebase_extensions: "absent",
-        ci_other_repositories: "absent",
-        local_scripts_cron: "confirmed_stopped",
-        manual_rest_rpc: "confirmed_stopped",
-        gas: "absent",
-        make: "absent",
-        zapier: "absent",
-        other_computers: "confirmed_stopped",
-        owner_manual_writes: "confirmed_stopped",
-      },
-      adminSdkCredentialReview: "confirmed",
-      firebaseCliSessionReview: "confirmed",
-      groupMembershipReview: "confirmed",
-      inheritedIamReview: "confirmed",
-      auditLogObservationWindow: "confirmed",
-      snapshotKeyRecoveryDrill: "confirmed",
+      confirmedByPrincipal: args.expectedOperatorPrincipal,
+      externalWritersConfirmedAbsent: true,
+      otherPcAutomationConfirmedAbsent: true,
+      maintenanceWindowApproved: true,
+      productionUsageStarted: false,
+      encryptedICloudSnapshotApproved:
+        snapshotStorageMode === "icloud_encrypted" ? true : undefined,
     }),
     rules: createRulesReadinessEvidence({
       generatedAt: "2026-07-17T00:00:00.000Z",
@@ -249,7 +310,9 @@ function readyInput() {
   };
 }
 
-function readinessArgs(): CutoverReadinessArguments {
+function readinessArgs(
+  snapshotStorageMode: CutoverReadinessArguments["snapshotStorageMode"] = "local_encrypted",
+): CutoverReadinessArguments {
   return {
     command: "readiness",
     projectId: CUTOVER_INFRA_CONTRACT.projectId,
@@ -258,6 +321,7 @@ function readinessArgs(): CutoverReadinessArguments {
     bindingExpiresAt: "2026-07-17T12:00:00Z",
     keyId: "transition-v1",
     snapshotDirectory: "/private/tmp/cutover",
+    snapshotStorageMode,
     dataPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.data.email,
     rulesPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.rules.email,
     expectedMainCommit: MAIN,
@@ -266,7 +330,9 @@ function readinessArgs(): CutoverReadinessArguments {
   };
 }
 
-function exactInfraReport(): CutoverInfraPlanReport {
+function exactInfraReport(
+  snapshotStorageMode: CutoverReadinessArguments["snapshotStorageMode"] = "local_encrypted",
+): CutoverInfraPlanReport {
   return {
     mode: "read-only-infra-plan",
     project: { projectId: CUTOVER_INFRA_CONTRACT.projectId, projectNumber: "123", active: true },
@@ -278,13 +344,19 @@ function exactInfraReport(): CutoverInfraPlanReport {
       projectBindings: "exact",
       dataImpersonationBinding: "exact",
       rulesImpersonationBinding: "exact",
-      dataWriteAuditLogs: "exact",
+      dataWriteAuditLogs: "missing",
       snapshotKeychainEntry: "present",
-      snapshotDirectory: "local_apfs_non_synced",
+      snapshotDirectory: snapshotStorageMode,
     },
     actions: [],
     applyBlockers: [],
     readinessBlockers: [],
+    warnings: [
+      "DATA_WRITE_AUDIT_LOGS_NOT_ENABLED",
+      ...(snapshotStorageMode === "icloud_encrypted"
+        ? ["ICLOUD_SNAPSHOT_REQUIRES_COMPLETE_DOWNLOAD_BEFORE_RESTORE"]
+        : []),
+    ],
     humanConfirmationRequired: [...REQUIRED_HUMAN_CONFIRMATION_IDS],
     credentialInventory: {
       fileCount: 0,

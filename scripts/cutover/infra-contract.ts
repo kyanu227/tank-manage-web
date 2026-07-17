@@ -4,6 +4,7 @@ import {
   RULES_READER_REQUIRED_IAM_PERMISSIONS,
   assertDistinctCutoverPrincipals,
 } from "./migration-credential";
+import type { SnapshotStorageMode } from "./snapshot-envelope";
 
 export const CUTOVER_PROJECT_ID = "okmarine-tankrental" as const;
 export const CUTOVER_DATA_SERVICE_ACCOUNT_ID = "transition-cutover-data" as const;
@@ -50,6 +51,7 @@ export type CutoverInfraCommonArguments = {
   bindingExpiresAt: string;
   keyId: string;
   snapshotDirectory: string;
+  snapshotStorageMode: SnapshotStorageMode;
   dataPrincipal: typeof CUTOVER_INFRA_CONTRACT.serviceAccounts.data.email;
   rulesPrincipal: typeof CUTOVER_INFRA_CONTRACT.serviceAccounts.rules.email;
 };
@@ -85,6 +87,7 @@ const COMMON_VALUE_ARGUMENT_NAMES = [
   "--binding-expires-at",
   "--key-id",
   "--snapshot-directory",
+  "--snapshot-storage-mode",
 ] as const;
 
 const READINESS_VALUE_ARGUMENT_NAMES = [
@@ -196,38 +199,13 @@ export function assertCutoverInfraPrincipalSeparation(input: {
   };
 }
 
-export const REQUIRED_HUMAN_WRITER_IDS = [
-  "cloud_functions",
-  "cloud_run_services",
-  "cloud_run_jobs",
-  "app_engine",
-  "cloud_scheduler",
-  "workflows",
-  "pubsub_eventarc_cloud_tasks",
-  "firebase_extensions",
-  "ci_other_repositories",
-  "local_scripts_cron",
-  "manual_rest_rpc",
-  "gas",
-  "make",
-  "zapier",
-  "other_computers",
-  "owner_manual_writes",
-] as const;
-
 export const REQUIRED_HUMAN_CONFIRMATION_IDS = [
-  ...REQUIRED_HUMAN_WRITER_IDS.map((id) => `writer:${id}`),
-  "adminSdkCredentialReview",
-  "firebaseCliSessionReview",
-  "groupMembershipReview",
-  "inheritedIamReview",
-  "auditLogObservationWindow",
-  "snapshotKeyRecoveryDrill",
+  "externalWritersConfirmedAbsent",
+  "otherPcAutomationConfirmedAbsent",
+  "maintenanceWindowApproved",
+  "productionUsageStarted",
+  "encryptedICloudSnapshotApproved",
 ] as const;
-
-export type HumanWriterId = typeof REQUIRED_HUMAN_WRITER_IDS[number];
-export type HumanWriterStatus = "confirmed_stopped" | "absent" | "unknown";
-export type HumanConfirmationStatus = "confirmed" | "unknown";
 
 export type CutoverHumanEvidence = {
   version: 1;
@@ -237,17 +215,15 @@ export type CutoverHumanEvidence = {
   expectedOperatorPrincipal: IamPrincipal | null;
   rulesDeployPrincipal: IamPrincipal | null;
   reviewedAt: string | null;
-  reviewerPrincipal: IamPrincipal | null;
-  writers: Record<HumanWriterId, HumanWriterStatus>;
-  adminSdkCredentialReview: HumanConfirmationStatus;
-  firebaseCliSessionReview: HumanConfirmationStatus;
-  groupMembershipReview: HumanConfirmationStatus;
-  inheritedIamReview: HumanConfirmationStatus;
-  auditLogObservationWindow: HumanConfirmationStatus;
-  snapshotKeyRecoveryDrill: HumanConfirmationStatus;
+  confirmedByPrincipal: IamPrincipal | null;
+  externalWritersConfirmedAbsent: true | null;
+  otherPcAutomationConfirmedAbsent: true | null;
+  maintenanceWindowApproved: true | null;
+  productionUsageStarted: boolean | null;
+  encryptedICloudSnapshotApproved: true | null;
 };
 
-/** 記入されていない証跡をabsentやconfirmedと推測せず、必ずunknownへ正規化する。 */
+/** 記入されていない証跡をtrueやfalseと推測せず、必ずnullへ正規化する。 */
 export function parseCutoverHumanEvidence(value: unknown): CutoverHumanEvidence {
   if (value === undefined || value === null) return emptyHumanEvidence();
   const root = objectRecord(value, "human evidence");
@@ -259,14 +235,12 @@ export function parseCutoverHumanEvidence(value: unknown): CutoverHumanEvidence 
     "expectedOperatorPrincipal",
     "rulesDeployPrincipal",
     "reviewedAt",
-    "reviewerPrincipal",
-    "writers",
-    "adminSdkCredentialReview",
-    "firebaseCliSessionReview",
-    "groupMembershipReview",
-    "inheritedIamReview",
-    "auditLogObservationWindow",
-    "snapshotKeyRecoveryDrill",
+    "confirmedByPrincipal",
+    "externalWritersConfirmedAbsent",
+    "otherPcAutomationConfirmedAbsent",
+    "maintenanceWindowApproved",
+    "productionUsageStarted",
+    "encryptedICloudSnapshotApproved",
   ], "human evidence");
   if (root.version !== 1) {
     throw new Error("human evidence versionが不正です");
@@ -285,19 +259,11 @@ export function parseCutoverHumanEvidence(value: unknown): CutoverHumanEvidence 
     false,
   );
   const reviewedAt = parseNullableHumanTimestamp(root.reviewedAt);
-  const reviewerPrincipal = parseNullableHumanPrincipal(
-    root.reviewerPrincipal,
-    "reviewerPrincipal",
+  const confirmedByPrincipal = parseNullableHumanPrincipal(
+    root.confirmedByPrincipal,
+    "confirmedByPrincipal",
     true,
   );
-  const rawWriters = root.writers === undefined
-    ? {}
-    : objectRecord(root.writers, "human evidence writers");
-  assertOnlyKeys(rawWriters, REQUIRED_HUMAN_WRITER_IDS, "human evidence writers");
-  const writers = Object.fromEntries(REQUIRED_HUMAN_WRITER_IDS.map((id) => [
-    id,
-    parseWriterStatus(rawWriters[id], id),
-  ])) as Record<HumanWriterId, HumanWriterStatus>;
   return {
     version: 1,
     projectId,
@@ -306,31 +272,26 @@ export function parseCutoverHumanEvidence(value: unknown): CutoverHumanEvidence 
     expectedOperatorPrincipal,
     rulesDeployPrincipal,
     reviewedAt,
-    reviewerPrincipal,
-    writers,
-    adminSdkCredentialReview: parseConfirmationStatus(
-      root.adminSdkCredentialReview,
-      "adminSdkCredentialReview",
+    confirmedByPrincipal,
+    externalWritersConfirmedAbsent: parseTrueOrNull(
+      root.externalWritersConfirmedAbsent,
+      "externalWritersConfirmedAbsent",
     ),
-    firebaseCliSessionReview: parseConfirmationStatus(
-      root.firebaseCliSessionReview,
-      "firebaseCliSessionReview",
+    otherPcAutomationConfirmedAbsent: parseTrueOrNull(
+      root.otherPcAutomationConfirmedAbsent,
+      "otherPcAutomationConfirmedAbsent",
     ),
-    groupMembershipReview: parseConfirmationStatus(
-      root.groupMembershipReview,
-      "groupMembershipReview",
+    maintenanceWindowApproved: parseTrueOrNull(
+      root.maintenanceWindowApproved,
+      "maintenanceWindowApproved",
     ),
-    inheritedIamReview: parseConfirmationStatus(
-      root.inheritedIamReview,
-      "inheritedIamReview",
+    productionUsageStarted: parseNullableBoolean(
+      root.productionUsageStarted,
+      "productionUsageStarted",
     ),
-    auditLogObservationWindow: parseConfirmationStatus(
-      root.auditLogObservationWindow,
-      "auditLogObservationWindow",
-    ),
-    snapshotKeyRecoveryDrill: parseConfirmationStatus(
-      root.snapshotKeyRecoveryDrill,
-      "snapshotKeyRecoveryDrill",
+    encryptedICloudSnapshotApproved: parseTrueOrNull(
+      root.encryptedICloudSnapshotApproved,
+      "encryptedICloudSnapshotApproved",
     ),
   };
 }
@@ -371,6 +332,9 @@ function parseCommonArguments(
     requiredValue(values, "--snapshot-directory"),
     "--snapshot-directory",
   );
+  const snapshotStorageMode = requireSnapshotStorageMode(
+    requiredValue(values, "--snapshot-storage-mode"),
+  );
   return {
     projectId: CUTOVER_PROJECT_ID,
     expectedOperatorPrincipal,
@@ -378,6 +342,7 @@ function parseCommonArguments(
     bindingExpiresAt,
     keyId,
     snapshotDirectory,
+    snapshotStorageMode,
     dataPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.data.email,
     rulesPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.rules.email,
   };
@@ -520,17 +485,12 @@ function emptyHumanEvidence(): CutoverHumanEvidence {
     expectedOperatorPrincipal: null,
     rulesDeployPrincipal: null,
     reviewedAt: null,
-    reviewerPrincipal: null,
-    writers: Object.fromEntries(REQUIRED_HUMAN_WRITER_IDS.map((id) => [id, "unknown"])) as Record<
-      HumanWriterId,
-      HumanWriterStatus
-    >,
-    adminSdkCredentialReview: "unknown",
-    firebaseCliSessionReview: "unknown",
-    groupMembershipReview: "unknown",
-    inheritedIamReview: "unknown",
-    auditLogObservationWindow: "unknown",
-    snapshotKeyRecoveryDrill: "unknown",
+    confirmedByPrincipal: null,
+    externalWritersConfirmedAbsent: null,
+    otherPcAutomationConfirmedAbsent: null,
+    maintenanceWindowApproved: null,
+    productionUsageStarted: null,
+    encryptedICloudSnapshotApproved: null,
   };
 }
 
@@ -566,6 +526,14 @@ export function assertCutoverInfraCommonContract(
   const keyId = requireRuntimeString(root.keyId, "keyId");
   if (!/^[A-Za-z0-9._-]{1,100}$/u.test(keyId)) throw new Error("keyIdが不正です");
   requiredAbsolutePath(requireRuntimeString(root.snapshotDirectory, "snapshotDirectory"), "snapshotDirectory");
+  requireSnapshotStorageMode(requireRuntimeString(root.snapshotStorageMode, "snapshotStorageMode"));
+}
+
+function requireSnapshotStorageMode(value: string): SnapshotStorageMode {
+  if (value !== "local_encrypted" && value !== "icloud_encrypted") {
+    throw new Error("snapshot storage modeが不正です");
+  }
+  return value;
 }
 
 /** CLI parserだけでなくservice公開境界でもmutation許可を再検証する。 */
@@ -657,16 +625,16 @@ function parseNullableHumanPrincipal(
   return principal;
 }
 
-function parseWriterStatus(value: unknown, id: HumanWriterId): HumanWriterStatus {
-  if (value === undefined) return "unknown";
-  if (value === "confirmed_stopped" || value === "absent" || value === "unknown") return value;
-  throw new Error(`human evidence writer ${id}のstatusが不正です`);
+function parseTrueOrNull(value: unknown, label: string): true | null {
+  if (value === undefined || value === null) return null;
+  if (value === true) return true;
+  throw new Error(`human evidence ${label}はtrueまたはnullである必要があります`);
 }
 
-function parseConfirmationStatus(value: unknown, label: string): HumanConfirmationStatus {
-  if (value === undefined) return "unknown";
-  if (value === "confirmed" || value === "unknown") return value;
-  throw new Error(`human evidence ${label}のstatusが不正です`);
+function parseNullableBoolean(value: unknown, label: string): boolean | null {
+  if (value === undefined || value === null) return null;
+  if (typeof value === "boolean") return value;
+  throw new Error(`human evidence ${label}はbooleanまたはnullである必要があります`);
 }
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {

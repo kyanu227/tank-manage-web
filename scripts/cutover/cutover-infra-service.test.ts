@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -52,7 +52,7 @@ describe("cutover infrastructure planner", () => {
     expect(Object.values(mutation).every((call) => !vi.mocked(call).mock.calls.length)).toBe(true);
   });
 
-  it("roleの不足・過剰permission、期限なしbinding、Audit exemptionをfail closedにする", async () => {
+  it("roleの不足・過剰permissionと期限なしbindingは停止し、Audit exemptionはwarningにする", async () => {
     const { repositoryRoot, snapshotDirectory } = await temporaryWorkspace();
     const fixture = exactFixture();
     fixture.dataRole = {
@@ -89,8 +89,31 @@ describe("cutover infrastructure planner", () => {
       "DATA_CUSTOM_ROLE_DRIFT",
       "RULES_CUSTOM_ROLE_DRIFT",
       "DATA_PROJECT_BINDING_DRIFT",
-      "DATA_WRITE_AUDIT_EXEMPTION_PRESENT",
     ]));
+    expect(report.warnings).toContain("DATA_WRITE_AUDIT_EXEMPTION_PRESENT");
+    expect(report.resources.dataWriteAuditLogs).toBe("exemptions_present");
+  });
+
+  it("DATA_WRITE Audit Logsが未設定でもwarningだけでIAM変更を計画しない", async () => {
+    const { repositoryRoot, snapshotDirectory } = await temporaryWorkspace();
+    const fixture = exactFixture();
+    fixture.projectPolicy.auditConfigs = [];
+    const mutation = mutationAdapter();
+
+    const report = await planCutoverInfrastructure({
+      args: planArgs(snapshotDirectory),
+      repositoryRoot,
+    }, {
+      readAdapter: fixture.read,
+      mutationAdapter: mutation,
+      local: localDependencies(snapshotDirectory, true),
+    });
+
+    expect(report.actions).toEqual([]);
+    expect(report.applyBlockers).toEqual([]);
+    expect(report.resources.dataWriteAuditLogs).toBe("missing");
+    expect(report.warnings).toContain("DATA_WRITE_AUDIT_LOGS_NOT_ENABLED");
+    expect(vi.mocked(mutation.setProjectIamPolicyOnce)).not.toHaveBeenCalled();
   });
 
   it("専用custom roleの別principal・groupへの追加bindingを拒否する", async () => {
@@ -119,6 +142,26 @@ describe("cutover infrastructure planner", () => {
       "DATA_PROJECT_BINDING_DRIFT",
       "RULES_PROJECT_BINDING_DRIFT",
     ]));
+  });
+
+  it("専用role外でもgroup bindingがあればmembership監査なしにGOとしない", async () => {
+    const { repositoryRoot, snapshotDirectory } = await temporaryWorkspace();
+    const fixture = exactFixture();
+    fixture.projectPolicy.bindings.push({
+      role: "roles/viewer",
+      members: ["group:operations@example.com"],
+    });
+
+    const report = await planCutoverInfrastructure({
+      args: planArgs(snapshotDirectory),
+      repositoryRoot,
+    }, {
+      readAdapter: fixture.read,
+      local: localDependencies(snapshotDirectory, true),
+    });
+
+    expect(report.readinessBlockers)
+      .toContain("GROUP_BINDINGS_PRESENT_HARD_STOP");
   });
 
   it("target SAに専用custom role以外のproject roleがあれば拒否する", async () => {
@@ -204,6 +247,30 @@ describe("cutover infrastructure apply", () => {
     expect(Object.values(mutation).every((call) => !vi.mocked(call).mock.calls.length)).toBe(true);
   });
 
+  it("missing snapshot directoryだけを0700で作成し、再読取りで完全一致にする", async () => {
+    const { repositoryRoot, snapshotDirectory } = await temporaryWorkspace();
+    const missingDirectory = join(snapshotDirectory, "planned");
+    const fixture = exactFixture();
+    const mutation = mutationAdapter();
+    const local = localDependencies(missingDirectory, true);
+
+    const plan = await planCutoverInfrastructure({
+      args: planArgs(missingDirectory),
+      repositoryRoot,
+    }, { readAdapter: fixture.read, mutationAdapter: mutation, local });
+    expect(plan.actions).toContain("create_snapshot_directory");
+    expect(plan.resources.snapshotDirectory).toBe("missing");
+
+    const applied = await applyCutoverInfrastructure({
+      args: applyArgs(missingDirectory),
+      repositoryRoot,
+    }, { readAdapter: fixture.read, mutationAdapter: mutation, local });
+    expect(applied.actions).toEqual([]);
+    expect(applied.resources.snapshotDirectory).toBe("local_encrypted");
+    expect((await stat(missingDirectory)).mode & 0o777).toBe(0o700);
+    expect(Object.values(mutation).every((call) => !vi.mocked(call).mock.calls.length)).toBe(true);
+  });
+
   it("missing resourceだけを作成し、policyを一度ずつ設定してKeychainを最後に作る", async () => {
     const { repositoryRoot, snapshotDirectory } = await temporaryWorkspace();
     const fixture = exactFixture();
@@ -259,6 +326,7 @@ describe("cutover infrastructure apply", () => {
     expect(operationOrder.at(-1)).toBe("keychain:add");
     expect(vi.mocked(mutation.setProjectIamPolicyOnce)).toHaveBeenCalledTimes(1);
     expect(vi.mocked(mutation.setServiceAccountIamPolicyOnce)).toHaveBeenCalledTimes(2);
+    expect(fixture.projectPolicy.auditConfigs).toBeUndefined();
   });
 
   it("作成resourceを再読取できない間はIAM policyへ進まない", async () => {
@@ -491,6 +559,7 @@ function planArgs(snapshotDirectory: string): CutoverInfraPlanArguments {
     bindingExpiresAt: EXPIRES_AT,
     keyId: "transition-v1",
     snapshotDirectory,
+    snapshotStorageMode: "local_encrypted",
     dataPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.data.email,
     rulesPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.rules.email,
   };
@@ -563,10 +632,10 @@ async function temporaryWorkspace(): Promise<{
   repositoryRoot: string;
   snapshotDirectory: string;
 }> {
-  const path = await mkdtemp(join(tmpdir(), "cutover-infra-service-"));
+  const path = await realpath(await mkdtemp(join(tmpdir(), "cutover-infra-service-")));
   temporaryDirectories.push(path);
   const repositoryRoot = join(path, "repository");
   const snapshotDirectory = join(path, "snapshot");
-  await Promise.all([mkdir(repositoryRoot), mkdir(snapshotDirectory)]);
+  await Promise.all([mkdir(repositoryRoot), mkdir(snapshotDirectory, { mode: 0o700 })]);
   return { repositoryRoot, snapshotDirectory };
 }

@@ -38,6 +38,7 @@ async function main(): Promise<void> {
 
   const envelope = await readEncryptedSnapshotFile(snapshotPath, {
     repositoryRoot: args.repositoryRoot,
+    storageMode: args.snapshotStorageMode,
   });
   const key = await loadSnapshotEncryptionKey({
     projectId: args.projectId,

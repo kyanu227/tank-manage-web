@@ -21,9 +21,10 @@ import {
 } from "./gcloud-infra-adapter";
 import {
   createSnapshotKeychainEntry,
-  inspectLocalSnapshotDirectory,
+  ensureLocalSnapshotDirectory,
   inspectSnapshotKeychainEntry,
   inventoryRepositoryServiceAccountCredentials,
+  planLocalSnapshotDirectory,
   type LocalCutoverEnvironmentDependencies,
   type RepositoryServiceAccountCredentialInventory,
 } from "./local-cutover-environment";
@@ -54,6 +55,7 @@ export type CutoverInfraAction =
   | "set_project_policy"
   | "set_data_service_account_policy"
   | "set_rules_service_account_policy"
+  | "create_snapshot_directory"
   | "create_snapshot_keychain_entry";
 
 export type CutoverInfraPlanReport = {
@@ -67,13 +69,14 @@ export type CutoverInfraPlanReport = {
     projectBindings: "missing" | "exact";
     dataImpersonationBinding: "missing" | "exact";
     rulesImpersonationBinding: "missing" | "exact";
-    dataWriteAuditLogs: "missing" | "exact";
+    dataWriteAuditLogs: "missing" | "exact" | "exemptions_present";
     snapshotKeychainEntry: "missing" | "present";
-    snapshotDirectory: "local_apfs_non_synced";
+    snapshotDirectory: "missing" | "local_encrypted" | "icloud_encrypted";
   };
   actions: CutoverInfraAction[];
   applyBlockers: string[];
   readinessBlockers: string[];
+  warnings: string[];
   humanConfirmationRequired: string[];
   credentialInventory: {
     fileCount: number;
@@ -224,9 +227,17 @@ export async function applyCutoverInfrastructure(
   assertApplySafe(plan.report);
   const remainingCloudActions = plan.report.actions.filter((action) => (
     action !== "create_snapshot_keychain_entry"
+    && action !== "create_snapshot_directory"
   ));
   if (remainingCloudActions.length > 0) {
     throw new Error("infra apply後のcloud resource完全一致を確認できません");
+  }
+  if (plan.report.actions.includes("create_snapshot_directory")) {
+    await ensureLocalSnapshotDirectory({
+      snapshotDirectory: input.args.snapshotDirectory,
+      repositoryRoot: input.repositoryRoot,
+      storageMode: input.args.snapshotStorageMode,
+    }, dependencies.local);
   }
   if (plan.report.actions.includes("create_snapshot_keychain_entry")) {
     await createSnapshotKeychainEntry({
@@ -271,9 +282,10 @@ async function collectPlan(
     read.getProjectIamPolicy(args.projectId),
     read.listProjectAncestors(args.projectId),
     inventoryRepositoryServiceAccountCredentials({ repositoryRoot: input.repositoryRoot }),
-    inspectLocalSnapshotDirectory({
+    planLocalSnapshotDirectory({
       snapshotDirectory: args.snapshotDirectory,
       repositoryRoot: input.repositoryRoot,
+      storageMode: args.snapshotStorageMode,
     }, dependencies.local),
     inspectSnapshotKeychainEntry({ projectId: args.projectId, keyId: args.keyId }, dependencies.local),
   ]);
@@ -302,6 +314,7 @@ async function collectPlan(
   const actions: CutoverInfraAction[] = [];
   const applyBlockers: string[] = [];
   const readinessBlockers: string[] = [];
+  const warnings: string[] = [];
   const humanConfirmationRequired = [...REQUIRED_HUMAN_CONFIRMATION_IDS];
   if (
     project.parent
@@ -355,8 +368,7 @@ async function collectPlan(
   const audit = assessAuditPolicies(
     projectPolicy,
     ancestorPolicies.map(({ policy }) => policy),
-    actions,
-    applyBlockers,
+    warnings,
   );
   assessAncestorAccess(
     [projectPolicy, ...ancestorPolicies.map(({ policy }) => policy)],
@@ -364,7 +376,7 @@ async function collectPlan(
     applyBlockers,
   );
   if (containsGroupBindings([projectPolicy, ...ancestorPolicies.map(({ policy }) => policy)])) {
-    readinessBlockers.push("GROUP_MEMBERSHIP_REQUIRES_HUMAN_EVIDENCE");
+    readinessBlockers.push("GROUP_BINDINGS_PRESENT_HARD_STOP");
   }
   if (credentialInventory.credentialFileCount > 0) {
     readinessBlockers.push("REPOSITORY_ADMIN_SDK_CREDENTIALS_REQUIRE_REVIEW");
@@ -374,6 +386,10 @@ async function collectPlan(
   }
   if (project.lifecycleState !== "ACTIVE") applyBlockers.push("PROJECT_NOT_ACTIVE");
   if (!keychain.exists) actions.push("create_snapshot_keychain_entry");
+  if (snapshotDirectory.status === "missing") actions.push("create_snapshot_directory");
+  if (args.snapshotStorageMode === "icloud_encrypted") {
+    warnings.push("ICLOUD_SNAPSHOT_REQUIRES_COMPLETE_DOWNLOAD_BEFORE_RESTORE");
+  }
 
   const credentialReport = await credentialInventoryReport(credentialInventory, read, args.projectId);
   const reportWithoutHash = {
@@ -393,13 +409,14 @@ async function collectPlan(
       rulesImpersonationBinding: rulesImpersonation,
       dataWriteAuditLogs: audit,
       snapshotKeychainEntry: keychain.exists ? "present" as const : "missing" as const,
-      snapshotDirectory: snapshotDirectory.fileSystem === "apfs"
-        ? "local_apfs_non_synced" as const
-        : "local_apfs_non_synced" as const,
+      snapshotDirectory: snapshotDirectory.status === "exact"
+        ? snapshotDirectory.storageMode
+        : "missing" as const,
     },
     actions: uniqueSorted(actions),
     applyBlockers: uniqueSorted(applyBlockers),
     readinessBlockers: uniqueSorted(readinessBlockers),
+    warnings: uniqueSorted(warnings),
     humanConfirmationRequired,
     credentialInventory: credentialReport,
   };
@@ -591,15 +608,16 @@ function assessPrincipalBinding(
 function assessAuditPolicies(
   projectPolicy: GcloudIamPolicy,
   ancestorPolicies: readonly GcloudIamPolicy[],
-  actions: CutoverInfraAction[],
-  blockers: string[],
-): "missing" | "exact" {
+  warnings: string[],
+): "missing" | "exact" | "exemptions_present" {
+  let exemptionsPresent = false;
   for (const policy of [projectPolicy, ...ancestorPolicies]) {
     for (const config of policy.auditConfigs ?? []) {
       if (config.service !== DATA_WRITE_SERVICE && config.service !== "allServices") continue;
       for (const log of config.auditLogConfigs) {
         if (log.logType === DATA_WRITE_LOG_TYPE && (log.exemptedMembers?.length ?? 0) > 0) {
-          blockers.push("DATA_WRITE_AUDIT_EXEMPTION_PRESENT");
+          exemptionsPresent = true;
+          warnings.push("DATA_WRITE_AUDIT_EXEMPTION_PRESENT");
         }
       }
     }
@@ -607,17 +625,17 @@ function assessAuditPolicies(
   const datastoreConfigs = (projectPolicy.auditConfigs ?? [])
     .filter((config) => config.service === DATA_WRITE_SERVICE);
   if (datastoreConfigs.length > 1) {
-    blockers.push("DATA_WRITE_AUDIT_CONFIG_DRIFT");
-    return "exact";
+    warnings.push("DATA_WRITE_AUDIT_CONFIG_DRIFT");
   }
   const dataWriteConfigs = datastoreConfigs.length === 1
     ? datastoreConfigs[0].auditLogConfigs.filter((log) => log.logType === DATA_WRITE_LOG_TYPE)
     : [];
   const hasExact = dataWriteConfigs.length === 1
     && (dataWriteConfigs[0].exemptedMembers?.length ?? 0) === 0;
-  if (dataWriteConfigs.length > 1) blockers.push("DATA_WRITE_AUDIT_CONFIG_DRIFT");
+  if (dataWriteConfigs.length > 1) warnings.push("DATA_WRITE_AUDIT_CONFIG_DRIFT");
+  if (exemptionsPresent) return "exemptions_present";
   if (!hasExact) {
-    actions.push("set_project_policy");
+    warnings.push("DATA_WRITE_AUDIT_LOGS_NOT_ENABLED");
     return "missing";
   }
   return "exact";
@@ -660,16 +678,6 @@ function desiredProjectPolicy(
     members: [`serviceAccount:${args.rulesPrincipal}`],
     condition: expectedCondition("rules", args.bindingExpiresAt),
   });
-  const auditConfigs = next.auditConfigs ?? [];
-  let datastore = auditConfigs.find((config) => config.service === DATA_WRITE_SERVICE);
-  if (!datastore) {
-    datastore = { service: DATA_WRITE_SERVICE, auditLogConfigs: [] };
-    auditConfigs.push(datastore);
-  }
-  if (!datastore.auditLogConfigs.some((log) => log.logType === DATA_WRITE_LOG_TYPE)) {
-    datastore.auditLogConfigs.push({ logType: DATA_WRITE_LOG_TYPE });
-  }
-  next.auditConfigs = auditConfigs;
   return next;
 }
 

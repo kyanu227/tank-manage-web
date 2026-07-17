@@ -41,6 +41,7 @@ async function main(): Promise<void> {
     const envelope = encryptTransitionSnapshot(payload, key);
     await writeEncryptedSnapshotFile(outputPath, envelope, {
       repositoryRoot: args.repositoryRoot,
+      storageMode: args.snapshotStorageMode,
     });
     console.log(JSON.stringify({
       created: true,

@@ -2,19 +2,18 @@ import {
   createCipheriv,
   createDecipheriv,
   randomBytes,
-  randomUUID,
   timingSafeEqual,
 } from "node:crypto";
 import { constants as fsConstants } from "node:fs";
 import {
   access,
-  link,
   open,
   readFile,
   realpath,
   stat,
   unlink,
 } from "node:fs/promises";
+import { userInfo } from "node:os";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   canonicalSha256,
@@ -34,8 +33,15 @@ const IV_BYTES = 12;
 const SHA256_PATTERN = /^[0-9a-f]{64}$/;
 export const MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES = 16 * 1024 * 1024;
 
+export type SnapshotStorageMode =
+  | "local_encrypted"
+  | "icloud_encrypted";
+
 export type SnapshotOutputPolicy = {
   repositoryRoot: string;
+  storageMode: SnapshotStorageMode;
+  /** testまたは明示contract用。既定はambient HOMEではなくOS account home。 */
+  homeDirectory?: string;
   mobileDocumentsRoot?: string;
   cloudStorageRoot?: string;
 };
@@ -156,22 +162,21 @@ export async function writeEncryptedSnapshotFile(
 ): Promise<void> {
   const safeOutputPath = await assertSafeSnapshotPath(outputPath, policy);
   const directory = dirname(safeOutputPath);
-  const temporaryPath = join(directory, `.${basename(safeOutputPath)}.${randomUUID()}.tmp`);
   const body = `${canonicalStringify(normalizeEnvelope(envelope))}\n`;
   if (Buffer.byteLength(body, "utf8") > MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES) {
     throw new Error("snapshot envelopeがfile size上限を超えています");
   }
   let handle: Awaited<ReturnType<typeof open>> | null = null;
+  let created = false;
   try {
-    handle = await open(temporaryPath, "wx", 0o600);
+    // bodyは暗号化済み。wxで最終pathを直接作成し、iCloud File Providerで
+    // hard linkが使えない場合にも平文・一時snapshotを作らない。
+    handle = await open(safeOutputPath, "wx", 0o600);
+    created = true;
     await handle.writeFile(body, { encoding: "utf8" });
     await handle.sync();
     await handle.close();
     handle = null;
-
-    // hard linkは既存outputを上書きしない。同一directoryなので同一filesystem上で完結する。
-    await link(temporaryPath, safeOutputPath);
-    await unlink(temporaryPath);
     const directoryHandle = await open(directory, fsConstants.O_RDONLY);
     try {
       await directoryHandle.sync();
@@ -180,7 +185,7 @@ export async function writeEncryptedSnapshotFile(
     }
   } catch (error) {
     if (handle) await handle.close().catch(() => undefined);
-    await unlink(temporaryPath).catch(() => undefined);
+    if (created) await unlink(safeOutputPath).catch(() => undefined);
     throw error;
   }
 
@@ -219,22 +224,37 @@ export async function assertSafeSnapshotPath(
   if (!repositoryRoot) throw new Error("repository rootを解決できません");
   const mobileDocumentsRoot = await normalizeExistingPath(
     policy.mobileDocumentsRoot
-      ?? join(process.env.HOME ?? "", "Library", "Mobile Documents"),
+      ?? join(policy.homeDirectory ?? userInfo().homedir, "Library", "Mobile Documents"),
     true,
   );
+  const iCloudDriveRoot = mobileDocumentsRoot
+    ? await normalizeExistingPath(join(mobileDocumentsRoot, "com~apple~CloudDocs"), true)
+    : null;
   const cloudStorageRoot = await normalizeExistingPath(
     policy.cloudStorageRoot
-      ?? join(process.env.HOME ?? "", "Library", "CloudStorage"),
+      ?? join(policy.homeDirectory ?? userInfo().homedir, "Library", "CloudStorage"),
     true,
   );
   if (isInside(normalizedPath, repositoryRoot)) {
     throw new Error("snapshotをrepository配下へ保存・読取できません");
   }
-  if (mobileDocumentsRoot && isInside(normalizedPath, mobileDocumentsRoot)) {
-    throw new Error("snapshotをiCloud Mobile Documents配下へ保存・読取できません");
-  }
   if (cloudStorageRoot && isInside(normalizedPath, cloudStorageRoot)) {
     throw new Error("snapshotを同期CloudStorage配下へ保存・読取できません");
+  }
+  if (
+    mobileDocumentsRoot
+    && isInside(normalizedPath, mobileDocumentsRoot)
+    && (!iCloudDriveRoot || !isInside(normalizedPath, iCloudDriveRoot))
+  ) {
+    throw new Error("snapshotはiCloud Driveのcom~apple~CloudDocs配下だけに保存・読取できます");
+  }
+  const actualStorageMode = classifySnapshotStorageMode(
+    normalizedPath,
+    iCloudDriveRoot,
+  );
+  const expectedStorageMode = policy.storageMode;
+  if (actualStorageMode !== expectedStorageMode) {
+    throw new Error("snapshot storage modeと保存先が一致しません");
   }
   if (mustExist) {
     await access(normalizedPath, fsConstants.R_OK);
@@ -254,6 +274,24 @@ export async function assertSafeSnapshotPath(
       });
   }
   return normalizedPath;
+}
+
+/** 暗号化snapshotの保存場所をrepository外localまたはiCloud Driveへ分類する。 */
+export async function resolveSnapshotStorageMode(
+  snapshotPath: string,
+  policy: SnapshotOutputPolicy,
+  mustExist = false,
+): Promise<SnapshotStorageMode> {
+  const safePath = await assertSafeSnapshotPath(snapshotPath, policy, mustExist);
+  const mobileDocumentsRoot = await normalizeExistingPath(
+    policy.mobileDocumentsRoot
+      ?? join(policy.homeDirectory ?? userInfo().homedir, "Library", "Mobile Documents"),
+    true,
+  );
+  const iCloudDriveRoot = mobileDocumentsRoot
+    ? await normalizeExistingPath(join(mobileDocumentsRoot, "com~apple~CloudDocs"), true)
+    : null;
+  return classifySnapshotStorageMode(safePath, iCloudDriveRoot);
 }
 
 export function envelopePayloadSha256(
@@ -315,6 +353,20 @@ async function normalizeExistingPath(path: string, optional = false): Promise<st
 function isInside(target: string, parent: string): boolean {
   const nested = relative(parent, target);
   return nested === "" || (!nested.startsWith("..") && !isAbsolute(nested));
+}
+
+/**
+ * gcloud impersonation用にHOMEを分離しても、OS account home配下の
+ * canonical iCloud Drive rootだけを暗号化snapshot保存先として識別する。
+ */
+function classifySnapshotStorageMode(
+  snapshotPath: string,
+  iCloudDriveRoot: string | null,
+): SnapshotStorageMode {
+  if (iCloudDriveRoot && isInside(snapshotPath, iCloudDriveRoot)) {
+    return "icloud_encrypted";
+  }
+  return "local_encrypted";
 }
 
 function objectRecord(value: unknown, label: string): Record<string, unknown> {

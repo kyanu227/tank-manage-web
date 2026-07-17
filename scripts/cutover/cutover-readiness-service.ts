@@ -3,7 +3,6 @@ import { isAbsolute, relative } from "node:path";
 import { canonicalSha256 } from "./canonical-firestore-value";
 import { assertSafeSnapshotPath } from "./snapshot-envelope";
 import {
-  REQUIRED_HUMAN_WRITER_IDS,
   REQUIRED_HUMAN_CONFIRMATION_IDS,
   parseCutoverHumanEvidence,
   type CutoverHumanEvidence,
@@ -26,6 +25,7 @@ export type CutoverReadinessReport = {
   status: "GO" | "NO-GO";
   completed: string[];
   blocking: string[];
+  warnings: string[];
   humanConfirmationRequired: string[];
   evidenceHashes: Record<string, string>;
 };
@@ -33,6 +33,8 @@ export type CutoverReadinessReport = {
 export async function loadReadinessEvidenceFiles(input: {
   args: CutoverReadinessArguments;
   repositoryRoot: string;
+  /** test injection用。既定はOS account homeとし、ambient HOMEは使わない。 */
+  homeDirectory?: string;
 }): Promise<{
   human: CutoverHumanEvidence;
   rules: RulesReadinessEvidenceV1 | null;
@@ -43,16 +45,22 @@ export async function loadReadinessEvidenceFiles(input: {
       input.args.humanEvidencePath,
       input.repositoryRoot,
       input.args.snapshotDirectory,
+      input.args.snapshotStorageMode,
+      input.homeDirectory,
     ),
     readOptionalSafeJson(
       input.args.rulesBaselineEvidencePath,
       input.repositoryRoot,
       input.args.snapshotDirectory,
+      input.args.snapshotStorageMode,
+      input.homeDirectory,
     ),
     readOptionalSafeJson(
       input.args.dataPreflightEvidencePath,
       input.repositoryRoot,
       input.args.snapshotDirectory,
+      input.args.snapshotStorageMode,
+      input.homeDirectory,
     ),
   ]);
   const rulesEvidence = rulesValue === null ? null : parseCutoverReadinessEvidence(rulesValue);
@@ -83,6 +91,7 @@ export function assessCutoverReadiness(input: {
 }): CutoverReadinessReport {
   const completed: string[] = [];
   const blocking: string[] = [];
+  const warnings: string[] = [];
   const humanConfirmationRequired: string[] = [];
   const evidenceHashes: Record<string, string> = {};
 
@@ -96,10 +105,8 @@ export function assessCutoverReadiness(input: {
     )) {
       blocking.push("INFRA_HUMAN_CONFIRMATION_CONTRACT_MISMATCH");
     }
-    const unresolvedInfraReadinessBlockers = input.infra.readinessBlockers.filter((blocker) => !(
-      blocker === "GROUP_MEMBERSHIP_REQUIRES_HUMAN_EVIDENCE"
-      && input.human.groupMembershipReview === "confirmed"
-    ));
+    const unresolvedInfraReadinessBlockers = input.infra.readinessBlockers;
+    warnings.push(...input.infra.warnings);
     if (input.infra.actions.length > 0) blocking.push("INFRA_ACTIONS_REMAIN");
     blocking.push(...input.infra.applyBlockers, ...unresolvedInfraReadinessBlockers);
     if (
@@ -115,6 +122,7 @@ export function assessCutoverReadiness(input: {
     now: input.now,
     completed,
     blocking,
+    warnings,
     required: humanConfirmationRequired,
   });
   evidenceHashes.human = canonicalSha256(input.human);
@@ -199,6 +207,7 @@ export function assessCutoverReadiness(input: {
     status: normalizedBlocking.length === 0 ? "GO" : "NO-GO",
     completed: uniqueSorted(completed),
     blocking: normalizedBlocking,
+    warnings: uniqueSorted(warnings),
     humanConfirmationRequired: uniqueSorted(humanConfirmationRequired),
     evidenceHashes,
   };
@@ -228,6 +237,8 @@ export function formatCutoverReadinessReport(report: CutoverReadinessReport): st
     "",
     section("Blocking", report.blocking),
     "",
+    section("Warnings", report.warnings),
+    "",
     section("Human confirmation required", report.humanConfirmationRequired),
     "",
     section("Evidence hashes", Object.entries(report.evidenceHashes).map(
@@ -240,9 +251,15 @@ async function readOptionalSafeJson(
   path: string | undefined,
   repositoryRoot: string,
   evidenceDirectory: string,
+  storageMode: CutoverReadinessArguments["snapshotStorageMode"],
+  homeDirectory?: string,
 ): Promise<unknown | null> {
   if (!path) return null;
-  const safePath = await assertSafeSnapshotPath(path, { repositoryRoot }, true);
+  const safePath = await assertSafeSnapshotPath(
+    path,
+    { repositoryRoot, storageMode, homeDirectory },
+    true,
+  );
   const safeDirectory = await realpath(evidenceDirectory);
   const nested = relative(safeDirectory, safePath);
   if (nested === "" || nested.startsWith("..") || isAbsolute(nested)) {
@@ -265,9 +282,10 @@ function assessHumanEvidence(input: {
   now: Date;
   completed: string[];
   blocking: string[];
+  warnings: string[];
   required: string[];
 }): void {
-  const { human, completed, blocking, required } = input;
+  const { human, completed, blocking, warnings, required } = input;
   const reviewedAt = human.reviewedAt === null ? Number.NaN : Date.parse(human.reviewedAt);
   const humanEvidenceAge = input.now.getTime() - reviewedAt;
   if (
@@ -276,8 +294,7 @@ function assessHumanEvidence(input: {
     || human.keyId !== input.args.keyId
     || human.expectedOperatorPrincipal !== input.args.expectedOperatorPrincipal
     || human.rulesDeployPrincipal !== input.args.rulesDeployPrincipal
-    || human.reviewerPrincipal === null
-    || human.reviewerPrincipal === input.args.expectedOperatorPrincipal
+    || human.confirmedByPrincipal === null
     || !Number.isFinite(reviewedAt)
     || humanEvidenceAge < 0
     || humanEvidenceAge > 60 * 60 * 1_000
@@ -285,26 +302,30 @@ function assessHumanEvidence(input: {
     blocking.push("HUMAN_EVIDENCE_CONTEXT_INVALID_OR_STALE");
     required.push("record fresh human evidence for this project and main commit");
   }
-  REQUIRED_HUMAN_WRITER_IDS.forEach((writer) => {
-    if (human.writers[writer] === "unknown") {
-      blocking.push(`WRITER_${writer.toUpperCase()}_UNKNOWN`);
-      required.push(`confirm ${writer} is absent or stopped`);
-    }
-  });
   const confirmations = {
-    adminSdkCredentialReview: human.adminSdkCredentialReview,
-    firebaseCliSessionReview: human.firebaseCliSessionReview,
-    groupMembershipReview: human.groupMembershipReview,
-    inheritedIamReview: human.inheritedIamReview,
-    auditLogObservationWindow: human.auditLogObservationWindow,
-    snapshotKeyRecoveryDrill: human.snapshotKeyRecoveryDrill,
+    externalWritersConfirmedAbsent: human.externalWritersConfirmedAbsent === true,
+    otherPcAutomationConfirmedAbsent: human.otherPcAutomationConfirmedAbsent === true,
+    maintenanceWindowApproved: human.maintenanceWindowApproved === true,
+    productionUsageStarted: human.productionUsageStarted === false,
   };
-  Object.entries(confirmations).forEach(([name, status]) => {
-    if (status !== "confirmed") {
-      blocking.push(`${name.replace(/[A-Z]/gu, (letter) => `_${letter}`).toUpperCase()}_UNKNOWN`);
+  Object.entries(confirmations).forEach(([name, confirmed]) => {
+    if (!confirmed) {
+      blocking.push(`${name.replace(/[A-Z]/gu, (letter) => `_${letter}`).toUpperCase()}_UNCONFIRMED`);
       required.push(`confirm ${name}`);
     }
   });
+  if (
+    input.args.snapshotStorageMode === "icloud_encrypted"
+    && human.encryptedICloudSnapshotApproved !== true
+  ) {
+    blocking.push("ENCRYPTED_ICLOUD_SNAPSHOT_NOT_APPROVED");
+    required.push("confirm encryptedICloudSnapshotApproved");
+  }
+  if (input.args.snapshotStorageMode === "local_encrypted") {
+    warnings.push("EXTERNAL_APFS_COPY_AND_SEPARATE_MAC_KEY_DRILL_RECOMMENDED");
+  } else {
+    warnings.push("SEPARATE_MAC_KEY_RECOVERY_DRILL_RECOMMENDED");
+  }
   if (required.length === 0) completed.push("all required human evidence is confirmed");
 }
 

@@ -2,8 +2,10 @@ import {
   chmod,
   mkdir,
   mkdtemp,
+  readdir,
   realpath,
   rm,
+  stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
@@ -12,9 +14,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createSnapshotKeychainEntry,
+  ensureLocalSnapshotDirectory,
   inspectLocalSnapshotDirectory,
   inspectSnapshotKeychainEntry,
   inventoryRepositoryServiceAccountCredentials,
+  planLocalSnapshotDirectory,
   type LocalCommandRequest,
 } from "./local-cutover-environment";
 
@@ -135,23 +139,34 @@ describe("local snapshot directory inspection", () => {
     }, { runCommand: command })).resolves.toEqual({
       isDirectory: true,
       outsideRepository: true,
-      outsideSyncRoots: true,
+      storageMode: "local_encrypted",
       fileSystem: "apfs",
       localMount: true,
     });
     expect(command).toHaveBeenCalledWith({ executable: "/sbin/mount", args: [] });
   });
 
-  it("repository・同期folder・non-local/non-APFSを拒否する", async () => {
+  it("iCloud encryptedを許可し、repository・他同期folder・non-local/non-APFSを拒否する", async () => {
     const root = await temporaryDirectory("cutover-path-policy-");
     const repositoryRoot = join(root, "repository");
-    const mobileRoot = join(root, "Mobile Documents");
+    const homeRoot = join(root, "home");
+    const mobileRoot = join(homeRoot, "Library", "Mobile Documents");
+    const iCloudRoot = join(mobileRoot, "com~apple~CloudDocs");
+    const iCloudSnapshot = join(iCloudRoot, "TankCutover");
+    const otherMobileProvider = join(mobileRoot, "other-provider");
+    const cloudRoot = join(root, "CloudStorage");
     const safeRoot = join(root, "safe");
     await Promise.all([
       mkdir(repositoryRoot),
-      mkdir(mobileRoot),
+      mkdir(iCloudSnapshot, { recursive: true, mode: 0o700 }),
+      mkdir(cloudRoot),
       mkdir(safeRoot),
     ]);
+    await mkdir(otherMobileProvider);
+    const mountCommand = async () => ({
+      exitCode: 0,
+      stdout: `/dev/disk1 on / (apfs, local)\n/dev/test on ${root} (apfs, local)`,
+    });
     const resolvedSafeRoot = await realpath(safeRoot);
     await expect(inspectLocalSnapshotDirectory({
       snapshotDirectory: repositoryRoot,
@@ -160,11 +175,39 @@ describe("local snapshot directory inspection", () => {
       cloudStorageRoot: join(root, "missing-cloud-root"),
     }, { runCommand: vi.fn() })).rejects.toThrow("repository配下");
     await expect(inspectLocalSnapshotDirectory({
-      snapshotDirectory: mobileRoot,
+      snapshotDirectory: iCloudSnapshot,
+      repositoryRoot,
+      storageMode: "icloud_encrypted",
+      homeDirectory: homeRoot,
+      mobileDocumentsRoot: mobileRoot,
+      cloudStorageRoot: cloudRoot,
+    }, { runCommand: mountCommand })).resolves.toMatchObject({
+      storageMode: "icloud_encrypted",
+      outsideRepository: true,
+      fileSystem: "apfs",
+    });
+    await expect(inspectLocalSnapshotDirectory({
+      snapshotDirectory: otherMobileProvider,
+      repositoryRoot,
+      storageMode: "icloud_encrypted",
+      homeDirectory: homeRoot,
+      mobileDocumentsRoot: mobileRoot,
+      cloudStorageRoot: cloudRoot,
+    }, { runCommand: vi.fn() })).rejects.toThrow("com~apple~CloudDocs");
+    await expect(inspectLocalSnapshotDirectory({
+      snapshotDirectory: cloudRoot,
       repositoryRoot,
       mobileDocumentsRoot: mobileRoot,
-      cloudStorageRoot: join(root, "missing-cloud-root"),
-    }, { runCommand: vi.fn() })).rejects.toThrow("同期folder");
+      cloudStorageRoot: cloudRoot,
+    }, { runCommand: vi.fn() })).rejects.toThrow("iCloud以外の同期folder");
+    await expect(inspectLocalSnapshotDirectory({
+      snapshotDirectory: iCloudSnapshot,
+      repositoryRoot,
+      storageMode: "local_encrypted",
+      homeDirectory: homeRoot,
+      mobileDocumentsRoot: mobileRoot,
+      cloudStorageRoot: cloudRoot,
+    }, { runCommand: mountCommand })).rejects.toThrow("storage mode");
 
     for (const options of ["apfs, nobrowse", "ext4, local"]) {
       await expect(inspectLocalSnapshotDirectory({
@@ -187,6 +230,151 @@ describe("local snapshot directory inspection", () => {
       mobileDocumentsRoot: mobileRoot,
       cloudStorageRoot: join(root, "missing-cloud-root"),
     }, { runCommand: vi.fn() })).rejects.toThrow("group/world書込み不可");
+  });
+});
+
+describe("local snapshot directory provisioning", () => {
+  it("missing local directoryを0700で作成し、完全一致する既存directoryは冪等に受理する", async () => {
+    const rawRoot = await temporaryDirectory("cutover-provision-local-");
+    const root = await realpath(rawRoot);
+    const repositoryRoot = join(root, "repository");
+    const safeParent = join(root, "safe-parent");
+    const snapshotDirectory = join(safeParent, "TankCutover");
+    await Promise.all([
+      mkdir(repositoryRoot, { mode: 0o700 }),
+      mkdir(safeParent, { mode: 0o700 }),
+    ]);
+    const runCommand = vi.fn(async () => ({
+      exitCode: 0,
+      stdout: `/dev/disk1 on / (apfs, local)\n/dev/test on ${root} (apfs, local)`,
+    }));
+    const input = {
+      snapshotDirectory,
+      repositoryRoot,
+      storageMode: "local_encrypted" as const,
+      mobileDocumentsRoot: join(root, "missing-mobile-root"),
+      cloudStorageRoot: join(root, "missing-cloud-root"),
+    };
+
+    const entriesBeforePlan = await readdir(safeParent);
+    await expect(planLocalSnapshotDirectory(input, { runCommand })).resolves.toEqual({
+      status: "missing",
+      outsideRepository: true,
+      storageMode: "local_encrypted",
+      fileSystem: "apfs",
+      localMount: true,
+    });
+    expect(await readdir(safeParent)).toEqual(entriesBeforePlan);
+    await expect(stat(snapshotDirectory)).rejects.toMatchObject({ code: "ENOENT" });
+
+    await expect(ensureLocalSnapshotDirectory(input, { runCommand })).resolves.toEqual({
+      isDirectory: true,
+      outsideRepository: true,
+      storageMode: "local_encrypted",
+      fileSystem: "apfs",
+      localMount: true,
+      created: true,
+    });
+    expect((await stat(snapshotDirectory)).mode & 0o777).toBe(0o700);
+
+    const exactBefore = await stat(snapshotDirectory);
+    await expect(planLocalSnapshotDirectory(input, { runCommand })).resolves.toEqual({
+      status: "exact",
+      outsideRepository: true,
+      storageMode: "local_encrypted",
+      fileSystem: "apfs",
+      localMount: true,
+    });
+    const exactAfter = await stat(snapshotDirectory);
+    expect(exactAfter.mode).toBe(exactBefore.mode);
+    expect(exactAfter.mtimeMs).toBe(exactBefore.mtimeMs);
+
+    await expect(ensureLocalSnapshotDirectory(input, { runCommand })).resolves.toMatchObject({
+      storageMode: "local_encrypted",
+      created: false,
+    });
+  });
+
+  it("OS account homeのcanonical iCloud Drive配下だけをicloud_encryptedとして作成する", async () => {
+    const rawRoot = await temporaryDirectory("cutover-provision-icloud-");
+    const root = await realpath(rawRoot);
+    const repositoryRoot = join(root, "repository");
+    const homeDirectory = join(root, "operator-home");
+    const iCloudRoot = join(
+      homeDirectory,
+      "Library",
+      "Mobile Documents",
+      "com~apple~CloudDocs",
+    );
+    const snapshotDirectory = join(iCloudRoot, "TankCutover");
+    await Promise.all([
+      mkdir(repositoryRoot, { mode: 0o700 }),
+      mkdir(iCloudRoot, { recursive: true, mode: 0o700 }),
+    ]);
+    const runCommand = async () => ({
+      exitCode: 0,
+      stdout: `/dev/disk1 on / (apfs, local)\n/dev/test on ${root} (apfs, local)`,
+    });
+
+    await expect(ensureLocalSnapshotDirectory({
+      snapshotDirectory,
+      repositoryRoot,
+      storageMode: "icloud_encrypted",
+      homeDirectory,
+    }, { runCommand })).resolves.toMatchObject({
+      storageMode: "icloud_encrypted",
+      created: true,
+    });
+    expect((await stat(snapshotDirectory)).mode & 0o777).toBe(0o700);
+
+    await expect(ensureLocalSnapshotDirectory({
+      snapshotDirectory: join(homeDirectory, "TankCutover"),
+      repositoryRoot,
+      storageMode: "icloud_encrypted",
+      homeDirectory,
+    }, { runCommand })).rejects.toThrow("storage mode");
+  });
+
+  it("symlink traversal、unsafe parent、既存mode driftをfail closedにする", async () => {
+    const rawRoot = await temporaryDirectory("cutover-provision-reject-");
+    const root = await realpath(rawRoot);
+    const repositoryRoot = join(root, "repository");
+    const realParent = join(root, "real-parent");
+    const linkedParent = join(root, "linked-parent");
+    const unsafeParent = join(root, "unsafe-parent");
+    const driftedDirectory = join(root, "drifted");
+    await Promise.all([
+      mkdir(repositoryRoot, { mode: 0o700 }),
+      mkdir(realParent, { mode: 0o700 }),
+      mkdir(unsafeParent, { mode: 0o700 }),
+      mkdir(driftedDirectory, { mode: 0o700 }),
+    ]);
+    await symlink(realParent, linkedParent);
+    await chmod(unsafeParent, 0o777);
+    await chmod(driftedDirectory, 0o750);
+    const runCommand = async () => ({
+      exitCode: 0,
+      stdout: `/dev/disk1 on / (apfs, local)\n/dev/test on ${root} (apfs, local)`,
+    });
+    const common = {
+      repositoryRoot,
+      storageMode: "local_encrypted" as const,
+      mobileDocumentsRoot: join(root, "missing-mobile-root"),
+      cloudStorageRoot: join(root, "missing-cloud-root"),
+    };
+
+    await expect(ensureLocalSnapshotDirectory({
+      ...common,
+      snapshotDirectory: join(linkedParent, "TankCutover"),
+    }, { runCommand })).rejects.toThrow("symlink");
+    await expect(ensureLocalSnapshotDirectory({
+      ...common,
+      snapshotDirectory: join(unsafeParent, "TankCutover"),
+    }, { runCommand })).rejects.toThrow("group/world書込み不可");
+    await expect(ensureLocalSnapshotDirectory({
+      ...common,
+      snapshotDirectory: driftedDirectory,
+    }, { runCommand })).rejects.toThrow("0700");
   });
 });
 

@@ -1,20 +1,27 @@
 import { randomBytes as nodeRandomBytes, timingSafeEqual } from "node:crypto";
 import { spawn } from "node:child_process";
-import { constants as fsConstants } from "node:fs";
+import { constants as fsConstants, type Stats } from "node:fs";
 import {
+  lstat,
+  mkdir,
   open,
   readdir,
   realpath,
   stat,
 } from "node:fs/promises";
-import { homedir } from "node:os";
+import { userInfo } from "node:os";
 import {
   basename,
+  dirname,
   isAbsolute,
   join,
+  parse,
   relative,
+  resolve,
+  sep,
 } from "node:path";
 import { snapshotKeychainIdentity } from "./snapshot-key-provider";
+import type { SnapshotStorageMode } from "./snapshot-envelope";
 
 const DEFAULT_MAX_CREDENTIAL_FILE_BYTES = 256 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES = 1024 * 1024;
@@ -134,20 +141,34 @@ export async function inventoryRepositoryServiceAccountCredentials(input: {
 export type LocalSnapshotDirectoryStatus = {
   isDirectory: true;
   outsideRepository: true;
-  outsideSyncRoots: true;
+  storageMode: SnapshotStorageMode;
   fileSystem: "apfs";
   localMount: true;
 };
 
-/** snapshot保存先が非同期領域のlocal APFS directoryであることだけを返す。 */
+export type LocalSnapshotDirectoryProvisionResult = LocalSnapshotDirectoryStatus & {
+  created: boolean;
+};
+
+export type LocalSnapshotDirectoryPlan = Omit<LocalSnapshotDirectoryStatus, "isDirectory"> & {
+  status: "missing" | "exact";
+};
+
+type LocalSnapshotDirectoryInput = {
+  snapshotDirectory: string;
+  repositoryRoot: string;
+  /** 指定時はpathから判定したmodeとの完全一致を要求する。 */
+  storageMode?: SnapshotStorageMode;
+  /** test injection用。既定値はambient HOMEではなくOS account home。 */
+  homeDirectory?: string;
+  /** `.../Library/Mobile Documents` root。 */
+  mobileDocumentsRoot?: string;
+  cloudStorageRoot?: string;
+};
+
+/** 暗号化snapshot保存先をrepository外のlocal APFSまたはiCloud Driveへ分類する。 */
 export async function inspectLocalSnapshotDirectory(
-  input: {
-    snapshotDirectory: string;
-    repositoryRoot: string;
-    homeDirectory?: string;
-    mobileDocumentsRoot?: string;
-    cloudStorageRoot?: string;
-  },
+  input: LocalSnapshotDirectoryInput,
   dependencies: LocalCutoverEnvironmentDependencies = {},
 ): Promise<LocalSnapshotDirectoryStatus> {
   if (!isAbsolute(input.snapshotDirectory)) {
@@ -171,27 +192,196 @@ export async function inspectLocalSnapshotDirectory(
   const repositoryRoot = await realpath(input.repositoryRoot).catch(() => {
     throw new Error("repository rootを安全に解決できません");
   });
-  const homeDirectory = input.homeDirectory ?? homedir();
+  const homeDirectory = input.homeDirectory ?? userInfo().homedir;
   const mobileDocumentsRoot = await optionalRealpath(
     input.mobileDocumentsRoot ?? join(homeDirectory, "Library", "Mobile Documents"),
+  );
+  const iCloudDriveRoot = await optionalRealpath(
+    join(
+      input.mobileDocumentsRoot ?? join(homeDirectory, "Library", "Mobile Documents"),
+      "com~apple~CloudDocs",
+    ),
   );
   const cloudStorageRoot = await optionalRealpath(
     input.cloudStorageRoot ?? join(homeDirectory, "Library", "CloudStorage"),
   );
-  if (isInside(snapshotDirectory, repositoryRoot)) {
-    throw new Error("snapshot directoryをrepository配下に指定できません");
-  }
-  if (
-    (mobileDocumentsRoot && isInside(snapshotDirectory, mobileDocumentsRoot))
-    || (cloudStorageRoot && isInside(snapshotDirectory, cloudStorageRoot))
-  ) {
-    throw new Error("snapshot directoryを同期folder配下に指定できません");
+  const storageMode = classifySnapshotDirectoryStorageMode({
+    snapshotDirectory,
+    repositoryRoot,
+    mobileDocumentsRoot,
+    iCloudDriveRoot,
+    cloudStorageRoot,
+    expectedStorageMode: input.storageMode,
+  });
+  await assertLocalApfsMount(snapshotDirectory, dependencies.runCommand ?? runLocalCommand);
+  return {
+    isDirectory: true,
+    outsideRepository: true,
+    storageMode,
+    fileSystem: "apfs",
+    localMount: true,
+  };
+}
+
+/**
+ * snapshot directoryを必要な場合だけ0700で一度作成する。
+ * recursive mkdirやsymlink追跡を行わず、既存directoryは完全一致時だけ冪等に受理する。
+ */
+export async function ensureLocalSnapshotDirectory(
+  input: LocalSnapshotDirectoryInput & { storageMode: SnapshotStorageMode },
+  dependencies: LocalCutoverEnvironmentDependencies = {},
+): Promise<LocalSnapshotDirectoryProvisionResult> {
+  const plan = await planLocalSnapshotDirectory(input, dependencies);
+  if (plan.status === "exact") {
+    return {
+      isDirectory: true,
+      outsideRepository: plan.outsideRepository,
+      storageMode: plan.storageMode,
+      fileSystem: plan.fileSystem,
+      localMount: plan.localMount,
+      created: false,
+    };
   }
 
-  const result = await (dependencies.runCommand ?? runLocalCommand)({
-    executable: "/sbin/mount",
-    args: [],
+  const requestedDirectory = resolve(input.snapshotDirectory);
+  try {
+    await mkdir(requestedDirectory, { mode: 0o700 });
+  } catch {
+    throw new Error("snapshot directoryを排他的に作成できません");
+  }
+  const createdStats = await lstat(requestedDirectory).catch(() => {
+    throw new Error("作成したsnapshot directoryを再検査できません");
   });
+  assertExactProvisionedDirectory(createdStats);
+  await assertNoSymlinkTraversal(requestedDirectory);
+  return {
+    isDirectory: true,
+    outsideRepository: true,
+    storageMode: input.storageMode,
+    fileSystem: "apfs",
+    localMount: true,
+    created: true,
+  };
+}
+
+/**
+ * 作成予定のsnapshot directoryをread-onlyで検査し、missingまたは完全一致だけを返す。
+ * missing時もparent・path policy・mountを検査するがfilesystem mutationは行わない。
+ */
+export async function planLocalSnapshotDirectory(
+  input: LocalSnapshotDirectoryInput & { storageMode: SnapshotStorageMode },
+  dependencies: LocalCutoverEnvironmentDependencies = {},
+): Promise<LocalSnapshotDirectoryPlan> {
+  if (!isAbsolute(input.snapshotDirectory)) {
+    throw new Error("snapshot directoryは絶対pathで指定してください");
+  }
+  const requestedDirectory = resolve(input.snapshotDirectory);
+  const current = await lstat(requestedDirectory).catch((error: unknown) => {
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
+    throw new Error("snapshot directoryを安全に検査できません");
+  });
+  if (current) {
+    await assertNoSymlinkTraversal(requestedDirectory);
+    assertExactProvisionedDirectory(current);
+    const inspected = await inspectLocalSnapshotDirectory({
+      ...input,
+      snapshotDirectory: requestedDirectory,
+    }, dependencies);
+    return {
+      status: "exact",
+      outsideRepository: inspected.outsideRepository,
+      storageMode: inspected.storageMode,
+      fileSystem: inspected.fileSystem,
+      localMount: inspected.localMount,
+    };
+  }
+
+  const requestedParent = dirname(requestedDirectory);
+  await assertNoSymlinkTraversal(requestedParent);
+  const parent = await realpath(requestedParent).catch(() => {
+    throw new Error("snapshot directoryのparentを安全に解決できません");
+  });
+  if (parent !== requestedParent) {
+    throw new Error("snapshot directoryのparentにsymlinkを使用できません");
+  }
+  const parentStats = await lstat(parent).catch(() => {
+    throw new Error("snapshot directoryのparentを安全に検査できません");
+  });
+  assertSafeParentDirectory(parentStats);
+
+  const repositoryRoot = await realpath(input.repositoryRoot).catch(() => {
+    throw new Error("repository rootを安全に解決できません");
+  });
+  const homeDirectory = input.homeDirectory ?? userInfo().homedir;
+  const mobileDocumentsPath = input.mobileDocumentsRoot
+    ?? join(homeDirectory, "Library", "Mobile Documents");
+  const mobileDocumentsRoot = await optionalRealpath(mobileDocumentsPath);
+  const iCloudDriveRoot = await optionalRealpath(join(mobileDocumentsPath, "com~apple~CloudDocs"));
+  const cloudStorageRoot = await optionalRealpath(
+    input.cloudStorageRoot ?? join(homeDirectory, "Library", "CloudStorage"),
+  );
+  classifySnapshotDirectoryStorageMode({
+    snapshotDirectory: requestedDirectory,
+    repositoryRoot,
+    mobileDocumentsRoot,
+    iCloudDriveRoot,
+    cloudStorageRoot,
+    expectedStorageMode: input.storageMode,
+  });
+  await assertLocalApfsMount(parent, dependencies.runCommand ?? runLocalCommand);
+  return {
+    status: "missing",
+    outsideRepository: true,
+    storageMode: input.storageMode,
+    fileSystem: "apfs",
+    localMount: true,
+  };
+}
+
+function classifySnapshotDirectoryStorageMode(input: {
+  snapshotDirectory: string;
+  repositoryRoot: string;
+  mobileDocumentsRoot: string | null;
+  iCloudDriveRoot: string | null;
+  cloudStorageRoot: string | null;
+  expectedStorageMode?: SnapshotStorageMode;
+}): SnapshotStorageMode {
+  if (isInside(input.snapshotDirectory, input.repositoryRoot)) {
+    throw new Error("snapshot directoryをrepository配下に指定できません");
+  }
+  if (input.cloudStorageRoot && isInside(input.snapshotDirectory, input.cloudStorageRoot)) {
+    throw new Error("snapshot directoryをiCloud以外の同期folder配下に指定できません");
+  }
+  const insideMobileDocuments = Boolean(
+    input.mobileDocumentsRoot
+    && isInside(input.snapshotDirectory, input.mobileDocumentsRoot),
+  );
+  const insideICloudDrive = Boolean(
+    input.iCloudDriveRoot
+    && isInside(input.snapshotDirectory, input.iCloudDriveRoot),
+  );
+  if (insideMobileDocuments && !insideICloudDrive) {
+    throw new Error(
+      "icloud_encryptedはOS account homeのcom~apple~CloudDocs配下だけを使用できます",
+    );
+  }
+  const actualStorageMode: SnapshotStorageMode = insideICloudDrive
+    ? "icloud_encrypted"
+    : "local_encrypted";
+  if (
+    input.expectedStorageMode !== undefined
+    && input.expectedStorageMode !== actualStorageMode
+  ) {
+    throw new Error("snapshot directoryと指定storage modeが一致しません");
+  }
+  return actualStorageMode;
+}
+
+async function assertLocalApfsMount(
+  targetPath: string,
+  runCommand: LocalCommandRunner,
+): Promise<void> {
+  const result = await runCommand({ executable: "/sbin/mount", args: [] });
   if (result.exitCode !== 0) {
     throw new Error("local mount情報を取得できません");
   }
@@ -199,18 +389,53 @@ export async function inspectLocalSnapshotDirectory(
     result.stdout.fill(0);
     throw new Error("local mount情報の形式が不正です");
   }
-  const mount = findContainingMount(snapshotDirectory, result.stdout);
+  const mount = findContainingMount(targetPath, result.stdout);
   if (!mount) throw new Error("snapshot directoryのmountを特定できません");
   if (!mount.options.has("apfs") || !mount.options.has("local")) {
     throw new Error("snapshot directoryはlocal APFS上である必要があります");
   }
-  return {
-    isDirectory: true,
-    outsideRepository: true,
-    outsideSyncRoots: true,
-    fileSystem: "apfs",
-    localMount: true,
-  };
+}
+
+async function assertNoSymlinkTraversal(targetPath: string): Promise<void> {
+  const normalized = resolve(targetPath);
+  const root = parse(normalized).root;
+  const parts = relative(root, normalized).split(sep).filter(Boolean);
+  let current = root;
+  for (const part of parts) {
+    current = join(current, part);
+    const currentStats = await lstat(current).catch(() => {
+      throw new Error("snapshot directory pathを安全に検査できません");
+    });
+    if (currentStats.isSymbolicLink()) {
+      throw new Error("snapshot directory pathにsymlinkを使用できません");
+    }
+  }
+}
+
+function assertSafeParentDirectory(stats: Stats): void {
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error("snapshot directoryのparentが通常directoryではありません");
+  }
+  assertCurrentUserOwner(stats, "snapshot directoryのparent");
+  if ((stats.mode & 0o022) !== 0) {
+    throw new Error("snapshot directoryのparentはgroup/world書込み不可である必要があります");
+  }
+}
+
+function assertExactProvisionedDirectory(stats: Stats): void {
+  if (!stats.isDirectory() || stats.isSymbolicLink()) {
+    throw new Error("snapshot保存先が通常directoryではありません");
+  }
+  assertCurrentUserOwner(stats, "snapshot directory");
+  if ((stats.mode & 0o777) !== 0o700) {
+    throw new Error("snapshot directoryのpermissionは0700である必要があります");
+  }
+}
+
+function assertCurrentUserOwner(stats: Stats, label: string): void {
+  if (typeof process.getuid !== "function" || stats.uid !== process.getuid()) {
+    throw new Error(`${label}は実行user所有である必要があります`);
+  }
 }
 
 export type SnapshotKeychainEntryStatus = {

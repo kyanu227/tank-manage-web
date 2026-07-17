@@ -9,7 +9,6 @@ import {
   CUTOVER_INFRA_CONTRACT,
   CUTOVER_PROJECT_ID,
   REQUIRED_HUMAN_CONFIRMATION_IDS,
-  REQUIRED_HUMAN_WRITER_IDS,
   assertCutoverInfraApplyAuthorization,
   assertCutoverInfraCommonContract,
   assertCutoverInfraPrincipalSeparation,
@@ -134,6 +133,7 @@ describe("strict CLI argument parser", () => {
       bindingExpiresAt: "2026-07-17T12:00:00Z",
       keyId: "transition-v1",
       snapshotDirectory: "/private/var/tmp/tank-cutover",
+      snapshotStorageMode: "local_encrypted",
       dataPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.data.email,
       rulesPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.rules.email,
     });
@@ -263,6 +263,14 @@ describe("strict CLI argument parser", () => {
       replaceArgument(commonArguments(), "--expected-operator-principal", "operator@example.com"),
       { now: NOW },
     )).toThrow("IAM principal");
+    expect(() => parseCutoverInfraPlanArguments(
+      replaceArgument(commonArguments(), "--snapshot-storage-mode", "plaintext"),
+      { now: NOW },
+    )).toThrow("storage mode");
+    expect(() => parseCutoverInfraPlanArguments(
+      commonArguments().filter((argument) => !argument.startsWith("--snapshot-storage-mode=")),
+      { now: NOW },
+    )).toThrow("--snapshot-storage-mode");
   });
 
   it("planとreadinessはapply専用flagを拒否する", () => {
@@ -281,7 +289,7 @@ describe("strict CLI argument parser", () => {
 });
 
 describe("human evidence schema", () => {
-  it("未回答をすべてunknownへ正規化する", () => {
+  it("未回答をすべてnullへ正規化する", () => {
     const evidence = parseCutoverHumanEvidence(undefined);
     expect(evidence.version).toBe(1);
     expect(evidence.projectId).toBeNull();
@@ -290,20 +298,15 @@ describe("human evidence schema", () => {
     expect(evidence.expectedOperatorPrincipal).toBeNull();
     expect(evidence.rulesDeployPrincipal).toBeNull();
     expect(evidence.reviewedAt).toBeNull();
-    expect(evidence.reviewerPrincipal).toBeNull();
-    expect(Object.keys(evidence.writers)).toEqual(REQUIRED_HUMAN_WRITER_IDS);
-    expect(Object.values(evidence.writers)).toEqual(
-      REQUIRED_HUMAN_WRITER_IDS.map(() => "unknown"),
-    );
-    expect(evidence.adminSdkCredentialReview).toBe("unknown");
-    expect(evidence.firebaseCliSessionReview).toBe("unknown");
-    expect(evidence.groupMembershipReview).toBe("unknown");
-    expect(evidence.inheritedIamReview).toBe("unknown");
-    expect(evidence.auditLogObservationWindow).toBe("unknown");
-    expect(evidence.snapshotKeyRecoveryDrill).toBe("unknown");
+    expect(evidence.confirmedByPrincipal).toBeNull();
+    expect(evidence.externalWritersConfirmedAbsent).toBeNull();
+    expect(evidence.otherPcAutomationConfirmedAbsent).toBeNull();
+    expect(evidence.maintenanceWindowApproved).toBeNull();
+    expect(evidence.productionUsageStarted).toBeNull();
+    expect(evidence.encryptedICloudSnapshotApproved).toBeNull();
   });
 
-  it("部分回答だけを保存し、未回答項目はunknownのままにする", () => {
+  it("部分回答だけを保存し、未回答項目はnullのままにする", () => {
     const evidence = parseCutoverHumanEvidence({
       version: 1,
       projectId: CUTOVER_PROJECT_ID,
@@ -312,35 +315,32 @@ describe("human evidence schema", () => {
       expectedOperatorPrincipal: OPERATOR,
       rulesDeployPrincipal: RULES_DEPLOY,
       reviewedAt: "2026-07-17T00:00:00.000Z",
-      reviewerPrincipal: "user:reviewer@example.com",
-      writers: {
-        gas: "absent",
-        owner_manual_writes: "confirmed_stopped",
-      },
-      groupMembershipReview: "confirmed",
-      firebaseCliSessionReview: "confirmed",
-      snapshotKeyRecoveryDrill: "confirmed",
+      confirmedByPrincipal: OPERATOR,
+      externalWritersConfirmedAbsent: true,
+      maintenanceWindowApproved: true,
+      productionUsageStarted: false,
     });
-    expect(evidence.writers.gas).toBe("absent");
-    expect(evidence.writers.owner_manual_writes).toBe("confirmed_stopped");
-    expect(evidence.writers.make).toBe("unknown");
-    expect(evidence.groupMembershipReview).toBe("confirmed");
-    expect(evidence.inheritedIamReview).toBe("unknown");
-    expect(evidence.snapshotKeyRecoveryDrill).toBe("confirmed");
+    expect(evidence.externalWritersConfirmedAbsent).toBe(true);
+    expect(evidence.otherPcAutomationConfirmedAbsent).toBeNull();
+    expect(evidence.maintenanceWindowApproved).toBe(true);
+    expect(evidence.productionUsageStarted).toBe(false);
+    expect(evidence.encryptedICloudSnapshotApproved).toBeNull();
     expect(evidence.keyId).toBe("transition-v1");
     expect(evidence.expectedOperatorPrincipal).toBe(OPERATOR);
     expect(evidence.rulesDeployPrincipal).toBe(RULES_DEPLOY);
-    expect(evidence.reviewerPrincipal).toBe("user:reviewer@example.com");
+    expect(evidence.confirmedByPrincipal).toBe(OPERATOR);
   });
 
-  it("未知fieldや不正statusをfail closedにする", () => {
+  it("未知fieldや不正booleanをfail closedにする", () => {
     expect(() => parseCutoverHumanEvidence({ version: 1, unexpected: true })).toThrow("未知");
-    expect(() => parseCutoverHumanEvidence({ version: 1, writers: { unknown_writer: "absent" } }))
-      .toThrow("未知");
-    expect(() => parseCutoverHumanEvidence({ version: 1, writers: { gas: "stopped" } }))
-      .toThrow("status");
-    expect(() => parseCutoverHumanEvidence({ version: 1, snapshotKeyRecoveryDrill: true }))
-      .toThrow("status");
+    expect(() => parseCutoverHumanEvidence({
+      version: 1,
+      externalWritersConfirmedAbsent: false,
+    })).toThrow("trueまたはnull");
+    expect(() => parseCutoverHumanEvidence({
+      version: 1,
+      productionUsageStarted: "no",
+    })).toThrow("booleanまたはnull");
     expect(() => parseCutoverHumanEvidence({ version: 1, keyId: "bad key" }))
       .toThrow("keyId");
     expect(() => parseCutoverHumanEvidence({
@@ -349,33 +349,13 @@ describe("human evidence schema", () => {
     })).toThrow("人間");
   });
 
-  it("confirmation契約が全writerと領域確認を網羅する", () => {
-    expect(REQUIRED_HUMAN_WRITER_IDS).toEqual([
-      "cloud_functions",
-      "cloud_run_services",
-      "cloud_run_jobs",
-      "app_engine",
-      "cloud_scheduler",
-      "workflows",
-      "pubsub_eventarc_cloud_tasks",
-      "firebase_extensions",
-      "ci_other_repositories",
-      "local_scripts_cron",
-      "manual_rest_rpc",
-      "gas",
-      "make",
-      "zapier",
-      "other_computers",
-      "owner_manual_writes",
-    ]);
+  it("confirmation契約が簡略化した5項目だけを網羅する", () => {
     expect(REQUIRED_HUMAN_CONFIRMATION_IDS).toEqual([
-      ...REQUIRED_HUMAN_WRITER_IDS.map((id) => `writer:${id}`),
-      "adminSdkCredentialReview",
-      "firebaseCliSessionReview",
-      "groupMembershipReview",
-      "inheritedIamReview",
-      "auditLogObservationWindow",
-      "snapshotKeyRecoveryDrill",
+      "externalWritersConfirmedAbsent",
+      "otherPcAutomationConfirmedAbsent",
+      "maintenanceWindowApproved",
+      "productionUsageStarted",
+      "encryptedICloudSnapshotApproved",
     ]);
   });
 });
@@ -388,6 +368,7 @@ function commonArguments(): string[] {
     "--binding-expires-at=2026-07-17T12:00:00Z",
     "--key-id=transition-v1",
     "--snapshot-directory=/private/var/tmp/tank-cutover",
+    "--snapshot-storage-mode=local_encrypted",
   ];
 }
 
