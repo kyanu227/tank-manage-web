@@ -10,6 +10,7 @@ import {
   assertProductionCredentialHygiene,
   reportCutoverCliError,
 } from "./cutover/snapshot-cli-common";
+import { createRulesReadinessEvidence } from "./cutover/readiness-evidence";
 
 main().catch((error) => {
   reportCutoverCliError(error);
@@ -54,8 +55,26 @@ async function main(): Promise<void> {
     gitSource,
   });
 
-  // Rules本文、token、credential pathはstdoutへ出さない。
-  console.log(JSON.stringify(result, null, 2));
+  // 既存commandのstdout契約は維持し、明示flag時だけreadiness証跡へ封入する。
+  if (!args.readinessEvidence) {
+    console.log(JSON.stringify(result, null, 2));
+    return;
+  }
+  // Rules本文、token、credential path、principal本文はstdoutへ出さない。
+  console.log(JSON.stringify(createRulesReadinessEvidence({
+    generatedAt: new Date().toISOString(),
+    projectId: args.projectId,
+    mainCommit: args.expectedMainCommit,
+    principal: args.expectedRulesPrincipal,
+    payload: {
+      matched: result.matched,
+      releaseId: result.releaseId,
+      releaseUpdateTime: result.releaseUpdateTime,
+      rulesetId: result.rulesetId,
+      normalizedSha256: result.normalizedSha256,
+      normalizedBytes: result.normalizedBytes,
+    },
+  }), null, 2));
 }
 
 function assertMainRepositoryContext(repositoryRoot: string, expectedMainCommit: string): void {

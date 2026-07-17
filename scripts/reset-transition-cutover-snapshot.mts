@@ -17,6 +17,7 @@ import {
   executeTransitionSnapshotReset,
   planTransitionSnapshotReset,
 } from "./cutover/transition-reset-service";
+import { assertResetCliExecutionAllowed } from "./cutover/production-execute-gates";
 
 const EXECUTE_CONFIRMATION = "RESET_TRANSITION_PLAN_V1";
 
@@ -33,14 +34,11 @@ async function main(): Promise<void> {
   if (execute && argumentValue(argv, "--confirm") !== EXECUTE_CONFIRMATION) {
     throw new Error(`実行には --confirm=${EXECUTE_CONFIRMATION} が必要です`);
   }
-  if (execute && !args.emulatorHost) {
-    throw new Error(
-      "本番reset executeは最終production execute解放PRまで無効です",
-    );
-  }
+  assertResetCliExecutionAllowed({ execute, emulatorHost: args.emulatorHost });
 
   const envelope = await readEncryptedSnapshotFile(snapshotPath, {
     repositoryRoot: args.repositoryRoot,
+    storageMode: args.snapshotStorageMode,
   });
   const key = await loadSnapshotEncryptionKey({
     projectId: args.projectId,

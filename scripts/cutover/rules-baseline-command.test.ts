@@ -12,7 +12,19 @@ describe("live Rules baseline command arguments", () => {
       expectedMainCommit: MAIN_COMMIT,
       expectedDataPrincipal: DATA_PRINCIPAL,
       expectedRulesPrincipal: RULES_PRINCIPAL,
+      readinessEvidence: false,
     });
+  });
+
+  it("readiness evidenceは値なしの明示flagだけを受理する", () => {
+    expect(parseRulesBaselineCommandArguments([
+      ...validArguments(),
+      "--readiness-evidence",
+    ]).readinessEvidence).toBe(true);
+    expect(() => parseRulesBaselineCommandArguments([
+      ...validArguments(),
+      "--readiness-evidence=true",
+    ])).toThrow("未知の引数");
   });
 
   it("dataとRulesに同じprincipalを指定した場合はfail closedにする", () => {

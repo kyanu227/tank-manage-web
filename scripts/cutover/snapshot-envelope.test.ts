@@ -4,6 +4,7 @@ import {
   link,
   mkdir,
   mkdtemp,
+  readdir,
   readFile,
   rm,
   stat,
@@ -26,6 +27,7 @@ import {
   decryptTransitionSnapshot,
   encryptTransitionSnapshot,
   readEncryptedSnapshotFile,
+  resolveSnapshotStorageMode,
   writeEncryptedSnapshotFile,
 } from "./snapshot-envelope";
 import type {
@@ -80,61 +82,139 @@ describe("encrypted transition snapshot envelope", () => {
       .toThrow("canonical JSON");
   });
 
-  it("repository/iCloud外へ0600・上書き禁止で暗号化fileだけを保存する", async () => {
+  it("repository外へ0600・上書き禁止で暗号化fileだけを保存する", async () => {
     const directory = await mkdtemp(join(tmpdir(), "tank-cutover-envelope-"));
     const output = join(directory, "snapshot.cutover.enc");
     const envelope = encryptTransitionSnapshot(fixturePayload(), randomBytes(32));
+    const localPolicy = {
+      repositoryRoot: process.cwd(),
+      storageMode: "local_encrypted" as const,
+    };
     try {
-      await writeEncryptedSnapshotFile(output, envelope, { repositoryRoot: process.cwd() });
+      await writeEncryptedSnapshotFile(output, envelope, localPolicy);
+      expect(await readdir(directory)).toEqual(["snapshot.cutover.enc"]);
       expect((await stat(output)).mode & 0o077).toBe(0);
       expect(JSON.parse(await readFile(output, "utf8"))).toEqual(envelope);
-      expect(await readEncryptedSnapshotFile(output, { repositoryRoot: process.cwd() }))
+      expect(await readEncryptedSnapshotFile(output, localPolicy))
         .toEqual(envelope);
       await chmod(output, 0o400);
-      await expect(readEncryptedSnapshotFile(output, { repositoryRoot: process.cwd() }))
+      await expect(readEncryptedSnapshotFile(output, localPolicy))
         .rejects.toThrow("0600");
       await chmod(output, 0o600);
-      await expect(writeEncryptedSnapshotFile(output, envelope, { repositoryRoot: process.cwd() }))
+      await expect(writeEncryptedSnapshotFile(output, envelope, localPolicy))
         .rejects.toThrow("上書き");
       await expect(assertSafeSnapshotPath(
         join(process.cwd(), "snapshot.cutover.enc"),
-        { repositoryRoot: process.cwd() },
+        localPolicy,
       )).rejects.toThrow("repository配下");
       const repositoryLink = join(directory, "repository-link");
       await symlink(process.cwd(), repositoryLink);
       await expect(assertSafeSnapshotPath(
         join(repositoryLink, "snapshot.cutover.enc"),
-        { repositoryRoot: process.cwd() },
+        localPolicy,
       )).rejects.toThrow("repository配下");
 
       const hardLink = join(directory, "snapshot-hard-link.cutover.enc");
       await link(output, hardLink);
-      await expect(readEncryptedSnapshotFile(output, { repositoryRoot: process.cwd() }))
+      await expect(readEncryptedSnapshotFile(output, localPolicy))
         .rejects.toThrow("hard link数");
       await unlink(hardLink);
 
       const mobileDocumentsRoot = join(directory, "Mobile Documents");
-      await mkdir(mobileDocumentsRoot);
+      const iCloudDriveRoot = join(mobileDocumentsRoot, "com~apple~CloudDocs");
+      await mkdir(iCloudDriveRoot, { recursive: true });
+      const icloudOutput = join(iCloudDriveRoot, "snapshot.cutover.enc");
+      const icloudKey = randomBytes(32);
+      const icloudEnvelope = encryptTransitionSnapshot(fixturePayload(), icloudKey);
+      const icloudPolicy = {
+        repositoryRoot: process.cwd(),
+        mobileDocumentsRoot,
+        storageMode: "icloud_encrypted" as const,
+      };
+      await writeEncryptedSnapshotFile(icloudOutput, icloudEnvelope, icloudPolicy);
+      expect(await readdir(iCloudDriveRoot)).toEqual(["snapshot.cutover.enc"]);
+      expect(await resolveSnapshotStorageMode(icloudOutput, icloudPolicy, true))
+        .toBe("icloud_encrypted");
+      const loadedIcloudEnvelope = await readEncryptedSnapshotFile(icloudOutput, icloudPolicy);
+      expect(decryptTransitionSnapshot(
+        loadedIcloudEnvelope,
+        icloudKey,
+        icloudEnvelope.keyId,
+      )).toEqual(fixturePayload());
+      expect(await readFile(icloudOutput, "utf8")).not.toContain("T-001");
+      const otherProvider = join(mobileDocumentsRoot, "other-provider");
+      await mkdir(otherProvider);
       await expect(assertSafeSnapshotPath(
-        join(mobileDocumentsRoot, "snapshot.cutover.enc"),
-        { repositoryRoot: process.cwd(), mobileDocumentsRoot },
-      )).rejects.toThrow("iCloud Mobile Documents配下");
+        join(otherProvider, "snapshot.cutover.enc"),
+        icloudPolicy,
+      )).rejects.toThrow("com~apple~CloudDocs");
 
       const cloudStorageRoot = join(directory, "CloudStorage");
       await mkdir(cloudStorageRoot);
       await expect(assertSafeSnapshotPath(
         join(cloudStorageRoot, "snapshot.cutover.enc"),
-        { repositoryRoot: process.cwd(), cloudStorageRoot },
+        { ...localPolicy, cloudStorageRoot },
       )).rejects.toThrow("同期CloudStorage配下");
 
       const oversized = join(directory, "oversized.cutover.enc");
       await writeFile(oversized, Buffer.alloc(MAX_ENCRYPTED_SNAPSHOT_FILE_BYTES + 1), {
         mode: 0o600,
       });
-      await expect(readEncryptedSnapshotFile(oversized, { repositoryRoot: process.cwd() }))
+      await expect(readEncryptedSnapshotFile(oversized, localPolicy))
         .rejects.toThrow("file size上限");
     } finally {
       await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it("ambient HOMEを分離してもOS account home契約だけをiCloudとして受理する", async () => {
+    const root = await mkdtemp(join(tmpdir(), "tank-cutover-home-policy-"));
+    const osHome = join(root, "os-home");
+    const isolatedHome = join(root, "isolated-home");
+    const realICloud = join(
+      osHome,
+      "Library",
+      "Mobile Documents",
+      "com~apple~CloudDocs",
+      "TankCutover",
+    );
+    const spoofedICloud = join(
+      isolatedHome,
+      "Library",
+      "Mobile Documents",
+      "com~apple~CloudDocs",
+      "TankCutover",
+    );
+    const realCloudStorage = join(osHome, "Library", "CloudStorage", "provider");
+    await Promise.all([
+      mkdir(realICloud, { recursive: true }),
+      mkdir(spoofedICloud, { recursive: true }),
+      mkdir(realCloudStorage, { recursive: true }),
+    ]);
+    const originalHome = process.env.HOME;
+    process.env.HOME = isolatedHome;
+    const policy = {
+      repositoryRoot: process.cwd(),
+      storageMode: "icloud_encrypted" as const,
+      homeDirectory: osHome,
+    };
+    try {
+      await expect(assertSafeSnapshotPath(
+        join(realICloud, "snapshot.cutover.enc"),
+        policy,
+      )).resolves.toContain("snapshot.cutover.enc");
+      await expect(assertSafeSnapshotPath(
+        join(spoofedICloud, "snapshot.cutover.enc"),
+        policy,
+      )).rejects.toThrow("storage mode");
+      await expect(assertSafeSnapshotPath(
+        join(realCloudStorage, "snapshot.cutover.enc"),
+        policy,
+      )).rejects.toThrow("同期CloudStorage");
+    } finally {
+      if (originalHome === undefined) delete process.env.HOME;
+      else process.env.HOME = originalHome;
+      await rm(root, { recursive: true, force: true });
     }
   });
 });

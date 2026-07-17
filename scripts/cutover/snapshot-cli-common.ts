@@ -11,12 +11,14 @@ import {
   relative,
   resolve,
 } from "node:path";
+import { userInfo } from "node:os";
 import { FirestoreRestClient } from "./firestore-rest-client";
 import {
   verifyDataMigrationCredential,
   type VerifiedDataMigrationCredential,
 } from "./migration-credential";
 import type { SnapshotKeySource } from "./snapshot-key-provider";
+import type { SnapshotStorageMode } from "./snapshot-envelope";
 
 export type SnapshotCommonArguments = {
   projectId: string;
@@ -24,6 +26,7 @@ export type SnapshotCommonArguments = {
   databaseUid: string;
   mainCommit: string;
   keyId: string;
+  snapshotStorageMode: SnapshotStorageMode;
   expectedDataPrincipal?: string;
   emulatorHost?: string;
   keySource: SnapshotKeySource;
@@ -40,6 +43,7 @@ export function parseSnapshotCommonArguments(
     "--expected-database-uid",
     "--expected-main-commit",
     "--key-id",
+    "--snapshot-storage-mode",
     "--expected-data-principal",
     "--test-key-stdin",
     ...additionalNames,
@@ -57,6 +61,7 @@ export function parseSnapshotCommonArguments(
   const databaseUid = argumentValue(argv, "--expected-database-uid");
   const mainCommit = argumentValue(argv, "--expected-main-commit");
   const keyId = argumentValue(argv, "--key-id");
+  const snapshotStorageMode = argumentValue(argv, "--snapshot-storage-mode");
   const expectedDataPrincipal = argumentValue(argv, "--expected-data-principal") || undefined;
   if (!projectId) throw new Error("--project=<explicit-project-id> は必須です");
   if (!databaseId) throw new Error("--database=<explicit-database-id> は必須です");
@@ -66,6 +71,12 @@ export function parseSnapshotCommonArguments(
   }
   if (!/^[A-Za-z0-9._-]{1,100}$/.test(keyId)) {
     throw new Error("--key-idは英数字・._-だけで指定してください");
+  }
+  if (
+    snapshotStorageMode !== "local_encrypted"
+    && snapshotStorageMode !== "icloud_encrypted"
+  ) {
+    throw new Error("--snapshot-storage-modeにはlocal_encryptedまたはicloud_encryptedが必要です");
   }
 
   const repositoryRoot = gitOutput(["rev-parse", "--show-toplevel"]);
@@ -105,6 +116,7 @@ export function parseSnapshotCommonArguments(
     databaseUid,
     mainCommit,
     keyId,
+    snapshotStorageMode,
     expectedDataPrincipal,
     emulatorHost,
     keySource: testKeyStdin ? "test-stdin" : "keychain",
@@ -232,9 +244,9 @@ export function assertProductionCredentialHygiene(options: {
   const roots = [
     repositoryRoot,
     options.mobileDocumentsRoot
-      ?? (process.env.HOME ? join(process.env.HOME, "Library", "Mobile Documents") : ""),
+      ?? join(userInfo().homedir, "Library", "Mobile Documents"),
     options.cloudStorageRoot
-      ?? (process.env.HOME ? join(process.env.HOME, "Library", "CloudStorage") : ""),
+      ?? join(userInfo().homedir, "Library", "CloudStorage"),
   ].filter((root) => root && existsSync(root)).map((root) => realpathSync(root));
   if (roots.some((root) => isInside(normalizedCredentialPath, root))) {
     throw new Error("GOOGLE_APPLICATION_CREDENTIALSをrepository・同期folder配下から使用できません");

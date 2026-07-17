@@ -41,6 +41,7 @@ describe("cutover CLI production safety", () => {
       databaseUid: "database-uid",
       mainCommit: "a".repeat(40),
       keyId: "key-id",
+      snapshotStorageMode: "local_encrypted",
       expectedDataPrincipal: "data@example-project.iam.gserviceaccount.com",
       keySource: "keychain",
       repositoryRoot: "/unused",

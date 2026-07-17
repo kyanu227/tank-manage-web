@@ -51,7 +51,10 @@ try {
 
   const firstSnapshotPath = join(tempDirectory, "snapshot-1.cutover.enc");
   await runSnapshotCreate(firstSnapshotPath);
-  const firstEnvelope = await readEncryptedSnapshotFile(firstSnapshotPath, { repositoryRoot: ROOT });
+  const firstEnvelope = await readEncryptedSnapshotFile(firstSnapshotPath, {
+    repositoryRoot: ROOT,
+    storageMode: "local_encrypted",
+  });
   const firstPayload = decryptTransitionSnapshot(firstEnvelope, key, KEY_ID);
   assertCounts(firstPayload, { tanks: 145, tankLogs: 38, transactions: 8, restoreWrites: 192 });
   assert(firstPayload.manifest.inventory.preservedNonTankLogs === 1, "preserved log count");
@@ -183,7 +186,10 @@ try {
 
   const finalSnapshotPath = join(tempDirectory, "snapshot-final.cutover.enc");
   await runSnapshotCreate(finalSnapshotPath);
-  const finalEnvelope = await readEncryptedSnapshotFile(finalSnapshotPath, { repositoryRoot: ROOT });
+  const finalEnvelope = await readEncryptedSnapshotFile(finalSnapshotPath, {
+    repositoryRoot: ROOT,
+    storageMode: "local_encrypted",
+  });
   const finalPayload = decryptTransitionSnapshot(finalEnvelope, key, KEY_ID);
   await runSnapshotReset(finalSnapshotPath, true);
   await runSnapshotRestore(finalSnapshotPath, true);
@@ -492,6 +498,7 @@ function commonArguments(): string[] {
     `--expected-database-uid=${DATABASE_UID}`,
     `--expected-main-commit=${MAIN_COMMIT}`,
     `--key-id=${KEY_ID}`,
+    "--snapshot-storage-mode=local_encrypted",
     "--test-key-stdin",
   ];
 }
@@ -666,7 +673,10 @@ async function assertAtomicResetRaceRejected(
 ): Promise<void> {
   const snapshotPath = join(tempDirectory, `snapshot-${label}.cutover.enc`);
   await runSnapshotCreate(snapshotPath);
-  const envelope = await readEncryptedSnapshotFile(snapshotPath, { repositoryRoot: ROOT });
+  const envelope = await readEncryptedSnapshotFile(snapshotPath, {
+    repositoryRoot: ROOT,
+    storageMode: "local_encrypted",
+  });
   const payload = decryptTransitionSnapshot(envelope, key, KEY_ID);
   const stalePlan = await planTransitionSnapshotReset({
     client,

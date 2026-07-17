@@ -28,6 +28,7 @@ import type {
   TransitionSnapshotPayloadV1,
   TransitionSourceCensus,
 } from "./firestore-rest-types";
+import { assertRestoreServiceExecutionAllowed } from "./production-execute-gates";
 import { createTransitionResetContract } from "./transition-reset-contract";
 
 export const MAX_CUTOVER_COMMIT_WRITES = 400;
@@ -262,11 +263,7 @@ export async function executeTransitionSnapshotRestore(
   commitTime: string | null;
   commitResponse: "confirmed" | "verified_after_ambiguous_response";
 }> {
-  if (!options.client.emulatorHost) {
-    throw new Error(
-      "本番restore executeは最終production execute解放PRまで無効です",
-    );
-  }
+  assertRestoreServiceExecutionAllowed(options.client.emulatorHost);
   const plan = await planTransitionSnapshotRestore(options);
   let result: Awaited<ReturnType<typeof options.client.commit>>;
   try {

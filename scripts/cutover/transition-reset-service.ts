@@ -15,6 +15,7 @@ import type {
   TransitionSnapshotPayloadV1,
   TransitionSourceCensus,
 } from "./firestore-rest-types";
+import { assertResetServiceExecutionAllowed } from "./production-execute-gates";
 import {
   TRANSITION_MIGRATION_MARKER_PATH,
   assertCommitBounds,
@@ -147,11 +148,7 @@ export async function executeTransitionSnapshotReset(
   commitTime: string | null;
   commitResponse: "confirmed" | "verified_after_ambiguous_response";
 }> {
-  if (!options.client.emulatorHost) {
-    throw new Error(
-      "本番reset executeは最終production execute解放PRまで無効です",
-    );
-  }
+  assertResetServiceExecutionAllowed(options.client.emulatorHost);
   const plan = await planTransitionSnapshotReset(options);
   let result: Awaited<ReturnType<typeof options.client.commit>>;
   try {
