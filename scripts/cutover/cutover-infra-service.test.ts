@@ -606,6 +606,11 @@ function mutableKeychainLocal(snapshotDirectory: string, order: string[]) {
   let stored = Buffer.alloc(0);
   return {
     randomBytes: () => Buffer.alloc(32, 7),
+    prepareKeychainWriteHelper: async () => ({
+      executablePath: "/tmp/test-keychain-helper",
+      argumentPrefix: ["-N", "-n", "-f", "/tmp/test-keychain-helper.exp"],
+      dispose: async () => undefined,
+    }),
     runCommand: vi.fn(async (request: LocalCommandRequest) => {
       if (request.executable === "/sbin/mount") {
         return {
@@ -613,7 +618,7 @@ function mutableKeychainLocal(snapshotDirectory: string, order: string[]) {
           stdout: `/dev/disk1 on / (apfs, local)\n/dev/test on ${snapshotDirectory} (apfs, local)`,
         };
       }
-      if (request.args[0] === "add-generic-password") {
+      if (request.args.includes("add-generic-password")) {
         order.push("keychain:add");
         exists = true;
         stored = Buffer.from(request.stdin ?? Buffer.alloc(0));

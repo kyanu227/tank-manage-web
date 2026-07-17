@@ -1,15 +1,19 @@
 import { randomBytes as nodeRandomBytes, timingSafeEqual } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { constants as fsConstants, type Stats } from "node:fs";
 import {
+  chmod,
   lstat,
+  mkdtemp,
   mkdir,
   open,
   readdir,
   realpath,
+  rm,
   stat,
+  writeFile,
 } from "node:fs/promises";
-import { userInfo } from "node:os";
+import { tmpdir, userInfo } from "node:os";
 import {
   basename,
   dirname,
@@ -20,13 +24,20 @@ import {
   resolve,
   sep,
 } from "node:path";
-import { snapshotKeychainIdentity } from "./snapshot-key-provider";
+import { fileURLToPath } from "node:url";
+import { snapshotKeychainIdentity } from "./snapshot-keychain-identity";
 import type { SnapshotStorageMode } from "./snapshot-envelope";
 
 const DEFAULT_MAX_CREDENTIAL_FILE_BYTES = 256 * 1024;
 const MAX_COMMAND_OUTPUT_BYTES = 1024 * 1024;
-const LOCAL_COMMAND_TIMEOUT_MS = 30_000;
+export const LOCAL_COMMAND_TIMEOUT_MS = 30_000;
 const KEYCHAIN_NOT_FOUND_EXIT_CODE = 44;
+const KEYCHAIN_WRITE_HELPER_SOURCE_PATH = fileURLToPath(
+  new URL("./keychain-generic-password.exp", import.meta.url),
+);
+const KEYCHAIN_WRITE_HELPER_REPOSITORY_PATH = "scripts/cutover/keychain-generic-password.exp";
+const SYSTEM_EXPECT_PATH = "/usr/bin/expect";
+const SYSTEM_EXPECT_REQUIREMENT = '=identifier "com.apple.expect" and anchor apple';
 const EXCLUDED_DIRECTORY_NAMES = new Set([".git", "node_modules", ".next", "out"]);
 const SERVICE_ACCOUNT_EMAIL_PATTERN =
   /^[a-z0-9][a-z0-9._-]{0,127}@[a-z0-9.-]+\.gserviceaccount\.com$/u;
@@ -51,6 +62,7 @@ export type LocalCommandRequest = {
   executable: string;
   args: readonly string[];
   stdin?: Buffer;
+  environment?: NodeJS.ProcessEnv;
   discardOutput?: boolean;
   /** stdoutを文字列化せずBufferのままcallerへ渡す。callerが必ずzeroizeする。 */
   sensitiveOutput?: boolean;
@@ -68,6 +80,16 @@ export type LocalCommandRunner = (
 export type LocalCutoverEnvironmentDependencies = {
   runCommand?: LocalCommandRunner;
   randomBytes?: (size: number) => Buffer;
+  prepareKeychainWriteHelper?: (input: {
+    repositoryRoot: string;
+    runCommand: LocalCommandRunner;
+  }) => Promise<PreparedKeychainWriteHelper>;
+};
+
+export type PreparedKeychainWriteHelper = {
+  executablePath: string;
+  argumentPrefix: readonly string[];
+  dispose: () => Promise<void>;
 };
 
 /**
@@ -464,7 +486,7 @@ export async function inspectSnapshotKeychainEntry(
  * 32-byte keyを生成し、既存entryを上書きせずKeychainへ登録する。key本文は返さない。
  */
 export async function createSnapshotKeychainEntry(
-  input: { projectId: string; keyId: string },
+  input: { projectId: string; keyId: string; repositoryRoot: string },
   dependencies: LocalCutoverEnvironmentDependencies = {},
 ): Promise<{ created: true }> {
   if (process.platform !== "darwin") {
@@ -475,33 +497,33 @@ export async function createSnapshotKeychainEntry(
   if (current.exists) throw new Error("既存Keychain entryは上書きしません");
 
   const identity = validatedKeychainIdentity(input.projectId, input.keyId);
-  const key = (dependencies.randomBytes ?? nodeRandomBytes)(32);
-  if (!Buffer.isBuffer(key) || key.byteLength !== 32) {
-    if (Buffer.isBuffer(key)) key.fill(0);
-    throw new Error("snapshot key生成結果が32 bytesではありません");
-  }
+  const helper = await (
+    dependencies.prepareKeychainWriteHelper ?? prepareSnapshotKeychainWriteHelper
+  )({ repositoryRoot: input.repositoryRoot, runCommand });
+  let key: Buffer | null = null;
   let encoded: Buffer | null = null;
-  let encodedInput: Buffer | null = null;
   try {
+    key = (dependencies.randomBytes ?? nodeRandomBytes)(32);
+    if (!Buffer.isBuffer(key) || key.byteLength !== 32) {
+      if (Buffer.isBuffer(key)) key.fill(0);
+      key = null;
+      throw new Error("snapshot key生成結果が32 bytesではありません");
+    }
     encoded = encodeCanonicalBase64Key(key);
-    encodedInput = Buffer.alloc(encoded.byteLength + 1);
-    encoded.copy(encodedInput);
-    encodedInput[encodedInput.byteLength - 1] = 0x0a;
     const args = [
+      ...helper.argumentPrefix,
       "add-generic-password",
-      "-s",
       identity.service,
-      "-a",
       identity.account,
-      "-w",
     ];
-    if (args.includes("-U") || args.at(-1) !== "-w") {
+    if (args.includes("-U") || args.includes("-w") || args.includes("-X")) {
       throw new Error("Keychain登録commandの上書き防止条件が不正です");
     }
     const result = await runCommand({
-      executable: "/usr/bin/security",
+      executable: helper.executablePath,
       args,
-      stdin: encodedInput,
+      stdin: encoded,
+      environment: keychainCommandEnvironment(),
       discardOutput: true,
     });
     if (result.exitCode !== 0) {
@@ -521,10 +543,178 @@ export async function createSnapshotKeychainEntry(
     }
     return { created: true };
   } finally {
-    key.fill(0);
+    key?.fill(0);
     encoded?.fill(0);
-    encodedInput?.fill(0);
+    await helper.dispose();
   }
+}
+
+/**
+ * review済みmainのExpect scriptをHEAD blobから一時展開する。
+ * Apple署名済みsystem Expect以外を実行せず、scriptは実行後に破棄する。
+ */
+export async function prepareSnapshotKeychainWriteHelper(input: {
+  repositoryRoot: string;
+  runCommand?: LocalCommandRunner;
+}): Promise<PreparedKeychainWriteHelper> {
+  const repositoryRoot = await realpath(input.repositoryRoot).catch(() => {
+    throw new Error("Keychain helperのrepository rootを解決できません");
+  });
+  const expectedSourcePath = join(repositoryRoot, KEYCHAIN_WRITE_HELPER_REPOSITORY_PATH);
+  const sourcePath = await realpath(KEYCHAIN_WRITE_HELPER_SOURCE_PATH).catch(() => {
+    throw new Error("Keychain helper sourceを解決できません");
+  });
+  if (sourcePath !== expectedSourcePath) {
+    throw new Error("Keychain helper sourceがreview済みpathと一致しません");
+  }
+  const sourceStats = await lstat(sourcePath).catch(() => {
+    throw new Error("Keychain helper sourceを検査できません");
+  });
+  if (
+    !sourceStats.isFile()
+    || sourceStats.isSymbolicLink()
+    || sourceStats.nlink !== 1
+    || sourceStats.uid !== userInfo().uid
+    || (sourceStats.mode & 0o022) !== 0
+  ) {
+    throw new Error("Keychain helper sourceの所有・permissionが不正です");
+  }
+  const runCommand = input.runCommand ?? runLocalCommand;
+  const reviewedSource = readTrustedKeychainHelperSource(repositoryRoot);
+  const expectPath = await realpath(SYSTEM_EXPECT_PATH).catch(() => {
+    reviewedSource.fill(0);
+    throw new Error("system Expectを安全に解決できません");
+  });
+  const expectStats = await lstat(expectPath).catch(() => {
+    reviewedSource.fill(0);
+    throw new Error("system Expectを安全に検査できません");
+  });
+  if (
+    expectPath !== SYSTEM_EXPECT_PATH
+    || !expectStats.isFile()
+    || expectStats.isSymbolicLink()
+    || expectStats.uid !== 0
+    || (expectStats.mode & 0o022) !== 0
+  ) {
+    reviewedSource.fill(0);
+    throw new Error("system Expectの所有・permissionが不正です");
+  }
+  const signature = await runCommand({
+    executable: "/usr/bin/codesign",
+    args: [
+      "--verify",
+      "--strict",
+      "-R",
+      SYSTEM_EXPECT_REQUIREMENT,
+      SYSTEM_EXPECT_PATH,
+    ],
+    environment: safeLocalCommandEnvironment(),
+    discardOutput: true,
+  });
+  if (signature.exitCode !== 0) {
+    reviewedSource.fill(0);
+    throw new Error("system ExpectのApple署名を検証できません");
+  }
+
+  const directory = await mkdtemp(join(tmpdir(), "tank-cutover-keychain-helper-"));
+  const scriptPath = join(directory, "keychain-helper.exp");
+  let prepared = false;
+  try {
+    await chmod(directory, 0o700);
+    await writeFile(scriptPath, reviewedSource, { flag: "wx", mode: 0o500 });
+    const scriptStats = await lstat(scriptPath).catch(() => {
+      throw new Error("Keychain helper scriptを検査できません");
+    });
+    if (
+      !scriptStats.isFile()
+      || scriptStats.isSymbolicLink()
+      || scriptStats.nlink !== 1
+      || scriptStats.uid !== userInfo().uid
+      || (scriptStats.mode & 0o777) !== 0o500
+    ) {
+      throw new Error("Keychain helper scriptの所有・permissionが不正です");
+    }
+    prepared = true;
+    return {
+      executablePath: SYSTEM_EXPECT_PATH,
+      argumentPrefix: ["-N", "-n", "-f", scriptPath],
+      dispose: async () => {
+        await rm(directory, { recursive: true, force: false });
+      },
+    };
+  } finally {
+    reviewedSource.fill(0);
+    if (!prepared) {
+      await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+    }
+  }
+}
+
+function readTrustedKeychainHelperSource(repositoryRoot: string): Buffer {
+  const git = (args: readonly string[]): string => execFileSync(
+    "/usr/bin/git",
+    ["-C", repositoryRoot, ...args],
+    {
+      encoding: "utf8",
+      env: safeLocalCommandEnvironment(),
+      stdio: ["ignore", "pipe", "pipe"],
+      timeout: 30_000,
+    },
+  ).trim();
+  try {
+    if (git(["status", "--porcelain"]) !== "") {
+      throw new Error("dirty");
+    }
+    if (git(["branch", "--show-current"]) !== "main") {
+      throw new Error("branch");
+    }
+    if (git(["rev-parse", "HEAD"]) !== git(["rev-parse", "origin/main"])) {
+      throw new Error("head");
+    }
+    if (git(["ls-files", "--error-unmatch", KEYCHAIN_WRITE_HELPER_REPOSITORY_PATH])
+        !== KEYCHAIN_WRITE_HELPER_REPOSITORY_PATH) {
+      throw new Error("untracked");
+    }
+    if (
+      git(["hash-object", KEYCHAIN_WRITE_HELPER_SOURCE_PATH])
+      !== git(["rev-parse", `HEAD:${KEYCHAIN_WRITE_HELPER_REPOSITORY_PATH}`])
+    ) {
+      throw new Error("blob");
+    }
+    const source = execFileSync(
+      "/usr/bin/git",
+      ["-C", repositoryRoot, "show", `HEAD:${KEYCHAIN_WRITE_HELPER_REPOSITORY_PATH}`],
+      {
+        encoding: null,
+        env: safeLocalCommandEnvironment(),
+        stdio: ["ignore", "pipe", "pipe"],
+        timeout: 30_000,
+        maxBuffer: 1024 * 1024,
+      },
+    );
+    if (!Buffer.isBuffer(source) || source.byteLength < 1) throw new Error("source");
+    return source;
+  } catch {
+    throw new Error("Keychain helperはcleanな最新mainからだけ実行できます");
+  }
+}
+
+function safeLocalCommandEnvironment(): NodeJS.ProcessEnv {
+  const allowed = ["HOME", "USER", "LOGNAME", "TMPDIR", "LANG"];
+  const environment = {} as NodeJS.ProcessEnv;
+  for (const name of allowed) {
+    const value = process.env[name];
+    if (value !== undefined) environment[name] = value;
+  }
+  environment.PATH = "/usr/bin:/bin:/usr/sbin:/sbin";
+  return environment;
+}
+
+/** Google credential用の隔離HOMEは親processに維持し、Keychain子processだけOS正規homeを使う。 */
+export function keychainCommandEnvironment(): NodeJS.ProcessEnv {
+  const environment = safeLocalCommandEnvironment();
+  environment.HOME = userInfo().homedir;
+  return environment;
 }
 
 export const runLocalCommand: LocalCommandRunner = async (request) => new Promise((resolve, reject) => {
@@ -534,6 +724,7 @@ export const runLocalCommand: LocalCommandRunner = async (request) => new Promis
   }
   const child = spawn(request.executable, [...request.args], {
     shell: false,
+    env: request.environment ?? safeLocalCommandEnvironment(),
     stdio: ["pipe", "pipe", "pipe"],
   });
   const chunks: Buffer[] = [];
@@ -618,6 +809,7 @@ async function readSnapshotKeychainKey(
       "-a",
       identity.account,
     ],
+    environment: keychainCommandEnvironment(),
     sensitiveOutput: true,
   });
   if (result.exitCode === KEYCHAIN_NOT_FOUND_EXIT_CODE) {
@@ -666,7 +858,7 @@ function encodeCanonicalBase64Key(key: Buffer): Buffer {
   return encoded;
 }
 
-function decodeCanonicalBase64Key(raw: Buffer): Buffer {
+export function decodeCanonicalBase64Key(raw: Buffer): Buffer {
   let end = raw.byteLength;
   if (end > 0 && raw[end - 1] === 0x0a) {
     end -= 1;
