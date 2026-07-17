@@ -6,6 +6,7 @@ export type RulesBaselineCommandArguments = {
   expectedMainCommit: string;
   expectedDataPrincipal: string;
   expectedRulesPrincipal: string;
+  readinessEvidence: boolean;
 };
 
 /** 認証やnetwork accessより先に、live Rules検証用の引数境界を確定する。 */
@@ -19,7 +20,15 @@ export function parseRulesBaselineCommandArguments(
     "--expected-rules-principal",
   ]);
   const seen = new Set<string>();
+  let readinessEvidence = false;
   argv.forEach((argument) => {
+    if (argument === "--readiness-evidence") {
+      if (readinessEvidence) {
+        throw new Error("live Rules baseline検証の引数を重複指定できません");
+      }
+      readinessEvidence = true;
+      return;
+    }
     const name = argument.split("=", 1)[0];
     if (!knownNames.has(name) || !argument.startsWith(`${name}=`)) {
       throw new Error("live Rules baseline検証に未知の引数があります");
@@ -50,5 +59,5 @@ export function parseRulesBaselineCommandArguments(
     expectedDataPrincipal,
     expectedRulesPrincipal,
   });
-  return { projectId, expectedMainCommit, ...principals };
+  return { projectId, expectedMainCommit, ...principals, readinessEvidence };
 }

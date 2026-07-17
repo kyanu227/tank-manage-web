@@ -18,6 +18,7 @@ import {
   executeTransitionSnapshotRestore,
   planTransitionSnapshotRestore,
 } from "./cutover/transition-snapshot-service";
+import { assertRestoreCliExecutionAllowed } from "./cutover/production-execute-gates";
 
 const EXECUTE_CONFIRMATION = "RESTORE_TRANSITION_PLAN_V1";
 
@@ -34,11 +35,7 @@ async function main(): Promise<void> {
   if (execute && argumentValue(argv, "--confirm") !== EXECUTE_CONFIRMATION) {
     throw new Error(`実行には --confirm=${EXECUTE_CONFIRMATION} が必要です`);
   }
-  if (execute && !args.emulatorHost) {
-    throw new Error(
-      "本番restore executeは最終production execute解放PRまで無効です",
-    );
-  }
+  assertRestoreCliExecutionAllowed({ execute, emulatorHost: args.emulatorHost });
   const envelope = await readEncryptedSnapshotFile(snapshotPath, {
     repositoryRoot: args.repositoryRoot,
   });

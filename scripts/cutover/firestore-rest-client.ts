@@ -6,6 +6,7 @@ import type {
   FirestoreRunQueryResult,
   FirestoreWrite,
 } from "./firestore-rest-types";
+import { assertFirestoreCommitAllowed } from "./production-execute-gates";
 
 type AccessTokenProvider = () => Promise<string>;
 const FIRESTORE_REQUEST_TIMEOUT_MS = 60_000;
@@ -160,11 +161,7 @@ export class FirestoreRestClient {
   }
 
   async commit(writes: FirestoreWrite[]): Promise<FirestoreCommitResponse> {
-    if (!this.emulatorHost) {
-      throw new Error(
-        "cutover用Firestore REST clientの本番commitは最終production execute解放PRまで無効です",
-      );
-    }
+    assertFirestoreCommitAllowed(this.emulatorHost);
     if (writes.length === 0) throw new Error("commit writeが空です");
     return this.request<FirestoreCommitResponse>(
       "POST",

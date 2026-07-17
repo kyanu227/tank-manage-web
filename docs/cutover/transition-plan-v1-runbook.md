@@ -1,6 +1,10 @@
 # transitionPlan v1 cutover runbook
 
-更新日: 2026-07-15
+環境準備toolのCLI契約、credential分離証跡、human evidenceは
+[`infra-readiness-tools.md`](./infra-readiness-tools.md)を正本とする。production execute gateを開放する前に、
+`cutover:readiness`がGOであることを別の確認者が検証する。
+
+更新日: 2026-07-17
 
 対象project: `okmarine-tankrental`
 状態: **設計・Emulator検証用。production reset / restore executeは無効**
@@ -65,21 +69,22 @@ fresh clientで確認する。
    ```bash
    gcloud iam roles create transitionCutoverData \
      --project=okmarine-tankrental \
-     --title='Transition cutover data' \
-     --description='Temporary Firestore data migration role' \
+     --title='Transition Cutover Data' \
+     --description='Exact Firestore data permissions for transition cutover' \
      --permissions='datastore.databases.get,datastore.databases.getMetadata,datastore.entities.get,datastore.entities.list,datastore.entities.create,datastore.entities.update,datastore.entities.delete' \
      --stage=GA
 
    gcloud iam roles create transitionRulesBaselineRead \
      --project=okmarine-tankrental \
-     --title='Transition Rules baseline read' \
-     --description='Temporary read-only Firebase Rules baseline role' \
+     --title='Transition Rules Baseline Read' \
+     --description='Exact Firebase Rules read permissions for cutover baseline' \
      --permissions='firebaserules.releases.get,firebaserules.rulesets.get' \
      --stage=GA
    ```
 
-   role作成と、service accountへの期限付き直接bindingは別の人間承認とする。このrunbookの
-   command例をそのまま実行せず、作成後にrole descriptionとpermission列をread-onlyで再取得する。
+   SA IDは`transition-cutover-data`と`transition-rules-reader`に固定する。role/SA作成、期限付き直接binding、
+   DATA_WRITE設定、Keychain登録は[`infra-readiness-tools.md`](./infra-readiness-tools.md)のguarded applyで扱う。
+   `--execute`とconfirmationを別の人間が照合し、作成後にrole descriptionとpermission列をread-onlyで再取得する。
 6. 2つのfreshな専用service accountそれぞれについて、project/folder/organizationのIAM
    policyをread-onlyで取得し、直接・継承・group経由の実効bindingを記録する。Owner、Editor、
    Datastore Owner/User、Firebase Rules Viewer等の広いroleと、上記の各permission set以外の
@@ -87,21 +92,24 @@ fresh clientで確認する。
    確認するもので、余分な直接・継承権限の不存在を証明しない。
 7. IAM policy変更後は最低10分待ち、反復したpermission確認が一致するまで進まない。公式には通常約2分、
    7分以上かかる場合もあり、group変更はさらに長いため専用principalをgroupへ入れない。
-8. `GOOGLE_APPLICATION_CREDENTIALS`やuser ADCを暗黙利用しない。Rules baseline照合では
+8. `GOOGLE_APPLICATION_CREDENTIALS`やambient user ADCを暗黙利用しない。Rules baseline照合では
    `--expected-rules-principal`、data preflight / snapshot / reset / restore / verifyでは
    `--expected-data-principal`を照合する。Rules reader credentialをクリアせずにdata操作へ進んだり、
    data credentialでRules baselineを読んだりしない。
-   credential切替は同じshellの上書きではなく、Rules reader専用のfresh processをbaseline照合後に
+   credential切替は同じshellの上書きではなく、[`infra-readiness-tools.md`](./infra-readiness-tools.md)の
+   非同期APFS上に隔離した`HOME`と`CLOUDSDK_CONFIG`で作成したimpersonation ADCを使う。
+   `CLOUDSDK_CONFIG`だけではauthentication libraryのwell-known ADC pathを隔離できない。
+   Rules reader専用のfresh processをbaseline照合後に
    終了し、そのcredential contextとroleを破棄・剥奪してから、data migration専用の別processを
    起動する。各processでは用途に対応するexpected principalを明示し、起動前後にprincipalと
    `GOOGLE_APPLICATION_CREDENTIALS`の有無だけを記録する。credential file pathや内容は証跡へ残さない。
+   証跡process終了後は隔離HOMEを削除し、元の`HOME`へ戻してからinfra plan/apply/readinessを実行する。
 9. service-account impersonationは、source / target principal、`roles/iam.serviceAccountTokenCreator`、
    短命token、有効期限、Audit Logsの証跡を別途検証した場合だけ承認する。
    clientがtarget principalを表示したことや、実装にprincipal照合があることだけでは承認済みとしない。
    証跡がなければ未承認としてcutoverを停止する。
-   Google Cloudの候補手順は`gcloud auth application-default login --impersonate-service-account=<SA>`だが、
-   現在のcutover CLIでtarget principal照合と7 / 2 permission分離を別々にread-only drillできるまでは
-   production手順として使用しない。drill後もRules用ADCを終了・破棄してからdata用ADCを別processで作り、
+   `gcloud auth application-default login --impersonate-service-account=<SA>`を隔離HOME/configuration内で使い、
+   target principal照合と7 / 2 permission分離を別々にread-only drillする。drill後もRules用ADCを終了・破棄してからdata用ADCを別processで作り、
    同一ADC fileやglobal gcloud impersonation設定を二用途で使い回さない。
 10. local service-account JSONを使う場合はrepository・同期folder外、owner本人、`0600`、hard link数1とする。
     repository直下の`firebase-service-account.json`や`*-firebase-adminsdk-*.json`は、使用中でなくても
