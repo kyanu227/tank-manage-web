@@ -10,7 +10,7 @@ Rules / data / human evidenceを再生成し、`cutover:readiness`がGOである
 対象project: `okmarine-tankrental`
 状態: **本番cutover完了。production reset / restoreの5 execute境界は再閉鎖済み**
 
-実施結果は[`transition-cutover-result-2026-07-18.md`](../deploy/transition-cutover-result-2026-07-18.md)を参照する。
+実施結果は[`transition-cutover-summary-2026-07-18.md`](../deploy/transition-cutover-summary-2026-07-18.md)を参照する。
 
 ## 1. 安全原則
 
