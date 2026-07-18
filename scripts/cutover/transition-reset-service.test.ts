@@ -24,6 +24,12 @@ const DATABASE_PREFIX = `projects/${PROJECT_ID}/databases/${DATABASE_ID}`;
 const DATABASE_UID = `emulator:${PROJECT_ID}:${DATABASE_ID}`;
 const MAIN_COMMIT = "a".repeat(40);
 const RESET_AT = "2026-07-13T03:00:00Z";
+const LEGACY_TANK_METADATA = {
+  tankId: { stringValue: "T-001" },
+  prefix: { stringValue: "T" },
+  notes: { stringValue: "legacy note" },
+  tags: { arrayValue: { values: [{ stringValue: "legacy-tag" }] } },
+} satisfies Record<string, FirestoreRestValue>;
 
 describe("transition atomic reset service", () => {
   it("snapshot updateTime付きfull overwrite/deleteとexists:false markerを一つのwrite列へ構成する", async () => {
@@ -120,9 +126,29 @@ describe("transition atomic reset service", () => {
     const payload = fixturePayload([
       { stringValue: "lent" },
       { stringValue: "filled" },
-    ], { futureOperationProjection: { stringValue: "secret" } });
-    await expect(planTransitionSnapshotReset(resetOptions(sourceClient(payload), payload)))
+    ], {
+      ...LEGACY_TANK_METADATA,
+      futureOperationProjection: { stringValue: "secret" },
+    });
+    const client = sourceClient(payload);
+
+    await expect(planTransitionSnapshotReset(resetOptions(client, payload)))
       .rejects.toThrow("分類できない");
+    expect(client.verifyDatabaseUid).not.toHaveBeenCalled();
+    expect(client.beginReadOnlyTransaction).not.toHaveBeenCalled();
+  });
+
+  it("既存tankのID・prefix・notes・tagsを基本情報としてfull overwrite後も保持する", async () => {
+    const payload = fixturePayload(undefined, LEGACY_TANK_METADATA);
+
+    const plan = await planTransitionSnapshotReset(
+      resetOptions(sourceClient(payload), payload),
+    );
+    const tankWrite = plan.writes.find((write) => write.update?.name.endsWith("/tanks/T-001"));
+
+    expect(tankWrite?.update?.fields).toMatchObject(LEGACY_TANK_METADATA);
+    expect(tankWrite?.update?.fields.status).toEqual({ stringValue: "empty" });
+    expect(tankWrite?.update?.fields.location).toEqual({ stringValue: "倉庫" });
   });
 
   it("最終解放前はservice境界で本番reset executeを読取前に拒否する", async () => {
