@@ -9,6 +9,7 @@ import type {
 import {
   assertFirestoreCommitAllowed,
 } from "./production-execute-gates";
+import { withCutoverDiagnosticCode } from "./cutover-diagnostic-error";
 import type { ProductionCutoverOperation } from "./production-execution-contract";
 
 type AccessTokenProvider = () => Promise<string>;
@@ -199,17 +200,24 @@ export class FirestoreRestClient {
     // authorization検査前にexact bodyを固定し、token取得待ち中のmutationを送信へ反映しない。
     const serializedRequestBody = serializeFirestoreRestBody({ writes });
     const writeCount = writes.length;
-    assertFirestoreCommitAllowed({
-      emulatorHost: this.emulatorHost,
-      authorization,
-      operation,
-      projectId: this.projectId,
-      databaseId: this.databaseId,
-      databaseUid: this.verifiedDatabaseUid,
-      dataPrincipal: this.dataPrincipal,
-      serializedRequestBody,
-      writeCount,
-    });
+    try {
+      assertFirestoreCommitAllowed({
+        emulatorHost: this.emulatorHost,
+        authorization,
+        operation,
+        projectId: this.projectId,
+        databaseId: this.databaseId,
+        databaseUid: this.verifiedDatabaseUid,
+        dataPrincipal: this.dataPrincipal,
+        serializedRequestBody,
+        writeCount,
+      });
+    } catch (error) {
+      if (operation === "reset") {
+        throw withCutoverDiagnosticCode(error, "RESET_AUTHORIZATION_FAILED");
+      }
+      throw error;
+    }
     return this.requestSerialized<FirestoreCommitResponse>(
       "POST",
       `${this.documentsRoot}:commit`,
@@ -222,7 +230,7 @@ export class FirestoreRestClient {
     url: string,
     serializedBody: string,
   ): Promise<T> {
-    return this.request<T>(method, url, undefined, serializedBody);
+    return this.request<T>(method, url, undefined, serializedBody, "commit");
   }
 
   private async request<T>(
@@ -230,6 +238,7 @@ export class FirestoreRestClient {
     url: string,
     body?: unknown,
     serializedBody?: string,
+    requestKind: "read" | "commit" = "read",
   ): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" };
     if (body !== undefined || serializedBody !== undefined) {
@@ -238,26 +247,60 @@ export class FirestoreRestClient {
     if (this.emulatorHost) {
       headers.Authorization = "Bearer owner";
     } else if (this.accessTokenProvider) {
-      headers.Authorization = `Bearer ${await this.accessTokenProvider()}`;
+      try {
+        headers.Authorization = `Bearer ${await this.accessTokenProvider()}`;
+      } catch (error) {
+        throw withCutoverDiagnosticCode(error, "DATA_CREDENTIAL_TOKEN_FAILED");
+      }
     }
-    const response = await fetch(url, {
-      method,
-      headers,
-      signal: AbortSignal.timeout(FIRESTORE_REQUEST_TIMEOUT_MS),
-      ...(serializedBody !== undefined
-        ? { body: serializedBody }
-        : body === undefined
-          ? {}
-          : { body: serializeFirestoreRestBody(body) }),
-    });
-    const text = await response.text();
+    let response: Response;
+    try {
+      response = await fetch(url, {
+        method,
+        headers,
+        signal: AbortSignal.timeout(FIRESTORE_REQUEST_TIMEOUT_MS),
+        ...(serializedBody !== undefined
+          ? { body: serializedBody }
+          : body === undefined
+            ? {}
+            : { body: serializeFirestoreRestBody(body) }),
+      });
+    } catch (error) {
+      if (requestKind === "commit") {
+        throw withCutoverDiagnosticCode(error, "FIRESTORE_COMMIT_TRANSPORT_AMBIGUOUS");
+      }
+      throw error;
+    }
+    let text: string;
+    try {
+      text = await response.text();
+    } catch (error) {
+      if (requestKind === "commit") {
+        throw withCutoverDiagnosticCode(error, "FIRESTORE_COMMIT_TRANSPORT_AMBIGUOUS");
+      }
+      throw new Error("Firestore REST responseを読み取れません");
+    }
     if (!response.ok) {
+      if (requestKind === "commit") {
+        const code = response.status >= 400 && response.status < 500
+          ? "FIRESTORE_COMMIT_HTTP_4XX"
+          : response.status >= 500
+            ? "FIRESTORE_COMMIT_HTTP_5XX"
+            : "FIRESTORE_COMMIT_HTTP_OTHER";
+        throw withCutoverDiagnosticCode(
+          new Error(`Firestore REST commit failed (status=${response.status})`),
+          code,
+        );
+      }
       throw new Error(`Firestore REST request failed (${method}, status=${response.status})`);
     }
     if (!text.trim()) return {} as T;
     try {
       return JSON.parse(text) as T;
-    } catch {
+    } catch (error) {
+      if (requestKind === "commit") {
+        throw withCutoverDiagnosticCode(error, "FIRESTORE_COMMIT_RESPONSE_INVALID");
+      }
       throw new Error("Firestore REST responseがJSONではありません");
     }
   }

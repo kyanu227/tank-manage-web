@@ -19,6 +19,10 @@ import {
 } from "./migration-credential";
 import type { SnapshotKeySource } from "./snapshot-key-provider";
 import type { SnapshotStorageMode } from "./snapshot-envelope";
+import {
+  safeCutoverCauseCode,
+  safeCutoverErrorCode,
+} from "./cutover-diagnostic-error";
 
 export type SnapshotCommonArguments = {
   projectId: string;
@@ -203,14 +207,28 @@ export function reportCutoverCliError(error: unknown): void {
   console.error(sanitizeCutoverCliErrorMessage(error));
 }
 
+/** Reset hotfixだけが固定診断codeを表示し、他のcutover CLIの出力契約は変えない。 */
+export function reportResetCutoverCliError(error: unknown): void {
+  console.error(sanitizeResetCutoverCliErrorMessage(error));
+}
+
 export function sanitizeCutoverCliErrorMessage(error: unknown): string {
-  const code = safeErrorCode(error);
+  const code = legacySafeErrorCode(error);
   return code
     ? `cutover command failed (${code}); sensitive details were suppressed`
     : "cutover command failed; sensitive details were suppressed";
 }
 
-function safeErrorCode(error: unknown): string | null {
+export function sanitizeResetCutoverCliErrorMessage(error: unknown): string {
+  const code = safeCutoverErrorCode(error);
+  if (!code) return "cutover command failed; sensitive details were suppressed";
+  const causeCode = safeCutoverCauseCode(error);
+  return causeCode && causeCode !== code
+    ? `cutover command failed (${code}; cause=${causeCode}); sensitive details were suppressed`
+    : `cutover command failed (${code}); sensitive details were suppressed`;
+}
+
+function legacySafeErrorCode(error: unknown): string | null {
   if (!error || typeof error !== "object" || !("code" in error)) return null;
   const code = (error as { code?: unknown }).code;
   return typeof code === "string" && /^[A-Z][A-Z0-9_]{0,39}$/.test(code)
