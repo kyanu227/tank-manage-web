@@ -109,6 +109,10 @@ try {
     "mode", "operation", "observedState", "targetStateConfirmed", "safeToRetry", "observations",
     "stableStateSha256",
   ]);
+  await runSnapshotRestoreExpectFailure(
+    firstSnapshotPath,
+    "completed migration marker is required before restore dry-run",
+  );
 
   await verifyResetPreflightFailClosed(firstSnapshotPath);
   const beforeResetDryRunSha = sourceCensusSha256(await readTransitionSourceCensus(client));
@@ -124,6 +128,10 @@ try {
     typeof resetRequestBytes === "number" && resetRequestBytes < 8 * 1024 * 1024,
     "reset request bytes",
   );
+  assert(
+    resetRequestBytes === preflight.output.requestBytes,
+    "preflight and reset dry-run deterministic request byte upper bounds match",
+  );
   assertSafeResetStdout(resetDryRun.stdout, firstPayload);
   await assertSourceStillPresent(beforeResetDryRunSha);
 
@@ -134,6 +142,10 @@ try {
     "reset execute snapshot ID",
   );
   assert(resetExecuted.output.writes === 192, "reset execute write count");
+  assert(
+    resetExecuted.output.requestBytes === resetRequestBytes,
+    "reset dry-run and execute deterministic request byte upper bound",
+  );
   assert(resetExecuted.output.commitResponse === "confirmed", "reset commit response");
   assert(
     objectValue(resetExecuted.output.verifyOnly, "reset inline verify").status === "reset_applied",
@@ -172,6 +184,10 @@ try {
 
   const executed = await runSnapshotRestore(firstSnapshotPath, true);
   assert(executed.mode === "executed", "restore execute mode");
+  assert(
+    executed.requestBytes === dryRun.requestBytes,
+    "restore dry-run and execute deterministic request byte upper bound",
+  );
   assert(typeof executed.commitTime === "string", "restore commit time");
   assert(executed.commitResponse === "confirmed", "restore commit response");
   assert(

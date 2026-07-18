@@ -3,6 +3,7 @@ import { canonicalSha256, snapshotFieldSha256 } from "./canonical-firestore-valu
 import { FirestoreRestClient } from "./firestore-rest-client";
 import type {
   FirestoreRestDocument,
+  FirestoreWrite,
   TransitionSnapshotDocumentV1,
   TransitionSnapshotPayloadV1,
   TransitionSourceCensus,
@@ -13,6 +14,7 @@ import {
   assertCommitBounds,
   assertRestoreIdentity,
   buildRestoreWrites,
+  deterministicCommitRequestBytes,
   executeTransitionSnapshotRestore,
   planTransitionSnapshotRestore,
   resetProjectionFieldsFromSnapshot,
@@ -106,6 +108,31 @@ describe("transition snapshot restore core", () => {
       .not.toThrow();
     expect(() => assertCommitBounds(MAX_CUTOVER_COMMIT_WRITES + 1, 1)).toThrow("writes");
     expect(() => assertCommitBounds(1, MAX_CUTOVER_COMMIT_BYTES + 1)).toThrow("bytes");
+  });
+
+  it("timestampのfraction桁数によらず決定的なrequest byte上限を返す", () => {
+    const writesWithShortTimestamps: FirestoreWrite[] = [{
+      update: {
+        name: `${DATABASE_PREFIX}/documents/tanks/T-001`,
+        fields: {
+          updatedAt: { timestampValue: "2026-07-18T00:00:00.12Z" },
+        },
+      },
+      currentDocument: { updateTime: "2026-07-18T00:00:00.1Z" },
+    }];
+    const writesWithLongTimestamps: FirestoreWrite[] = [{
+      update: {
+        name: `${DATABASE_PREFIX}/documents/tanks/T-001`,
+        fields: {
+          updatedAt: { timestampValue: "2026-07-18T00:00:00.123456789Z" },
+        },
+      },
+      currentDocument: { updateTime: "2026-07-18T00:00:00.987654321Z" },
+    }];
+
+    expect(deterministicCommitRequestBytes(writesWithShortTimestamps)).toBe(
+      deterministicCommitRequestBytes(writesWithLongTimestamps),
+    );
   });
 
   it("project、database、UID、main commitの不一致を拒否する", () => {

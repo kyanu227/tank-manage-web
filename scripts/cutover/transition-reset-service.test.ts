@@ -360,9 +360,10 @@ describe("transition atomic reset service", () => {
     const first = await planTransitionSnapshotReset(resetOptions(sourceClient(payload), payload));
     const second = await planTransitionSnapshotReset({
       ...resetOptions(sourceClient(payload), payload),
-      now: () => new Date("2026-07-13T04:00:00Z"),
+      now: () => new Date("2026-07-13T04:00:00.123Z"),
     });
     expect(first.resetAt).not.toBe(second.resetAt);
+    expect(first.requestBytes).toBe(second.requestBytes);
     expect(first.summary.resetPlanSha256).toBe(second.summary.resetPlanSha256);
   });
 

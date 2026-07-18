@@ -16,6 +16,7 @@ import {
   TRANSITION_MIGRATION_MARKER_PATH,
   assertCommitBounds,
   assertRestoreIdentity,
+  deterministicCommitRequestBytes,
   readTransitionSourceCensus,
   resetProjectionFieldsFromSnapshot,
   sourceCensusSha256,
@@ -158,7 +159,7 @@ export async function planTransitionSnapshotReset(
     options.client,
     executionIdentity,
   );
-  const requestBytes = Buffer.byteLength(canonicalStringify({ writes }), "utf8");
+  const requestBytes = deterministicCommitRequestBytes(writes);
   assertCommitBounds(writes.length, requestBytes);
   return sealTransitionResetPlan({
     writes,
