@@ -36,6 +36,7 @@ import {
   authorizeResetServiceExecution,
 } from "./production-execute-gates";
 import { CUTOVER_PROJECT_ID } from "./infra-contract";
+import { safeCutoverErrorCode } from "./cutover-diagnostic-error";
 
 const PROJECT_ID = "demo-reset";
 const DATABASE_ID = "(default)";
@@ -214,6 +215,53 @@ describe("transition atomic reset service", () => {
     expect(String(request?.body)).not.toContain("T-EXTRA");
   });
 
+  it("本番相当192-write planをproduction serviceからlower REST exact bodyまで通す", async () => {
+    const payload = productionSizedFixturePayload();
+    const client = sourceClient(payload, {
+      productionAccessTokenProvider: async () => "short-lived-test-token",
+      useRealCommit: true,
+    });
+    const plan = await planTransitionSnapshotReset({
+      client,
+      payload,
+      snapshotPayloadSha256: canonicalSha256(payload),
+      expectedProjectId: CUTOVER_PROJECT_ID,
+      expectedDatabaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      expectedDatabaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      expectedMainCommit: MAIN_COMMIT,
+      executionIdentity: productionExecutionIdentity(),
+      now: () => new Date(RESET_AT),
+    });
+    expect(plan.writes).toHaveLength(192);
+    const intent = createProductionExecutionIntent({
+      operation: "reset",
+      confirmation: PRODUCTION_RESET_CONFIRMATION,
+      projectId: CUTOVER_PROJECT_ID,
+      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
+      operatorPrincipal: PRODUCTION_CUTOVER_OPERATOR_PRINCIPAL,
+      mainCommit: MAIN_COMMIT,
+      snapshotId: plan.summary.snapshotId,
+      snapshotPayloadSha256: plan.summary.snapshotPayloadSha256,
+      sourceCensusSha256: plan.summary.sourceCensusSha256,
+      resetPlanSha256: plan.summary.resetPlanSha256,
+    });
+    const authorization = authorizeResetServiceExecution({ intent, plan });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      commitTime: "2026-07-18T00:00:00Z",
+      writeResults: plan.writes.map(() => ({})),
+    }), { status: 200 }));
+    fetchMock.mockClear();
+
+    await expect(client.commit("reset", plan.writes, authorization)).resolves.toMatchObject({
+      commitTime: "2026-07-18T00:00:00Z",
+    });
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock.mock.calls[0]?.[1]?.body)
+      .toBe(serializeFirestoreRestBody({ writes: plan.writes }));
+  });
+
   it.each([
     ["mainCommit", "0".repeat(40)],
     ["snapshotId", "different-snapshot"],
@@ -343,16 +391,19 @@ describe("transition atomic reset service", () => {
   it("commit通信例外後に原状態でも未適用とは断定せず成功扱いにしない", async () => {
     const payload = fixturePayload();
     const client = sourceClient(payload, { throwWithoutApply: true });
-    await expect(executeTransitionSnapshotReset(resetOptions(client, payload)))
-      .rejects.toThrow("未適用とは断定できません");
+    const error = await executeTransitionSnapshotReset(resetOptions(client, payload))
+      .catch((caught) => caught);
+    expect(error).toBeInstanceOf(Error);
+    expect(safeCutoverErrorCode(error)).toBe("RESET_COMMIT_NOT_OBSERVED");
     expect(client.commit).toHaveBeenCalledTimes(1);
   });
 
   it("plan後のphantom targetがcommitと競合した場合も成功扱いにしない", async () => {
     const payload = fixturePayload();
     const client = sourceClient(payload, { phantomAfterApply: true });
-    await expect(executeTransitionSnapshotReset(resetOptions(client, payload)))
-      .rejects.toThrow("対象tank logまたはtransactionが残っています");
+    const error = await executeTransitionSnapshotReset(resetOptions(client, payload))
+      .catch((caught) => caught);
+    expect(safeCutoverErrorCode(error)).toBe("RESET_POST_VERIFY_FAILED");
   });
 
   it("dry-runとexecute時刻が異なっても同じ業務plan hashになる", async () => {
@@ -506,6 +557,90 @@ function productionFixturePayload(): TransitionSnapshotPayloadV1 {
         marker: null,
       }),
       snapshotDocumentsSha256: canonicalSha256(documents),
+    },
+    documents,
+  };
+}
+
+function productionSizedFixturePayload(): TransitionSnapshotPayloadV1 {
+  const productionPrefix = `projects/${CUTOVER_PROJECT_ID}`
+    + `/databases/${PRODUCTION_CUTOVER_DATABASE_ID}`;
+  const document = (
+    kind: TransitionSnapshotDocumentV1["kind"],
+    path: string,
+    fields: Record<string, FirestoreRestValue>,
+    offsetSeconds: number,
+  ): TransitionSnapshotDocumentV1 => {
+    const name = `${productionPrefix}/documents/${path}`;
+    const updateTime = new Date(Date.parse("2026-07-13T00:00:00Z") + offsetSeconds * 1000)
+      .toISOString()
+      .replace(".000Z", "Z");
+    return {
+      kind,
+      name,
+      fields,
+      createTime: "2026-07-13T00:00:00Z",
+      updateTime,
+      fieldSha256: snapshotFieldSha256(name, fields),
+    };
+  };
+  const documents: TransitionSnapshotDocumentV1[] = [];
+  for (let index = 0; index < 145; index += 1) {
+    documents.push(document("tank", `tanks/T-${String(index).padStart(3, "0")}`, {
+      tankId: { stringValue: `T-${String(index).padStart(3, "0")}` },
+      status: { stringValue: index < 133 ? "empty" : "filled" },
+      location: { stringValue: "倉庫" },
+      type: { stringValue: "steel" },
+    }, index + 1));
+  }
+  for (let index = 0; index < 38; index += 1) {
+    documents.push(document("tank_log", `logs/L-${String(index).padStart(3, "0")}`, {
+      logKind: { stringValue: "tank" },
+      tankId: { stringValue: `T-${String(index).padStart(3, "0")}` },
+    }, 146 + index));
+  }
+  for (let index = 0; index < 8; index += 1) {
+    documents.push(document("transaction", `transactions/TX-${String(index).padStart(3, "0")}`, {
+      type: { stringValue: "return" },
+      status: { stringValue: "pending" },
+    }, 184 + index));
+  }
+  documents.sort((left, right) => left.name.localeCompare(right.name));
+  const inventory = {
+    totalLogs: 38,
+    preservedNonTankLogs: 0,
+    unknownLogs: 0 as const,
+    totalTransactions: 8,
+    preservedTransactions: 0,
+    unknownTransactions: 0 as const,
+  };
+  return {
+    manifest: {
+      version: 1,
+      scope: "transitionPlanRequiredV1",
+      snapshotId: "snapshot-production-sized-test",
+      createdAt: "2026-07-13T00:10:00Z",
+      readTime: "2026-07-13T00:05:00Z",
+      projectId: CUTOVER_PROJECT_ID,
+      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      mainCommit: MAIN_COMMIT,
+      keyId: "test-key",
+      migrationMarkerPath: "migrationMarkers/transitionPlanRequiredV1",
+      counts: { tanks: 145, tankLogs: 38, transactions: 8, restoreWrites: 192 },
+      inventory,
+      documentPathSha256: canonicalSha256(documents.map((item) => item.name)),
+      sourceCensusSha256: canonicalSha256({
+        documents: documents.map((item) => ({
+          name: item.name,
+          updateTime: item.updateTime,
+          fieldSha256: item.fieldSha256,
+        })),
+        inventory,
+        marker: null,
+      }),
+      snapshotDocumentsSha256: canonicalSha256(documents),
+      subcollectionsChecked: 192,
     },
     documents,
   };

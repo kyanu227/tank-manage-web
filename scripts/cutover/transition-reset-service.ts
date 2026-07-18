@@ -24,6 +24,7 @@ import {
   type RestoreTransitionSnapshotOptions,
 } from "./transition-snapshot-service";
 import { createTransitionResetContract } from "./transition-reset-contract";
+import { withCutoverDiagnosticCode } from "./cutover-diagnostic-error";
 
 export { statusCountsFromSnapshot } from "./transition-reset-contract";
 
@@ -195,8 +196,18 @@ export async function executeTransitionSnapshotReset(
   commitTime: string | null;
   commitResponse: "confirmed" | "verified_after_ambiguous_response";
 }> {
-  const plan = await planTransitionSnapshotReset(options);
-  const authorization = options.resetProductionAuthorizationProvider?.(plan);
+  let plan: TransitionResetPlan;
+  try {
+    plan = await planTransitionSnapshotReset(options);
+  } catch (error) {
+    throw withCutoverDiagnosticCode(error, "RESET_PLAN_FAILED");
+  }
+  let authorization: unknown;
+  try {
+    authorization = options.resetProductionAuthorizationProvider?.(plan);
+  } catch (error) {
+    throw withCutoverDiagnosticCode(error, "RESET_AUTHORIZATION_FAILED");
+  }
   let result: Awaited<ReturnType<typeof options.client.commit>>;
   try {
     result = await options.client.commit("reset", plan.writes, authorization);
@@ -209,15 +220,26 @@ export async function executeTransitionSnapshotReset(
         commitResponse: "verified_after_ambiguous_response",
       };
     }
-    throw new AggregateError(
+    const aggregate = new AggregateError(
       [commitError, ...(outcome.error ? [outcome.error] : [])],
       outcome.status === "not_observed"
         ? "reset commit応答が失敗し、反復read-back時点では適用を確認できませんでした（未適用とは断定できません）"
         : "reset commit応答が失敗し、反復read-backでも適用状態を確定できません",
+      { cause: commitError },
+    );
+    throw withCutoverDiagnosticCode(
+      aggregate,
+      outcome.status === "not_observed"
+        ? "RESET_COMMIT_NOT_OBSERVED"
+        : "RESET_COMMIT_STATE_UNKNOWN",
     );
   }
 
-  await assertTransitionSnapshotResetApplied(options, plan);
+  try {
+    await assertTransitionSnapshotResetApplied(options, plan);
+  } catch (error) {
+    throw withCutoverDiagnosticCode(error, "RESET_POST_VERIFY_FAILED");
+  }
   if (
     typeof result.commitTime !== "string"
     || !result.commitTime

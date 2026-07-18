@@ -236,10 +236,6 @@ describe("cutover readiness assessment", () => {
 
   it.each([
     ["releaseId", { releaseName: `projects/${CUTOVER_INFRA_CONTRACT.projectId}/releases/other-release` }],
-    ["releaseCreateTime", { releaseCreateTime: "2026-03-11T07:36:21.000Z" }],
-    ["releaseUpdateTime", { releaseUpdateTime: "2026-06-02T08:28:54.000Z" }],
-    ["rulesetId", { rulesetName: `projects/${CUTOVER_INFRA_CONTRACT.projectId}/rulesets/other-ruleset` }],
-    ["rulesetCreateTime", { rulesetCreateTime: "2026-06-02T08:28:53.000Z" }],
     ["normalizedSha256", { normalizedSha256: "0".repeat(64) }],
     ["normalizedBytes", { normalizedBytes: 101 }],
   ] as const)("Rules evidenceの%sがpinned manifestと異なればNO-GO", (_label, change) => {
@@ -251,7 +247,24 @@ describe("cutover readiness assessment", () => {
     expect(report.blocking).toContain("LIVE_RULES_BASELINE_EVIDENCE_INVALID_OR_STALE");
   });
 
-  it("live Rules source filenameがpinned manifestと異なればNO-GO", () => {
+  it.each([
+    ["releaseCreateTime", { releaseCreateTime: "2026-03-11T07:36:21.000Z" }],
+    ["releaseUpdateTime", { releaseUpdateTime: "2026-06-02T08:28:54.000Z" }],
+    ["rulesetId", { rulesetName: `projects/${CUTOVER_INFRA_CONTRACT.projectId}/rulesets/other-ruleset` }],
+    ["rulesetCreateTime", { rulesetCreateTime: "2026-06-02T08:28:53.000Z" }],
+  ] as const)("Rules manifestの%sは監査記録として保持するがGO判定を止めない", (
+    _label,
+    change,
+  ) => {
+    const input = readyInput();
+    const report = assessCutoverReadiness({
+      ...input,
+      expectedRulesBaseline: { ...RULES_BASELINE, ...change },
+    });
+    expect(report.status).toBe("GO");
+  });
+
+  it("live Rules source filenameは本文hash一致ならGO判定を止めない", () => {
     const input = readyInput();
     const rules = createRulesReadinessEvidence({
       generatedAt: input.rules!.generatedAt,
@@ -265,7 +278,7 @@ describe("cutover readiness assessment", () => {
     });
     const report = assessCutoverReadiness({ ...input, rules });
 
-    expect(report.blocking).toContain("LIVE_RULES_BASELINE_EVIDENCE_INVALID_OR_STALE");
+    expect(report.status).toBe("GO");
   });
 });
 

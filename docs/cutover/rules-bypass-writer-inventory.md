@@ -120,7 +120,7 @@ principalやpermissionを確定できない場合はblockerである。
 - human evidenceと矛盾する実在のRules迂回writerが見つかり、停止できない。
 - repository内にAdmin SDK credential候補が残る、またはambient credential fallbackを拒否できない。
 - freeze Rules deploy後の反映待ちとfresh client deny smokeを完了できない。
-- live baseline確認後、freeze deploy前にRules release metadataまたはsource hashが変化した。
+- live baseline確認後、freeze deploy前にRules source hashが変化した。
 - snapshot復号・hash・censusが不一致、unknown recordまたはsubcollectionを検出した。
 - 最終censusとatomic commit間に新規・更新・削除documentが見つかった。
 

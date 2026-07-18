@@ -147,16 +147,9 @@ export function assessCutoverReadiness(input: {
         now: input.now,
       });
       const expectedReleaseId = resourceId(input.expectedRulesBaseline.releaseName);
-      const expectedRulesetId = resourceId(input.expectedRulesBaseline.rulesetName);
       if (
         input.expectedRulesBaseline.projectId !== input.args.projectId
         || input.rules.payload.releaseId !== expectedReleaseId
-        || input.rules.payload.releaseCreateTime !== input.expectedRulesBaseline.releaseCreateTime
-        || input.rules.payload.releaseUpdateTime !== input.expectedRulesBaseline.releaseUpdateTime
-        || input.rules.payload.rulesetId !== expectedRulesetId
-        || input.rules.payload.rulesetCreateTime !== input.expectedRulesBaseline.rulesetCreateTime
-        || input.rules.payload.liveRulesSourceFile
-          !== input.expectedRulesBaseline.liveRulesSourceFile
         || input.rules.payload.normalizedSha256 !== input.expectedRulesBaseline.normalizedSha256
         || input.rules.payload.normalizedBytes !== input.expectedRulesBaseline.normalizedBytes
       ) {
