@@ -58,7 +58,9 @@ export type TransitionResetPlan = {
 // Data Resetで保持してよいtank基本情報。未知fieldを基本情報だと推測しない。
 const KNOWN_TANK_BASIC_INFORMATION_FIELDS = new Set([
   "id",
+  "tankId",
   "tankNumber",
+  "prefix",
   "type",
   "capacity",
   "serialNumber",
@@ -79,6 +81,8 @@ const KNOWN_TANK_BASIC_INFORMATION_FIELDS = new Set([
   "maintenanceDate",
   "nextMaintenanceDate",
   "note",
+  "notes",
+  "tags",
   "createdAt",
 ]);
 
