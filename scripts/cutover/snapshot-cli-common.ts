@@ -165,7 +165,10 @@ export async function createSnapshotRestRuntime(
 /** Firestore document clientへRules reader credentialが混入するのをruntimeでも拒否する。 */
 export function createDataMigrationFirestoreRestClient(
   args: Pick<SnapshotCommonArguments, "projectId" | "databaseId">,
-  credential: Pick<VerifiedDataMigrationCredential, "kind" | "accessTokenProvider">,
+  credential: Pick<
+    VerifiedDataMigrationCredential,
+    "kind" | "principal" | "accessTokenProvider"
+  >,
 ): FirestoreRestClient {
   if (credential.kind !== "data_migration") {
     throw new Error("Firestore data処理にはdata migration credentialが必要です");
@@ -174,6 +177,7 @@ export function createDataMigrationFirestoreRestClient(
     projectId: args.projectId,
     databaseId: args.databaseId,
     accessTokenProvider: credential.accessTokenProvider,
+    dataPrincipal: credential.principal,
   });
 }
 

@@ -14,11 +14,8 @@ import {
   snapshotFieldSha256,
   validateTransitionSnapshotPayload,
 } from "./canonical-firestore-value";
-import {
-  FirestoreRestClient,
-  serializeFirestoreRestBody,
-} from "./firestore-rest-client";
 import type {
+  CutoverFirestoreClient,
   FirestoreRestDocument,
   FirestoreRestValue,
   FirestoreWrite,
@@ -28,8 +25,15 @@ import type {
   TransitionSnapshotPayloadV1,
   TransitionSourceCensus,
 } from "./firestore-rest-types";
-import { assertRestoreServiceExecutionAllowed } from "./production-execute-gates";
-import { createTransitionResetContract } from "./transition-reset-contract";
+import {
+  emulatorExecutionIdentity,
+  type ProductionExecutionIntent,
+  type TransitionExecutionIdentity,
+} from "./production-execution-contract";
+import {
+  createTransitionResetContract,
+  type TransitionResetContract,
+} from "./transition-reset-contract";
 
 export const MAX_CUTOVER_COMMIT_WRITES = 400;
 export const MAX_CUTOVER_COMMIT_BYTES = 8 * 1024 * 1024;
@@ -41,7 +45,7 @@ const REQUIRED_RESET_LOCATION = "倉庫";
 const MAX_TIMESTAMP_PRECONDITION = "9999-12-31T23:59:59.999999999Z";
 
 export type CaptureTransitionSnapshotOptions = {
-  client: FirestoreRestClient;
+  client: CutoverFirestoreClient;
   databaseUid: string;
   mainCommit: string;
   keyId: string;
@@ -50,13 +54,19 @@ export type CaptureTransitionSnapshotOptions = {
 };
 
 export type RestoreTransitionSnapshotOptions = {
-  client: FirestoreRestClient;
+  client: CutoverFirestoreClient;
   payload: TransitionSnapshotPayloadV1;
   snapshotPayloadSha256: string;
   expectedProjectId: string;
   expectedDatabaseId: string;
   expectedDatabaseUid: string;
   expectedMainCommit: string;
+  executionIdentity?: TransitionExecutionIdentity;
+  executionIntent?: ProductionExecutionIntent;
+  ambiguousReadbackDelaysMs?: readonly number[];
+  restoreProductionAuthorizationProvider?: (
+    plan: TransitionRestorePlan,
+  ) => unknown;
 };
 
 export type TransitionRestorePlan = {
@@ -69,9 +79,41 @@ export type TransitionRestorePlan = {
     writes: number;
     requestBytes: number;
     snapshotId: string;
+    snapshotPayloadSha256: string;
     sourceCensusSha256: string;
+    resetPlanSha256: string;
   };
 };
+
+type AuthenticatedTransitionRestorePlanContext = {
+  projectId: string;
+  databaseId: string;
+  databaseUid: string | undefined;
+  dataPrincipal: string | undefined;
+  operatorPrincipal: string;
+  mainCommit: string;
+};
+
+const authenticTransitionRestorePlans = new WeakMap<
+  object,
+  AuthenticatedTransitionRestorePlanContext
+>();
+
+/** production commit認可は、実plannerがreset済みlive stateから生成したplanだけを受理する。 */
+export function assertAuthenticTransitionRestorePlan(
+  plan: TransitionRestorePlan,
+): void {
+  if (!authenticTransitionRestorePlans.has(plan) || !Object.isFrozen(plan)) {
+    throw new Error("restore serviceが生成した凍結planではありません");
+  }
+}
+
+export function authenticatedTransitionRestorePlanContext(
+  plan: TransitionRestorePlan,
+): AuthenticatedTransitionRestorePlanContext {
+  assertAuthenticTransitionRestorePlan(plan);
+  return authenticTransitionRestorePlans.get(plan)!;
+}
 
 export async function captureTransitionSnapshot(
   options: CaptureTransitionSnapshotOptions,
@@ -137,7 +179,7 @@ export async function captureTransitionSnapshot(
 }
 
 export async function readTransitionSourceCensus(
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
 ): Promise<TransitionSourceCensus> {
   const transaction = await client.beginReadOnlyTransaction();
   try {
@@ -220,6 +262,7 @@ export async function readTransitionSourceCensus(
 export async function planTransitionSnapshotRestore(
   options: RestoreTransitionSnapshotOptions,
 ): Promise<TransitionRestorePlan> {
+  const executionIdentity = transitionExecutionIdentity(options);
   const payload = validateTransitionSnapshotPayload(options.payload);
   if (
     !/^[0-9a-f]{64}$/.test(options.snapshotPayloadSha256)
@@ -231,18 +274,30 @@ export async function planTransitionSnapshotRestore(
   await options.client.verifyDatabaseUid(options.expectedDatabaseUid);
 
   const current = await readTransitionSourceCensus(options.client);
-  assertRestoreCurrentState(current, payload, options.snapshotPayloadSha256, options.client);
+  assertRestoreCurrentState(
+    current,
+    payload,
+    options.snapshotPayloadSha256,
+    options.client,
+    executionIdentity,
+  );
   const inspectionPaths = snapshotInspectionPaths(payload.documents, options.client);
   await assertNoSubcollections(options.client, inspectionPaths);
 
   // subcollection検査後に再読取し、最新updateTimeをpreconditionへ使用する。
   const finalCurrent = await readTransitionSourceCensus(options.client);
-  assertRestoreCurrentState(finalCurrent, payload, options.snapshotPayloadSha256, options.client);
+  const resetContract = assertRestoreCurrentState(
+    finalCurrent,
+    payload,
+    options.snapshotPayloadSha256,
+    options.client,
+    executionIdentity,
+  );
   await assertNoSubcollections(options.client, inspectionPaths);
   const writes = buildRestoreWrites(payload, finalCurrent, options.client);
-  const requestBytes = Buffer.byteLength(serializeFirestoreRestBody({ writes }), "utf8");
+  const requestBytes = Buffer.byteLength(canonicalStringify({ writes }), "utf8");
   assertCommitBounds(writes.length, requestBytes);
-  return {
+  return sealTransitionRestorePlan({
     writes,
     requestBytes,
     summary: {
@@ -252,9 +307,18 @@ export async function planTransitionSnapshotRestore(
       writes: writes.length,
       requestBytes,
       snapshotId: payload.manifest.snapshotId,
+      snapshotPayloadSha256: options.snapshotPayloadSha256,
       sourceCensusSha256: payload.manifest.sourceCensusSha256,
+      resetPlanSha256: resetContract.resetPlanSha256,
     },
-  };
+  }, {
+    projectId: options.client.projectId,
+    databaseId: options.client.databaseId,
+    databaseUid: options.client.getVerifiedDatabaseUid(),
+    dataPrincipal: options.client.dataPrincipal,
+    operatorPrincipal: executionIdentity.operatorPrincipal,
+    mainCommit: options.expectedMainCommit,
+  });
 }
 
 export async function executeTransitionSnapshotRestore(
@@ -263,14 +327,14 @@ export async function executeTransitionSnapshotRestore(
   commitTime: string | null;
   commitResponse: "confirmed" | "verified_after_ambiguous_response";
 }> {
-  assertRestoreServiceExecutionAllowed(options.client.emulatorHost);
   const plan = await planTransitionSnapshotRestore(options);
+  const authorization = options.restoreProductionAuthorizationProvider?.(plan);
   let result: Awaited<ReturnType<typeof options.client.commit>>;
   try {
-    result = await options.client.commit(plan.writes);
+    result = await options.client.commit("restore", plan.writes, authorization);
   } catch (commitError) {
     try {
-      await assertRestoredSnapshot(options);
+      await assertRestoredAfterAmbiguousCommit(options);
       return {
         ...plan,
         commitTime: null,
@@ -300,10 +364,63 @@ export async function executeTransitionSnapshotRestore(
   return { ...plan, commitTime: result.commitTime, commitResponse: "confirmed" };
 }
 
+async function assertRestoredAfterAmbiguousCommit(
+  options: RestoreTransitionSnapshotOptions,
+): Promise<void> {
+  const delays = options.ambiguousReadbackDelaysMs ?? [100, 400];
+  let lastError: unknown;
+  for (let attempt = 0; attempt <= delays.length; attempt += 1) {
+    try {
+      await assertRestoredSnapshot(options);
+      return;
+    } catch (error) {
+      lastError = error;
+    }
+    const delayMs = delays[attempt];
+    if (delayMs !== undefined && delayMs > 0) await wait(delayMs);
+  }
+  throw lastError;
+}
+
+function sealTransitionRestorePlan(
+  plan: TransitionRestorePlan,
+  context: AuthenticatedTransitionRestorePlanContext,
+): TransitionRestorePlan {
+  freezeDeep(plan);
+  authenticTransitionRestorePlans.set(plan, Object.freeze({ ...context }));
+  return plan;
+}
+
+function freezeDeep(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  Object.values(value).forEach(freezeDeep);
+  if (!Object.isFrozen(value)) Object.freeze(value);
+}
+
+async function wait(delayMs: number): Promise<void> {
+  await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+}
+
+export function transitionExecutionIdentity(
+  options: Pick<RestoreTransitionSnapshotOptions, "client" | "executionIdentity">,
+): TransitionExecutionIdentity {
+  if (options.executionIdentity) {
+    if (
+      !options.client.emulatorHost
+      && options.client.dataPrincipal !== options.executionIdentity.dataPrincipal
+    ) {
+      throw new Error("execution identityのdata principalが検証済みclient principalと一致しません");
+    }
+    return options.executionIdentity;
+  }
+  if (options.client.emulatorHost) return emulatorExecutionIdentity();
+  throw new Error("本番cutoverにはexecution identityが必須です");
+}
+
 export function buildRestoreWrites(
   payload: TransitionSnapshotPayloadV1,
   current: TransitionSourceCensus,
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
 ): FirestoreWrite[] {
   const currentByName = new Map(current.documents.map((document) => [document.name, document]));
   const writes = payload.documents.map((document): FirestoreWrite => {
@@ -375,7 +492,7 @@ export function assertCommitBounds(writeCount: number, requestBytes: number): vo
 
 export function assertSnapshotCanRestoreAtomically(
   payloadInput: TransitionSnapshotPayloadV1,
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
 ): void {
   const payload = validateTransitionSnapshotPayload(payloadInput);
   const writes: FirestoreWrite[] = payload.documents.map((document) => (
@@ -395,12 +512,12 @@ export function assertSnapshotCanRestoreAtomically(
   });
   assertCommitBounds(
     writes.length,
-    Buffer.byteLength(serializeFirestoreRestBody({ writes }), "utf8"),
+    Buffer.byteLength(canonicalStringify({ writes }), "utf8"),
   );
 }
 
 async function assertNoSubcollections(
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
   relativePaths: string[],
 ): Promise<void> {
   const concurrency = 10;
@@ -420,7 +537,7 @@ async function assertNoSubcollections(
 
 function snapshotInspectionPaths(
   documents: TransitionSnapshotDocumentV1[],
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
 ): string[] {
   return [
     ...documents.map((document) => relativeDocumentPath(document.name, client.databasePrefix)),
@@ -451,8 +568,9 @@ function assertRestoreCurrentState(
   current: TransitionSourceCensus,
   payload: TransitionSnapshotPayloadV1,
   snapshotPayloadSha256: string,
-  client: FirestoreRestClient,
-): void {
+  client: CutoverFirestoreClient,
+  executionIdentity: TransitionExecutionIdentity,
+): TransitionResetContract {
   const originalTanks = payload.documents.filter((document) => document.kind === "tank");
   const currentTanks = current.documents.filter((document) => document.kind === "tank");
   const currentTankLogs = current.documents.filter((document) => document.kind === "tank_log");
@@ -494,14 +612,19 @@ function assertRestoreCurrentState(
   if (restString(markerFields.snapshotPayloadSha256) !== snapshotPayloadSha256) {
     throw new Error("migration markerのsnapshot payload SHA-256が一致しません");
   }
-  const expectedMarkerFields = createTransitionResetContract(
+  const expectedContract = createTransitionResetContract(
     payload,
     snapshotPayloadSha256,
     resetAt,
-  ).markerFields;
-  if (canonicalStringify(markerFields) !== canonicalStringify(expectedMarkerFields)) {
+    executionIdentity,
+  );
+  if (
+    canonicalStringify(markerFields)
+    !== canonicalStringify(expectedContract.markerFields)
+  ) {
     throw new Error("migration markerがsnapshot由来のreset契約と一致しません");
   }
+  return expectedContract;
 }
 
 function assertTankIsExpectedResetState(

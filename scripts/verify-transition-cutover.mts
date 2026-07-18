@@ -14,6 +14,10 @@ import {
   loadSnapshotEncryptionKey,
 } from "./cutover/snapshot-key-provider";
 import { verifyTransitionCutoverState } from "./cutover/transition-cutover-verifier";
+import {
+  emulatorExecutionIdentity,
+  productionExecutionIdentity,
+} from "./cutover/production-execution-contract";
 
 type CutoverOperation = "reset" | "restore";
 
@@ -48,6 +52,9 @@ async function main(): Promise<void> {
       expectedDatabaseId: args.databaseId,
       expectedDatabaseUid: args.databaseUid,
       expectedMainCommit: args.mainCommit,
+      executionIdentity: args.emulatorHost
+        ? emulatorExecutionIdentity()
+        : productionExecutionIdentity(),
     });
     const targetStateConfirmed = operation === "reset"
       ? result.status === "reset_applied"

@@ -10,6 +10,7 @@ import type {
   FirestoreRestValue,
   TransitionSnapshotPayloadV1,
 } from "./firestore-rest-types";
+import type { TransitionExecutionIdentity } from "./production-execution-contract";
 
 export type TransitionResetContract = {
   resetAt: string;
@@ -22,6 +23,7 @@ export function createTransitionResetContract(
   payloadInput: TransitionSnapshotPayloadV1,
   snapshotPayloadSha256: string,
   resetAtInput: string,
+  executionIdentityInput: TransitionExecutionIdentity,
 ): TransitionResetContract {
   if (!/^[0-9a-f]{64}$/.test(snapshotPayloadSha256)) {
     throw new Error("snapshot payload SHA-256が不正です");
@@ -34,10 +36,11 @@ export function createTransitionResetContract(
   if (!("timestampValue" in resetAtValue)) throw new Error("resetAtを正規化できません");
   const resetAt = resetAtValue.timestampValue;
   const statusCounts = statusCountsFromSnapshot(payload);
+  const executionIdentity = requireExecutionIdentity(executionIdentityInput);
 
   // 実行時刻だけを除外し、dry-runとexecuteで同じ業務plan hashを比較できるようにする。
   const resetPlanSha256 = canonicalSha256({
-    contractVersion: 1,
+    contractVersion: 2,
     scope: payload.manifest.scope,
     projectId: payload.manifest.projectId,
     databaseId: payload.manifest.databaseId,
@@ -51,6 +54,8 @@ export function createTransitionResetContract(
     counts: payload.manifest.counts,
     statusCounts,
     migrationMarkerPath: payload.manifest.migrationMarkerPath,
+    operatorPrincipal: executionIdentity.operatorPrincipal,
+    dataPrincipal: executionIdentity.dataPrincipal,
     targetProjection: {
       status: "empty",
       location: "倉庫",
@@ -69,12 +74,14 @@ export function createTransitionResetContract(
     resetPlanSha256,
     markerFields: {
       migration: { stringValue: payload.manifest.scope },
-      scriptVersion: { integerValue: "1" },
+      scriptVersion: { integerValue: "2" },
       status: { stringValue: "completed" },
       projectId: { stringValue: payload.manifest.projectId },
       databaseId: { stringValue: payload.manifest.databaseId },
       databaseUid: { stringValue: payload.manifest.databaseUid },
       mainCommit: { stringValue: payload.manifest.mainCommit },
+      operatorPrincipal: { stringValue: executionIdentity.operatorPrincipal },
+      dataPrincipal: { stringValue: executionIdentity.dataPrincipal },
       keyId: { stringValue: payload.manifest.keyId },
       snapshotId: { stringValue: payload.manifest.snapshotId },
       snapshotPayloadSha256: { stringValue: snapshotPayloadSha256 },
@@ -93,6 +100,21 @@ export function createTransitionResetContract(
       resetPlanSha256: { stringValue: resetPlanSha256 },
     },
   };
+}
+
+function requireExecutionIdentity(
+  input: TransitionExecutionIdentity,
+): TransitionExecutionIdentity {
+  const operatorPrincipal = input.operatorPrincipal.trim().toLowerCase();
+  const dataPrincipal = input.dataPrincipal.trim().toLowerCase();
+  if (!/^user:[^@\s]+@[^@\s]+$/u.test(operatorPrincipal)) {
+    throw new Error("cutover operator principalが不正です");
+  }
+  if (!/^[a-z0-9._%+-]+@[a-z0-9.-]+\.iam\.gserviceaccount\.com$/u.test(dataPrincipal)
+    && !/^[a-z0-9._%+-]+@demo\.invalid$/u.test(dataPrincipal)) {
+    throw new Error("cutover data principalが不正です");
+  }
+  return { operatorPrincipal, dataPrincipal };
 }
 
 export function statusCountsFromSnapshot(

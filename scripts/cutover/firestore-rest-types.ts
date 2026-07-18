@@ -47,6 +47,32 @@ export type FirestoreCommitResponse = {
   commitTime?: string;
 };
 
+/** planner/serviceが具体client実装へruntime依存しないための最小契約。 */
+export type CutoverFirestoreClient = {
+  readonly projectId: string;
+  readonly databaseId: string;
+  readonly databaseName: string;
+  readonly databasePrefix: string;
+  readonly emulatorHost?: string;
+  readonly dataPrincipal?: string;
+  fullDocumentName(relativePath: string): string;
+  verifyDatabaseUid(expectedDatabaseUid: string): Promise<void>;
+  getVerifiedDatabaseUid(): string | undefined;
+  beginReadOnlyTransaction(): Promise<string>;
+  rollback(transaction: string): Promise<void>;
+  runCollectionQuery(
+    collectionId: string,
+    transaction: string,
+  ): Promise<{ documents: FirestoreRestDocument[]; readTime: string }>;
+  batchGet(relativePaths: string[]): Promise<Map<string, FirestoreRestDocument | null>>;
+  listCollectionIds(relativeDocumentPath: string): Promise<string[]>;
+  commit(
+    operation: "reset" | "restore",
+    writes: FirestoreWrite[],
+    authorization?: unknown,
+  ): Promise<FirestoreCommitResponse>;
+};
+
 export type TransitionSnapshotDocumentKind = "tank" | "tank_log" | "transaction";
 
 export type TransitionSnapshotDocumentV1 = {

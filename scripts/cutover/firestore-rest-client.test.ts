@@ -3,6 +3,9 @@ import {
   FirestoreRestClient,
   serializeFirestoreRestBody,
 } from "./firestore-rest-client";
+import {
+  PRODUCTION_CUTOVER_DATA_PRINCIPAL,
+} from "./production-execution-contract";
 
 describe("Firestore REST client safety", () => {
   afterEach(() => {
@@ -53,10 +56,11 @@ describe("Firestore REST client safety", () => {
       projectId: "okmarine-tankrental",
       databaseId: "(default)",
       accessTokenProvider: async () => "unused-test-token",
+      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
     });
     await expect(client.commit([{
       delete: "projects/okmarine-tankrental/databases/(default)/documents/tanks/T-001",
-    }])).rejects.toThrow("本番commit");
+    }])).rejects.toThrow("authorization");
   });
 
   it("本番readでも暗黙ADCへfallbackせず明示providerを必須にする", () => {
@@ -64,6 +68,14 @@ describe("Firestore REST client safety", () => {
       projectId: "okmarine-tankrental",
       databaseId: "(default)",
     })).toThrow("検証済みaccess token provider");
+  });
+
+  it("本番clientは検証済みdata principalも必須にする", () => {
+    expect(() => new FirestoreRestClient({
+      projectId: "okmarine-tankrental",
+      databaseId: "(default)",
+      accessTokenProvider: async () => "unused-test-token",
+    })).toThrow("data principal");
   });
 
   it("不正な本番response本文をerrorへ再掲しない", async () => {
@@ -75,6 +87,7 @@ describe("Firestore REST client safety", () => {
       projectId: "okmarine-tankrental",
       databaseId: "(default)",
       accessTokenProvider: async () => "unused-test-token",
+      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
     });
     await expect(client.verifyDatabaseUid("expected-uid"))
       .rejects.toThrow("Firestore REST responseがJSONではありません");
