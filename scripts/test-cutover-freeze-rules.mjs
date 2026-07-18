@@ -32,9 +32,9 @@ const REPOSITORY_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const PINNED_BASELINE_GIT_COMMIT = "b7e853c8f38071937951b871cbe0e3281dd22876";
 const PINNED_BASELINE_RULES_SHA256 = "6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8";
 const PINNED_RELEASE_CREATE_TIME = "2026-03-11T07:36:20.560827Z";
-const PINNED_RELEASE_UPDATE_TIME = "2026-06-02T08:28:53.917518Z";
-const PINNED_RULESET_NAME = "projects/okmarine-tankrental/rulesets/5e97d441-b926-473a-a983-b77e41293db4";
-const PINNED_RULESET_CREATE_TIME = "2026-06-02T08:28:52.433311Z";
+const PINNED_RELEASE_UPDATE_TIME = "2026-07-18T08:48:41.527284Z";
+const PINNED_RULESET_NAME = "projects/okmarine-tankrental/rulesets/a6a7e85b-1761-44f4-a714-cc53957611e8";
+const PINNED_RULESET_CREATE_TIME = "2026-07-18T08:48:40.023823Z";
 const EXPECTED_FREEZE_RULES = `rules_version = '2';
 
 service cloud.firestore {
@@ -110,11 +110,12 @@ async function assertRulesAndConfigsAreDedicated() {
   assert.equal(rules, EXPECTED_FREEZE_RULES, "freeze ruleset must remain an exact deny-all ruleset");
 
   const baselineManifest = await readJson(BASELINE_MANIFEST_PATH);
-  assert.equal(baselineManifest.version, 1);
+  assert.equal(baselineManifest.version, 2);
   assert.equal(baselineManifest.projectId, "okmarine-tankrental");
   assert.equal(baselineManifest.gitCommit, PINNED_BASELINE_GIT_COMMIT);
   assert.equal(baselineManifest.normalizedSha256, PINNED_BASELINE_RULES_SHA256);
-  assert.equal(baselineManifest.rulesFile, "firestore.rules");
+  assert.equal(baselineManifest.pinnedGitRulesFile, "firestore.rules");
+  assert.equal(baselineManifest.liveRulesSourceFile, "firestore.cutover-baseline.rules");
   assert.equal(
     baselineManifest.releaseName,
     "projects/okmarine-tankrental/releases/cloud.firestore",
@@ -149,6 +150,11 @@ async function assertRulesAndConfigsAreDedicated() {
   assert.deepEqual(baselineConfig, {
     firestore: { rules: "firestore.cutover-baseline.rules" },
   });
+  assert.equal(
+    baselineConfig.firestore.rules,
+    baselineManifest.liveRulesSourceFile,
+    "rollback deploy config must match the attested live source filename",
+  );
   assert.deepEqual(freezeConfig, {
     firestore: { rules: "firestore.cutover-freeze.rules" },
   });

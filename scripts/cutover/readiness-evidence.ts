@@ -4,8 +4,8 @@ import { canonicalSha256 } from "./canonical-firestore-value";
 const SHA256_PATTERN = /^[0-9a-f]{64}$/u;
 const GIT_SHA_PATTERN = /^[0-9a-f]{40}$/u;
 
-export type RulesReadinessEvidenceV1 = {
-  version: 1;
+export type RulesReadinessEvidenceV2 = {
+  version: 2;
   kind: "rules-baseline";
   generatedAt: string;
   projectId: string;
@@ -14,8 +14,11 @@ export type RulesReadinessEvidenceV1 = {
   payload: {
     matched: true;
     releaseId: "cloud.firestore";
+    releaseCreateTime: string;
     releaseUpdateTime: string;
     rulesetId: string;
+    rulesetCreateTime: string;
+    liveRulesSourceFile: string;
     normalizedSha256: string;
     normalizedBytes: number;
   };
@@ -43,7 +46,7 @@ export type DataReadinessEvidenceV1 = {
 };
 
 export type CutoverReadinessEvidence =
-  | RulesReadinessEvidenceV1
+  | RulesReadinessEvidenceV2
   | DataReadinessEvidenceV1;
 
 export function principalSha256(principal: string): string {
@@ -57,10 +60,10 @@ export function createRulesReadinessEvidence(input: {
   projectId: string;
   mainCommit: string;
   principal: string;
-  payload: RulesReadinessEvidenceV1["payload"];
-}): RulesReadinessEvidenceV1 {
+  payload: RulesReadinessEvidenceV2["payload"];
+}): RulesReadinessEvidenceV2 {
   const evidenceWithoutHash = {
-    version: 1 as const,
+    version: 2 as const,
     kind: "rules-baseline" as const,
     generatedAt: requireTimestamp(input.generatedAt, "generatedAt"),
     projectId: requireProjectId(input.projectId),
@@ -102,10 +105,16 @@ export function createDataReadinessEvidence(input: {
 
 export function parseCutoverReadinessEvidence(value: unknown): CutoverReadinessEvidence {
   const record = objectRecord(value, "readiness evidence");
-  if (record.version !== 1) throw new Error("readiness evidence versionが不正です");
-  if (record.kind === "rules-baseline") return parseRulesEvidence(record);
-  if (record.kind === "data-preflight") return parseDataEvidence(record);
-  throw new Error("readiness evidence kindが不正です");
+  if (record.kind === "rules-baseline" && record.version === 2) {
+    return parseRulesEvidence(record);
+  }
+  if (record.kind === "data-preflight" && record.version === 1) {
+    return parseDataEvidence(record);
+  }
+  if (record.kind !== "rules-baseline" && record.kind !== "data-preflight") {
+    throw new Error("readiness evidence kindが不正です");
+  }
+  throw new Error("readiness evidence versionが不正です");
 }
 
 export function assertFreshReadinessEvidence(input: {
@@ -136,13 +145,13 @@ export function assertFreshReadinessEvidence(input: {
   }
 }
 
-function parseRulesEvidence(record: Record<string, unknown>): RulesReadinessEvidenceV1 {
+function parseRulesEvidence(record: Record<string, unknown>): RulesReadinessEvidenceV2 {
   assertExactKeys(record, [
     "version", "kind", "generatedAt", "projectId", "mainCommit",
     "principalSha256", "payload", "evidenceSha256",
   ], "Rules readiness evidence");
   const withoutHash = {
-    version: 1 as const,
+    version: 2 as const,
     kind: "rules-baseline" as const,
     generatedAt: requireTimestamp(record.generatedAt, "generatedAt"),
     projectId: requireProjectId(record.projectId),
@@ -180,10 +189,11 @@ function parseDataEvidence(record: Record<string, unknown>): DataReadinessEviden
   return { ...withoutHash, evidenceSha256 };
 }
 
-function normalizeRulesPayload(value: unknown): RulesReadinessEvidenceV1["payload"] {
+function normalizeRulesPayload(value: unknown): RulesReadinessEvidenceV2["payload"] {
   const payload = objectRecord(value, "Rules evidence payload");
   assertExactKeys(payload, [
-    "matched", "releaseId", "releaseUpdateTime", "rulesetId",
+    "matched", "releaseId", "releaseCreateTime", "releaseUpdateTime", "rulesetId",
+    "rulesetCreateTime", "liveRulesSourceFile",
     "normalizedSha256", "normalizedBytes",
   ], "Rules evidence payload");
   if (payload.matched !== true || payload.releaseId !== "cloud.firestore") {
@@ -192,8 +202,14 @@ function normalizeRulesPayload(value: unknown): RulesReadinessEvidenceV1["payloa
   return {
     matched: true,
     releaseId: "cloud.firestore",
+    releaseCreateTime: requireTimestamp(payload.releaseCreateTime, "releaseCreateTime"),
     releaseUpdateTime: requireTimestamp(payload.releaseUpdateTime, "releaseUpdateTime"),
     rulesetId: requireNonEmptyString(payload.rulesetId, "rulesetId"),
+    rulesetCreateTime: requireTimestamp(payload.rulesetCreateTime, "rulesetCreateTime"),
+    liveRulesSourceFile: requireNonEmptyString(
+      payload.liveRulesSourceFile,
+      "liveRulesSourceFile",
+    ),
     normalizedSha256: requireSha256(payload.normalizedSha256, "normalizedSha256"),
     normalizedBytes: requirePositiveInteger(payload.normalizedBytes, "normalizedBytes"),
   };

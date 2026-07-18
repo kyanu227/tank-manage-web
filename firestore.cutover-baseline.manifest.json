@@ -1,12 +1,13 @@
 {
-  "version": 1,
+  "version": 2,
   "projectId": "okmarine-tankrental",
   "releaseName": "projects/okmarine-tankrental/releases/cloud.firestore",
   "releaseCreateTime": "2026-03-11T07:36:20.560827Z",
-  "releaseUpdateTime": "2026-06-02T08:28:53.917518Z",
-  "rulesetName": "projects/okmarine-tankrental/rulesets/5e97d441-b926-473a-a983-b77e41293db4",
-  "rulesetCreateTime": "2026-06-02T08:28:52.433311Z",
-  "rulesFile": "firestore.rules",
+  "releaseUpdateTime": "2026-07-18T08:48:41.527284Z",
+  "rulesetName": "projects/okmarine-tankrental/rulesets/a6a7e85b-1761-44f4-a714-cc53957611e8",
+  "rulesetCreateTime": "2026-07-18T08:48:40.023823Z",
+  "pinnedGitRulesFile": "firestore.rules",
+  "liveRulesSourceFile": "firestore.cutover-baseline.rules",
   "gitCommit": "b7e853c8f38071937951b871cbe0e3281dd22876",
   "normalizedSha256": "6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8",
   "normalizedBytes": 26390
