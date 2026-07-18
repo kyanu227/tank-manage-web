@@ -16,7 +16,15 @@ import {
   type DataReadinessEvidenceV1,
   type RulesReadinessEvidenceV1,
 } from "./readiness-evidence";
-import { probeProductionExecuteGatesClosed } from "./production-execute-gates";
+import {
+  probeProductionExecuteGatePosture,
+  type ProductionExecuteGatePosture,
+} from "./production-execute-gates";
+import {
+  PRODUCTION_CUTOVER_DATABASE_ID,
+  PRODUCTION_CUTOVER_DATABASE_UID,
+  PRODUCTION_CUTOVER_OPERATOR_PRINCIPAL,
+} from "./production-execution-contract";
 
 const MAX_RESET_WRITES = 400;
 const MAX_RESET_REQUEST_BYTES = 8 * 1024 * 1024;
@@ -85,7 +93,7 @@ export function assessCutoverReadiness(input: {
   human: CutoverHumanEvidence;
   rules: RulesReadinessEvidenceV1 | null;
   data: DataReadinessEvidenceV1 | null;
-  productionExecuteGatesClosed: boolean;
+  productionExecuteGatePosture: ProductionExecuteGatePosture;
   expectedRulesBaseline: FirestoreRulesBaselineManifest;
   now: Date;
 }): CutoverReadinessReport {
@@ -196,10 +204,20 @@ export function assessCutoverReadiness(input: {
     }
   }
 
-  if (input.productionExecuteGatesClosed) {
+  if (input.productionExecuteGatePosture === "closed") {
     completed.push("production reset and restore execute gates remain closed");
+  } else if (input.productionExecuteGatePosture === "armed_for_fixed_transition_v1") {
+    if (
+      input.args.expectedOperatorPrincipal === PRODUCTION_CUTOVER_OPERATOR_PRINCIPAL
+      && input.args.databaseId === PRODUCTION_CUTOVER_DATABASE_ID
+      && input.args.expectedDatabaseUid === PRODUCTION_CUTOVER_DATABASE_UID
+    ) {
+      completed.push("production execute gates are armed for the fixed transition v1 contract");
+    } else {
+      blocking.push("PRODUCTION_EXECUTE_CONTRACT_CONTEXT_MISMATCH");
+    }
   } else {
-    blocking.push("PRODUCTION_EXECUTE_GATE_NOT_PROVEN_CLOSED");
+    blocking.push("PRODUCTION_EXECUTE_GATE_POSTURE_UNSAFE");
   }
 
   const normalizedBlocking = uniqueSorted(blocking);
@@ -213,10 +231,12 @@ export function assessCutoverReadiness(input: {
   };
 }
 
-export async function productionExecuteGatesAreClosed(repositoryRoot: string): Promise<boolean> {
+export async function productionExecuteGatePosture(
+  repositoryRoot: string,
+): Promise<ProductionExecuteGatePosture> {
   // repositoryRootを解決できることも確認し、別worktreeからの誤集約を拒否する。
   await realpath(repositoryRoot);
-  return probeProductionExecuteGatesClosed();
+  return probeProductionExecuteGatePosture();
 }
 
 /** 別repositoryの同一SHAをreadiness正本として誤用しない。 */
@@ -294,7 +314,7 @@ function assessHumanEvidence(input: {
     || human.keyId !== input.args.keyId
     || human.expectedOperatorPrincipal !== input.args.expectedOperatorPrincipal
     || human.rulesDeployPrincipal !== input.args.rulesDeployPrincipal
-    || human.confirmedByPrincipal === null
+    || human.confirmedByPrincipal !== input.args.expectedOperatorPrincipal
     || !Number.isFinite(reviewedAt)
     || humanEvidenceAge < 0
     || humanEvidenceAge > 60 * 60 * 1_000

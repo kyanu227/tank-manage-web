@@ -6,7 +6,10 @@ import type {
   FirestoreRunQueryResult,
   FirestoreWrite,
 } from "./firestore-rest-types";
-import { assertFirestoreCommitAllowed } from "./production-execute-gates";
+import {
+  assertFirestoreCommitAllowed,
+} from "./production-execute-gates";
+import type { ProductionCutoverOperation } from "./production-execution-contract";
 
 type AccessTokenProvider = () => Promise<string>;
 const FIRESTORE_REQUEST_TIMEOUT_MS = 60_000;
@@ -16,6 +19,7 @@ export type FirestoreRestClientOptions = {
   databaseId: string;
   emulatorHost?: string;
   accessTokenProvider?: AccessTokenProvider;
+  dataPrincipal?: string;
 };
 
 export class FirestoreRestClient {
@@ -24,9 +28,11 @@ export class FirestoreRestClient {
   readonly databaseName: string;
   readonly databasePrefix: string;
   readonly emulatorHost?: string;
+  readonly dataPrincipal?: string;
 
   private readonly apiRoot: string;
   private readonly accessTokenProvider?: AccessTokenProvider;
+  private verifiedDatabaseUid?: string;
 
   constructor(options: FirestoreRestClientOptions) {
     this.projectId = requireProjectId(options.projectId);
@@ -40,7 +46,11 @@ export class FirestoreRestClient {
     if (!this.emulatorHost && !options.accessTokenProvider) {
       throw new Error("本番cutover REST clientには検証済みaccess token providerが必須です");
     }
+    if (!this.emulatorHost && !options.dataPrincipal?.trim()) {
+      throw new Error("本番cutover REST clientには検証済みdata principalが必須です");
+    }
     this.accessTokenProvider = this.emulatorHost ? undefined : options.accessTokenProvider;
+    this.dataPrincipal = this.emulatorHost ? undefined : options.dataPrincipal?.trim();
   }
 
   get documentsRoot(): string {
@@ -58,6 +68,7 @@ export class FirestoreRestClient {
       if (expectedDatabaseUid !== expected) {
         throw new Error(`Emulator database UIDが一致しません: expected=${expected}`);
       }
+      this.verifiedDatabaseUid = expected;
       return;
     }
     const database = await this.request<Record<string, unknown>>(
@@ -70,6 +81,7 @@ export class FirestoreRestClient {
     if (typeof database.uid !== "string" || database.uid !== expectedDatabaseUid) {
       throw new Error(`Firestore database UIDが一致しません: ${String(database.uid ?? "missing")}`);
     }
+    this.verifiedDatabaseUid = expectedDatabaseUid;
   }
 
   async beginReadOnlyTransaction(): Promise<string> {
@@ -160,19 +172,69 @@ export class FirestoreRestClient {
     return [...new Set(ids)].sort(compareCanonicalStrings);
   }
 
-  async commit(writes: FirestoreWrite[]): Promise<FirestoreCommitResponse> {
-    assertFirestoreCommitAllowed(this.emulatorHost);
+  getVerifiedDatabaseUid(): string | undefined {
+    return this.verifiedDatabaseUid;
+  }
+
+  async commit(writes: FirestoreWrite[]): Promise<FirestoreCommitResponse>;
+  async commit(
+    operation: ProductionCutoverOperation,
+    writes: FirestoreWrite[],
+    authorization?: unknown,
+  ): Promise<FirestoreCommitResponse>;
+  async commit(
+    operationOrWrites: ProductionCutoverOperation | FirestoreWrite[],
+    writesOrAuthorization?: FirestoreWrite[] | unknown,
+    maybeAuthorization?: unknown,
+  ): Promise<FirestoreCommitResponse> {
+    const operation = typeof operationOrWrites === "string" ? operationOrWrites : "reset";
+    const writes = Array.isArray(operationOrWrites)
+      ? operationOrWrites
+      : writesOrAuthorization;
+    const authorization = Array.isArray(operationOrWrites)
+      ? undefined
+      : maybeAuthorization;
+    if (!Array.isArray(writes)) throw new Error("commit write列が不正です");
     if (writes.length === 0) throw new Error("commit writeが空です");
-    return this.request<FirestoreCommitResponse>(
+    // authorization検査前にexact bodyを固定し、token取得待ち中のmutationを送信へ反映しない。
+    const serializedRequestBody = serializeFirestoreRestBody({ writes });
+    const writeCount = writes.length;
+    assertFirestoreCommitAllowed({
+      emulatorHost: this.emulatorHost,
+      authorization,
+      operation,
+      projectId: this.projectId,
+      databaseId: this.databaseId,
+      databaseUid: this.verifiedDatabaseUid,
+      dataPrincipal: this.dataPrincipal,
+      serializedRequestBody,
+      writeCount,
+    });
+    return this.requestSerialized<FirestoreCommitResponse>(
       "POST",
       `${this.documentsRoot}:commit`,
-      { writes },
+      serializedRequestBody,
     );
   }
 
-  private async request<T>(method: "GET" | "POST", url: string, body?: unknown): Promise<T> {
+  private async requestSerialized<T>(
+    method: "POST",
+    url: string,
+    serializedBody: string,
+  ): Promise<T> {
+    return this.request<T>(method, url, undefined, serializedBody);
+  }
+
+  private async request<T>(
+    method: "GET" | "POST",
+    url: string,
+    body?: unknown,
+    serializedBody?: string,
+  ): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" };
-    if (body !== undefined) headers["Content-Type"] = "application/json";
+    if (body !== undefined || serializedBody !== undefined) {
+      headers["Content-Type"] = "application/json";
+    }
     if (this.emulatorHost) {
       headers.Authorization = "Bearer owner";
     } else if (this.accessTokenProvider) {
@@ -182,7 +244,11 @@ export class FirestoreRestClient {
       method,
       headers,
       signal: AbortSignal.timeout(FIRESTORE_REQUEST_TIMEOUT_MS),
-      ...(body === undefined ? {} : { body: serializeFirestoreRestBody(body) }),
+      ...(serializedBody !== undefined
+        ? { body: serializedBody }
+        : body === undefined
+          ? {}
+          : { body: serializeFirestoreRestBody(body) }),
     });
     const text = await response.text();
     if (!response.ok) {

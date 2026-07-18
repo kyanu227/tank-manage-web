@@ -7,6 +7,10 @@ import {
 import { planTransitionSnapshotReset } from "./cutover/transition-reset-service";
 import { captureTransitionSnapshot } from "./cutover/transition-snapshot-service";
 import { createDataReadinessEvidence } from "./cutover/readiness-evidence";
+import {
+  emulatorExecutionIdentity,
+  productionExecutionIdentity,
+} from "./cutover/production-execution-contract";
 
 main().catch((error) => {
   reportCutoverCliError(error);
@@ -36,6 +40,9 @@ async function main(): Promise<void> {
     expectedDatabaseId: args.databaseId,
     expectedDatabaseUid: args.databaseUid,
     expectedMainCommit: args.mainCommit,
+    executionIdentity: args.emulatorHost
+      ? emulatorExecutionIdentity()
+      : productionExecutionIdentity(),
   });
 
   const summary = {

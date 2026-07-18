@@ -20,6 +20,11 @@ import {
   createDataReadinessEvidence,
   createRulesReadinessEvidence,
 } from "./readiness-evidence";
+import {
+  PRODUCTION_CUTOVER_DATABASE_ID,
+  PRODUCTION_CUTOVER_DATABASE_UID,
+  PRODUCTION_CUTOVER_OPERATOR_PRINCIPAL,
+} from "./production-execution-contract";
 
 const NOW = new Date("2026-07-17T00:05:00.000Z");
 const MAIN = "a".repeat(40);
@@ -52,11 +57,57 @@ describe("cutover readiness assessment", () => {
     expect(formatCutoverReadinessReport(report)).toContain("Warnings:");
   });
 
+  it("閉鎖中または固定one-time契約へのarmedだけを安全postureとして受理する", () => {
+    const closed = assessCutoverReadiness({
+      ...readyInput(),
+      productionExecuteGatePosture: "closed",
+    });
+    expect(closed.status).toBe("GO");
+    expect(closed.completed).toContain("production reset and restore execute gates remain closed");
+
+    const unsafe = assessCutoverReadiness({
+      ...readyInput(),
+      productionExecuteGatePosture: "unsafe",
+    });
+    expect(unsafe.status).toBe("NO-GO");
+    expect(unsafe.blocking).toContain("PRODUCTION_EXECUTE_GATE_POSTURE_UNSAFE");
+  });
+
+  it.each([
+    ["operator", { expectedOperatorPrincipal: "user:other@example.com" }],
+    ["database", { databaseId: "other-database" }],
+    ["database UID", { expectedDatabaseUid: "other-database-uid" }],
+  ] as const)("armed postureで%sがPhase 3固定契約と異なればNO-GO", (_label, change) => {
+    const input = readyInput();
+    const args = { ...input.args, ...change };
+    const human = "expectedOperatorPrincipal" in change
+      ? {
+          ...input.human,
+          expectedOperatorPrincipal: change.expectedOperatorPrincipal,
+          confirmedByPrincipal: change.expectedOperatorPrincipal,
+        }
+      : input.human;
+    const data = createDataReadinessEvidence({
+      generatedAt: input.data!.generatedAt,
+      projectId: args.projectId,
+      databaseId: args.databaseId,
+      databaseUid: args.expectedDatabaseUid,
+      mainCommit: args.expectedMainCommit,
+      principal: args.dataPrincipal,
+      payload: input.data!.payload,
+    });
+
+    const report = assessCutoverReadiness({ ...input, args, human, data });
+
+    expect(report.status).toBe("NO-GO");
+    expect(report.blocking).toContain("PRODUCTION_EXECUTE_CONTRACT_CONTEXT_MISMATCH");
+  });
+
   it.each([
     ["infra", null],
     ["rules", null],
     ["data", null],
-    ["productionExecuteGatesClosed", false],
+    ["productionExecuteGatePosture", "unsafe"],
   ] as const)("%sが欠ければNO-GO", (key, value) => {
     const report = assessCutoverReadiness({ ...readyInput(), [key]: value });
     expect(report.status).toBe("NO-GO");
@@ -158,6 +209,15 @@ describe("cutover readiness assessment", () => {
       },
     });
     expect(operatorConfirmed.status).toBe("GO");
+
+    const differentConfirmer = assessCutoverReadiness({
+      ...input,
+      human: {
+        ...input.human,
+        confirmedByPrincipal: "user:other@example.com",
+      },
+    });
+    expect(differentConfirmer.blocking).toContain("HUMAN_EVIDENCE_CONTEXT_INVALID_OR_STALE");
   });
 
   it.each([
@@ -304,7 +364,7 @@ function readyInput(
         documentPathSha256: "d".repeat(64),
       },
     }),
-    productionExecuteGatesClosed: true,
+    productionExecuteGatePosture: "armed_for_fixed_transition_v1" as const,
     expectedRulesBaseline: RULES_BASELINE,
     now: NOW,
   };
@@ -316,7 +376,7 @@ function readinessArgs(
   return {
     command: "readiness",
     projectId: CUTOVER_INFRA_CONTRACT.projectId,
-    expectedOperatorPrincipal: "user:operator@example.com",
+    expectedOperatorPrincipal: PRODUCTION_CUTOVER_OPERATOR_PRINCIPAL,
     rulesDeployPrincipal: "user:rules-deployer@example.com",
     bindingExpiresAt: "2026-07-17T12:00:00Z",
     keyId: "transition-v1",
@@ -325,8 +385,8 @@ function readinessArgs(
     dataPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.data.email,
     rulesPrincipal: CUTOVER_INFRA_CONTRACT.serviceAccounts.rules.email,
     expectedMainCommit: MAIN,
-    databaseId: "(default)",
-    expectedDatabaseUid: "database-uid",
+    databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+    expectedDatabaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
   };
 }
 

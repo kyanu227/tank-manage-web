@@ -22,6 +22,10 @@ import {
   sourceCensusSha256,
 } from "./cutover/transition-snapshot-service";
 import { planTransitionSnapshotReset } from "./cutover/transition-reset-service";
+import {
+  PRODUCTION_RESET_CONFIRMATION,
+  PRODUCTION_RESTORE_CONFIRMATION,
+} from "./cutover/production-execution-contract";
 
 const ROOT = resolve(import.meta.dirname, "..");
 const PROJECT_ID = "demo-transition-cutover";
@@ -110,6 +114,10 @@ try {
   const beforeResetDryRunSha = sourceCensusSha256(await readTransitionSourceCensus(client));
   const resetDryRun = await runSnapshotResetViaNpmSilent(firstSnapshotPath);
   assert(resetDryRun.output.mode === "dry-run", "reset dry-run mode");
+  assert(
+    resetDryRun.output.snapshotId === firstPayload.manifest.snapshotId,
+    "reset dry-run snapshot ID",
+  );
   assert(resetDryRun.output.writes === 192, "reset dry-run write count");
   const resetRequestBytes = resetDryRun.output.requestBytes;
   assert(
@@ -121,14 +129,23 @@ try {
 
   const resetExecuted = await runSnapshotReset(firstSnapshotPath, true);
   assert(resetExecuted.output.mode === "executed", "reset execute mode");
+  assert(
+    resetExecuted.output.snapshotId === firstPayload.manifest.snapshotId,
+    "reset execute snapshot ID",
+  );
   assert(resetExecuted.output.writes === 192, "reset execute write count");
   assert(resetExecuted.output.commitResponse === "confirmed", "reset commit response");
+  assert(
+    objectValue(resetExecuted.output.verifyOnly, "reset inline verify").status === "reset_applied",
+    "reset execute performs inline verify-only",
+  );
   assert(
     resetPlanHash(resetExecuted.output) === resetPlanHash(resetDryRun.output),
     "reset dry-run and execute plan hashes match",
   );
   assertSafeResetStdout(resetExecuted.stdout, firstPayload);
   await assertResetStillPresent();
+  await runSnapshotResetExpectFailure(firstSnapshotPath, "completed marker blocks repeat reset");
   const resetVerified = await runCutoverVerify(firstSnapshotPath, "reset", true);
   assert(resetVerified.output.targetStateConfirmed === true, "reset target verified");
   assert(resetVerified.output.observedState === "reset_applied", "exact reset observed");
@@ -157,12 +174,22 @@ try {
   assert(executed.mode === "executed", "restore execute mode");
   assert(typeof executed.commitTime === "string", "restore commit time");
   assert(executed.commitResponse === "confirmed", "restore commit response");
+  assert(
+    objectValue(executed.verifyOnly, "restore inline verify").status
+      === "source_or_restored_observed",
+    "restore execute performs inline verify-only",
+  );
   await assertRestored(firstPayload);
   const restoreVerified = await runCutoverVerify(firstSnapshotPath, "restore", true);
   assert(restoreVerified.output.targetStateConfirmed === true, "restore target verified");
   assert(
     restoreVerified.output.observedState === "source_or_restored_observed",
     "exact restored source observed",
+  );
+  await runSnapshotRestoreExpectFailure(firstSnapshotPath, "marker deletion blocks repeat restore");
+  await runSnapshotResetExpectFailure(
+    firstSnapshotPath,
+    "restored updateTime blocks reset replay from the same snapshot",
   );
 
   // snapshot後の各precondition競合で192-write全体が一件も適用されないことを確認する。
@@ -382,7 +409,7 @@ async function runSnapshotRestore(
     [
       ...commonArguments(),
       `--snapshot=${snapshotPath}`,
-      ...(execute ? ["--execute", "--confirm=RESTORE_TRANSITION_PLAN_V1"] : []),
+      ...(execute ? ["--execute", `--confirm=${PRODUCTION_RESTORE_CONFIRMATION}`] : []),
     ],
     true,
   );
@@ -398,7 +425,7 @@ async function runSnapshotReset(
     [
       ...commonArguments(),
       `--snapshot=${snapshotPath}`,
-      ...(execute ? ["--execute", "--confirm=RESET_TRANSITION_PLAN_V1"] : []),
+      ...(execute ? ["--execute", `--confirm=${PRODUCTION_RESET_CONFIRMATION}`] : []),
     ],
     true,
   );
@@ -526,8 +553,8 @@ async function assertSourceStillPresent(expectedSourceCensusSha256: string): Pro
 
 function assertSafeResetStdout(stdout: string, payload: TransitionSnapshotPayloadV1): void {
   assertSafeCutoverStdout(stdout, payload, [
-    "mode", "counts", "statusCounts", "writes", "requestBytes", "hashes",
-    "commitTime", "commitResponse",
+    "mode", "snapshotId", "counts", "statusCounts", "writes", "requestBytes", "hashes",
+    "commitTime", "commitResponse", "verifyOnly",
   ]);
   const output = parseJsonOutput(stdout);
   const counts = objectValue(output.counts, "reset stdout counts");
@@ -563,7 +590,6 @@ function assertSafeCutoverStdout(
     "倉庫",
     "typed-snapshot",
     "steel",
-    payload.manifest.snapshotId,
     payload.manifest.keyId,
     tempDirectory,
   ];

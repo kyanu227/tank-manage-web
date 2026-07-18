@@ -6,16 +6,12 @@ import {
   relativeDocumentPath,
   validateTransitionSnapshotPayload,
 } from "./canonical-firestore-value";
-import {
-  FirestoreRestClient,
-  serializeFirestoreRestBody,
-} from "./firestore-rest-client";
 import type {
+  CutoverFirestoreClient,
   FirestoreWrite,
   TransitionSnapshotPayloadV1,
   TransitionSourceCensus,
 } from "./firestore-rest-types";
-import { assertResetServiceExecutionAllowed } from "./production-execute-gates";
 import {
   TRANSITION_MIGRATION_MARKER_PATH,
   assertCommitBounds,
@@ -23,6 +19,7 @@ import {
   readTransitionSourceCensus,
   resetProjectionFieldsFromSnapshot,
   sourceCensusSha256,
+  transitionExecutionIdentity,
   type RestoreTransitionSnapshotOptions,
 } from "./transition-snapshot-service";
 import { createTransitionResetContract } from "./transition-reset-contract";
@@ -32,6 +29,9 @@ export { statusCountsFromSnapshot } from "./transition-reset-contract";
 export type TransitionSnapshotResetOptions = RestoreTransitionSnapshotOptions & {
   now?: () => Date;
   ambiguousReadbackDelaysMs?: readonly number[];
+  resetProductionAuthorizationProvider?: (
+    plan: TransitionResetPlan,
+  ) => unknown;
 };
 
 export type TransitionResetSummary = {
@@ -43,6 +43,7 @@ export type TransitionResetSummary = {
   statusCounts: Record<string, number>;
   writes: number;
   requestBytes: number;
+  snapshotId: string;
   snapshotPayloadSha256: string;
   sourceCensusSha256: string;
   resetPlanSha256: string;
@@ -54,6 +55,36 @@ export type TransitionResetPlan = {
   resetAt: string;
   summary: TransitionResetSummary;
 };
+
+type AuthenticatedTransitionResetPlanContext = {
+  projectId: string;
+  databaseId: string;
+  databaseUid: string | undefined;
+  dataPrincipal: string | undefined;
+  operatorPrincipal: string;
+  mainCommit: string;
+};
+
+const authenticTransitionResetPlans = new WeakMap<
+  object,
+  AuthenticatedTransitionResetPlanContext
+>();
+
+/** production commit認可は、実plannerがlive censusから生成したplanだけを受理する。 */
+export function assertAuthenticTransitionResetPlan(
+  plan: TransitionResetPlan,
+): void {
+  if (!authenticTransitionResetPlans.has(plan) || !Object.isFrozen(plan)) {
+    throw new Error("reset serviceが生成した凍結planではありません");
+  }
+}
+
+export function authenticatedTransitionResetPlanContext(
+  plan: TransitionResetPlan,
+): AuthenticatedTransitionResetPlanContext {
+  assertAuthenticTransitionResetPlan(plan);
+  return authenticTransitionResetPlans.get(plan)!;
+}
 
 // Data Resetで保持してよいtank基本情報。未知fieldを基本情報だと推測しない。
 const KNOWN_TANK_BASIC_INFORMATION_FIELDS = new Set([
@@ -89,6 +120,7 @@ const KNOWN_TANK_BASIC_INFORMATION_FIELDS = new Set([
 export async function planTransitionSnapshotReset(
   options: TransitionSnapshotResetOptions,
 ): Promise<TransitionResetPlan> {
+  const executionIdentity = transitionExecutionIdentity(options);
   const payload = validateTransitionSnapshotPayload(options.payload);
   assertPayloadSha256(options.snapshotPayloadSha256, payload);
   assertKnownTankResetFields(payload);
@@ -117,16 +149,18 @@ export async function planTransitionSnapshotReset(
     payload,
     options.snapshotPayloadSha256,
     (options.now ?? (() => new Date()))().toISOString(),
+    executionIdentity,
   );
   const writes = buildTransitionResetWrites(
     payload,
     options.snapshotPayloadSha256,
     contract.resetAt,
     options.client,
+    executionIdentity,
   );
-  const requestBytes = Buffer.byteLength(serializeFirestoreRestBody({ writes }), "utf8");
+  const requestBytes = Buffer.byteLength(canonicalStringify({ writes }), "utf8");
   assertCommitBounds(writes.length, requestBytes);
-  return {
+  return sealTransitionResetPlan({
     writes,
     requestBytes,
     resetAt: contract.resetAt,
@@ -139,11 +173,19 @@ export async function planTransitionSnapshotReset(
       statusCounts: contract.statusCounts,
       writes: writes.length,
       requestBytes,
+      snapshotId: payload.manifest.snapshotId,
       snapshotPayloadSha256: options.snapshotPayloadSha256,
       sourceCensusSha256: payload.manifest.sourceCensusSha256,
       resetPlanSha256: contract.resetPlanSha256,
     },
-  };
+  }, {
+    projectId: options.client.projectId,
+    databaseId: options.client.databaseId,
+    databaseUid: options.client.getVerifiedDatabaseUid(),
+    dataPrincipal: options.client.dataPrincipal,
+    operatorPrincipal: executionIdentity.operatorPrincipal,
+    mainCommit: options.expectedMainCommit,
+  });
 }
 
 export async function executeTransitionSnapshotReset(
@@ -152,11 +194,11 @@ export async function executeTransitionSnapshotReset(
   commitTime: string | null;
   commitResponse: "confirmed" | "verified_after_ambiguous_response";
 }> {
-  assertResetServiceExecutionAllowed(options.client.emulatorHost);
   const plan = await planTransitionSnapshotReset(options);
+  const authorization = options.resetProductionAuthorizationProvider?.(plan);
   let result: Awaited<ReturnType<typeof options.client.commit>>;
   try {
-    result = await options.client.commit(plan.writes);
+    result = await options.client.commit("reset", plan.writes, authorization);
   } catch (commitError) {
     const outcome = await classifyAmbiguousResetOutcome(options, plan);
     if (outcome.status === "applied") {
@@ -191,11 +233,27 @@ export async function executeTransitionSnapshotReset(
   return { ...plan, commitTime: result.commitTime, commitResponse: "confirmed" };
 }
 
+function sealTransitionResetPlan(
+  plan: TransitionResetPlan,
+  context: AuthenticatedTransitionResetPlanContext,
+): TransitionResetPlan {
+  freezeDeep(plan);
+  authenticTransitionResetPlans.set(plan, Object.freeze({ ...context }));
+  return plan;
+}
+
+function freezeDeep(value: unknown): void {
+  if (!value || typeof value !== "object") return;
+  Object.values(value).forEach(freezeDeep);
+  if (!Object.isFrozen(value)) Object.freeze(value);
+}
+
 function buildTransitionResetWrites(
   payloadInput: TransitionSnapshotPayloadV1,
   snapshotPayloadSha256: string,
   resetAt: string,
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
+  executionIdentity: NonNullable<RestoreTransitionSnapshotOptions["executionIdentity"]>,
 ): FirestoreWrite[] {
   const payload = validateTransitionSnapshotPayload(payloadInput);
   assertPayloadSha256(snapshotPayloadSha256, payload);
@@ -218,7 +276,12 @@ function buildTransitionResetWrites(
   writes.push({
     update: {
       name: client.fullDocumentName(payload.manifest.migrationMarkerPath),
-      fields: createTransitionResetContract(payload, snapshotPayloadSha256, resetAt).markerFields,
+      fields: createTransitionResetContract(
+        payload,
+        snapshotPayloadSha256,
+        resetAt,
+        executionIdentity,
+      ).markerFields,
     },
     currentDocument: { exists: false },
   });
@@ -268,6 +331,7 @@ export async function assertTransitionSnapshotResetApplied(
     payload,
     options.snapshotPayloadSha256,
     plan.resetAt,
+    transitionExecutionIdentity(options),
   ).markerFields;
   const marker = census.markerDocument;
   if (!marker || marker.name !== options.client.fullDocumentName(TRANSITION_MIGRATION_MARKER_PATH)) {
@@ -360,7 +424,7 @@ function assertSourceMatchesSnapshot(
 }
 
 async function assertNoResetSubcollections(
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
   relativePaths: string[],
 ): Promise<void> {
   const concurrency = 10;
@@ -378,7 +442,7 @@ async function assertNoResetSubcollections(
 
 function resetInspectionPaths(
   payload: TransitionSnapshotPayloadV1,
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
 ): string[] {
   return [
     ...payload.documents.map((document) => (

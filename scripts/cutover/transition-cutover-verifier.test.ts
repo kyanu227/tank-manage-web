@@ -13,6 +13,7 @@ import type {
   TransitionSourceCensus,
 } from "./firestore-rest-types";
 import { createTransitionResetContract } from "./transition-reset-contract";
+import { emulatorExecutionIdentity } from "./production-execution-contract";
 import {
   TRANSITION_MIGRATION_MARKER_PATH,
   resetProjectionFieldsFromSnapshot,
@@ -357,7 +358,12 @@ function resetCensus(
     },
     markerDocument: {
       name: `${DATABASE_PREFIX}/documents/${TRANSITION_MIGRATION_MARKER_PATH}`,
-      fields: createTransitionResetContract(payload, payloadSha256, RESET_AT).markerFields,
+      fields: createTransitionResetContract(
+        payload,
+        payloadSha256,
+        RESET_AT,
+        emulatorExecutionIdentity(),
+      ).markerFields,
       createTime: "2026-07-14T00:00:01Z",
       updateTime: "2026-07-14T00:00:01Z",
     },

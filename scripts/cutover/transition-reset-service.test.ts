@@ -3,7 +3,10 @@ import {
   canonicalSha256,
   snapshotFieldSha256,
 } from "./canonical-firestore-value";
-import { FirestoreRestClient } from "./firestore-rest-client";
+import {
+  FirestoreRestClient,
+  serializeFirestoreRestBody,
+} from "./firestore-rest-client";
 import type {
   FirestoreCommitResponse,
   FirestoreRestDocument,
@@ -17,6 +20,22 @@ import {
   planTransitionSnapshotReset,
   statusCountsFromSnapshot,
 } from "./transition-reset-service";
+import {
+  PRODUCTION_CUTOVER_DATA_PRINCIPAL,
+  PRODUCTION_CUTOVER_DATABASE_ID,
+  PRODUCTION_CUTOVER_DATABASE_UID,
+  PRODUCTION_CUTOVER_OPERATOR_PRINCIPAL,
+  PRODUCTION_RESET_CONFIRMATION,
+  createProductionExecutionIntent,
+  emulatorExecutionIdentity,
+  productionExecutionIdentity,
+} from "./production-execution-contract";
+import { createTransitionResetContract } from "./transition-reset-contract";
+import {
+  assertFirestoreCommitAllowed,
+  authorizeResetServiceExecution,
+} from "./production-execute-gates";
+import { CUTOVER_PROJECT_ID } from "./infra-contract";
 
 const PROJECT_ID = "demo-reset";
 const DATABASE_ID = "(default)";
@@ -54,12 +73,14 @@ describe("transition atomic reset service", () => {
     expect(markerWrite.currentDocument).toEqual({ exists: false });
     expect(Object.keys(markerWrite.update?.fields ?? {}).sort()).toEqual([
       "completedAt",
+      "dataPrincipal",
       "databaseId",
       "databaseUid",
       "documentPathSha256",
       "keyId",
       "mainCommit",
       "migration",
+      "operatorPrincipal",
       "projectId",
       "resetAt",
       "resetPlanSha256",
@@ -83,6 +104,13 @@ describe("transition atomic reset service", () => {
       stringValue: payload.manifest.sourceCensusSha256,
     });
     expect(markerWrite.update?.fields.mainCommit).toEqual({ stringValue: MAIN_COMMIT });
+    expect(markerWrite.update?.fields.scriptVersion).toEqual({ integerValue: "2" });
+    expect(markerWrite.update?.fields.operatorPrincipal).toEqual({
+      stringValue: emulatorExecutionIdentity().operatorPrincipal,
+    });
+    expect(markerWrite.update?.fields.dataPrincipal).toEqual({
+      stringValue: emulatorExecutionIdentity().dataPrincipal,
+    });
     expect(plan.summary).toMatchObject({
       counts: { tanks: 2, tankLogs: 1, transactions: 1 },
       statusCounts: { filled: 1, lent: 1 },
@@ -99,6 +127,138 @@ describe("transition atomic reset service", () => {
       undefined,
     ]);
     expect(statusCountsFromSnapshot(payload)).toEqual({ missing: 1, unknown: 1 });
+  });
+
+  it("実plannerの凍結planだけをoperation・exact bodyへ拘束しtoken待機中の改変を送らない", async () => {
+    let resolveToken!: (token: string) => void;
+    const tokenPromise = new Promise<string>((resolve) => {
+      resolveToken = resolve;
+    });
+    const payload = productionFixturePayload();
+    const client = sourceClient(payload, {
+      productionAccessTokenProvider: () => tokenPromise,
+      useRealCommit: true,
+    });
+    const options = {
+      client,
+      payload,
+      snapshotPayloadSha256: canonicalSha256(payload),
+      expectedProjectId: CUTOVER_PROJECT_ID,
+      expectedDatabaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      expectedDatabaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      expectedMainCommit: MAIN_COMMIT,
+      executionIdentity: productionExecutionIdentity(),
+      now: () => new Date(RESET_AT),
+      ambiguousReadbackDelaysMs: [0, 0],
+    };
+    const plan = await planTransitionSnapshotReset(options);
+    expect(Object.isFrozen(plan)).toBe(true);
+    expect(Object.isFrozen(plan.writes)).toBe(true);
+    expect(Object.isFrozen(plan.writes[0])).toBe(true);
+
+    const intent = createProductionExecutionIntent({
+      operation: "reset",
+      confirmation: PRODUCTION_RESET_CONFIRMATION,
+      projectId: CUTOVER_PROJECT_ID,
+      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
+      operatorPrincipal: PRODUCTION_CUTOVER_OPERATOR_PRINCIPAL,
+      mainCommit: MAIN_COMMIT,
+      snapshotId: plan.summary.snapshotId,
+      snapshotPayloadSha256: plan.summary.snapshotPayloadSha256,
+      sourceCensusSha256: plan.summary.sourceCensusSha256,
+      resetPlanSha256: plan.summary.resetPlanSha256,
+    });
+    const authorization = authorizeResetServiceExecution({ intent, plan });
+    if (!authorization) throw new Error("production authorizationがありません");
+    const originalWrites = structuredClone(plan.writes) as FirestoreWrite[];
+    const mutableWrites = structuredClone(originalWrites);
+
+    expect(() => assertFirestoreCommitAllowed({
+      operation: "reset",
+      authorization: Object.freeze({ ...authorization }),
+      projectId: CUTOVER_PROJECT_ID,
+      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
+      serializedRequestBody: serializeFirestoreRestBody({ writes: mutableWrites }),
+      writeCount: mutableWrites.length,
+    })).toThrow("authorization");
+
+    expect(() => assertFirestoreCommitAllowed({
+      operation: "restore",
+      authorization,
+      projectId: CUTOVER_PROJECT_ID,
+      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
+      serializedRequestBody: serializeFirestoreRestBody({ writes: mutableWrites }),
+      writeCount: mutableWrites.length,
+    })).toThrow("operation/write契約");
+
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
+      commitTime: "2026-07-18T00:00:00Z",
+      writeResults: originalWrites.map(() => ({})),
+    }), { status: 200 }));
+    const commitPromise = client.commit("reset", mutableWrites, authorization);
+    mutableWrites[0].delete = `${mutableWrites[0].delete}-tampered`;
+    mutableWrites.push({ delete: client.fullDocumentName("tanks/T-EXTRA") });
+    resolveToken("short-lived-test-token");
+    await expect(commitPromise).resolves.toMatchObject({
+      commitTime: "2026-07-18T00:00:00Z",
+    });
+    const request = fetchMock.mock.calls[0]?.[1];
+    expect(request?.body).toBe(serializeFirestoreRestBody({ writes: originalWrites }));
+    expect(String(request?.body)).not.toContain("tampered");
+    expect(String(request?.body)).not.toContain("T-EXTRA");
+  });
+
+  it.each([
+    ["mainCommit", "0".repeat(40)],
+    ["snapshotId", "different-snapshot"],
+    ["snapshotPayloadSha256", "0".repeat(64)],
+    ["sourceCensusSha256", "1".repeat(64)],
+    ["resetPlanSha256", "2".repeat(64)],
+  ] as const)("実reset planとintentの%s不一致をservice境界で拒否する", async (key, value) => {
+    const payload = productionFixturePayload();
+    const client = sourceClient(payload, {
+      productionAccessTokenProvider: async () => "unused-test-token",
+      useRealCommit: true,
+    });
+    const plan = await planTransitionSnapshotReset({
+      client,
+      payload,
+      snapshotPayloadSha256: canonicalSha256(payload),
+      expectedProjectId: CUTOVER_PROJECT_ID,
+      expectedDatabaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      expectedDatabaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      expectedMainCommit: MAIN_COMMIT,
+      executionIdentity: productionExecutionIdentity(),
+      now: () => new Date(RESET_AT),
+    });
+    const intentInput = {
+      operation: "reset" as const,
+      confirmation: PRODUCTION_RESET_CONFIRMATION,
+      projectId: CUTOVER_PROJECT_ID,
+      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
+      operatorPrincipal: PRODUCTION_CUTOVER_OPERATOR_PRINCIPAL,
+      mainCommit: MAIN_COMMIT,
+      snapshotId: plan.summary.snapshotId,
+      snapshotPayloadSha256: plan.summary.snapshotPayloadSha256,
+      sourceCensusSha256: plan.summary.sourceCensusSha256,
+      resetPlanSha256: plan.summary.resetPlanSha256,
+    };
+    const mismatchedIntent = createProductionExecutionIntent({
+      ...intentInput,
+      [key]: value,
+    });
+    expect(() => authorizeResetServiceExecution({
+      intent: mismatchedIntent,
+      plan,
+    })).toThrow("承認済み契約");
   });
 
   it("service境界でpayloadのcanonical SHA不一致を読取前に拒否する", async () => {
@@ -151,24 +311,6 @@ describe("transition atomic reset service", () => {
     expect(tankWrite?.update?.fields.location).toEqual({ stringValue: "倉庫" });
   });
 
-  it("最終解放前はservice境界で本番reset executeを読取前に拒否する", async () => {
-    const payload = fixturePayload();
-    const client = new FirestoreRestClient({
-      projectId: "production-reset",
-      databaseId: DATABASE_ID,
-      accessTokenProvider: async () => "unused",
-    });
-    client.verifyDatabaseUid = vi.fn(async () => undefined);
-    await expect(executeTransitionSnapshotReset({
-      ...resetOptions(client, {
-        ...payload,
-        manifest: { ...payload.manifest, projectId: "production-reset" },
-      }),
-      expectedProjectId: "production-reset",
-    })).rejects.toThrow("本番reset execute");
-    expect(client.verifyDatabaseUid).not.toHaveBeenCalled();
-  });
-
   it("commitTime欠落は完全read-back後だけverifiedとして扱う", async () => {
     const payload = fixturePayload();
     const client = sourceClient(payload, {
@@ -177,6 +319,7 @@ describe("transition atomic reset service", () => {
     const result = await executeTransitionSnapshotReset(resetOptions(client, payload));
     expect(result.commitResponse).toBe("verified_after_ambiguous_response");
     expect(result.commitTime).toBeNull();
+    expect(client.commit).toHaveBeenCalledTimes(1);
   });
 
   it("commit通信例外でも適用済みならread-backでverifiedとする", async () => {
@@ -185,6 +328,7 @@ describe("transition atomic reset service", () => {
     const result = await executeTransitionSnapshotReset(resetOptions(client, payload));
     expect(result.commitResponse).toBe("verified_after_ambiguous_response");
     expect(result.commitTime).toBeNull();
+    expect(client.commit).toHaveBeenCalledTimes(1);
   });
 
   it("commit通信例外後に遅延適用されても反復read-backでverifiedとする", async () => {
@@ -193,6 +337,7 @@ describe("transition atomic reset service", () => {
     const result = await executeTransitionSnapshotReset(resetOptions(client, payload));
     expect(result.commitResponse).toBe("verified_after_ambiguous_response");
     expect(client.runCollectionQuery).toHaveBeenCalledTimes(24);
+    expect(client.commit).toHaveBeenCalledTimes(1);
   });
 
   it("commit通信例外後に原状態でも未適用とは断定せず成功扱いにしない", async () => {
@@ -200,6 +345,7 @@ describe("transition atomic reset service", () => {
     const client = sourceClient(payload, { throwWithoutApply: true });
     await expect(executeTransitionSnapshotReset(resetOptions(client, payload)))
       .rejects.toThrow("未適用とは断定できません");
+    expect(client.commit).toHaveBeenCalledTimes(1);
   });
 
   it("plan後のphantom targetがcommitと競合した場合も成功扱いにしない", async () => {
@@ -218,6 +364,30 @@ describe("transition atomic reset service", () => {
     });
     expect(first.resetAt).not.toBe(second.resetAt);
     expect(first.summary.resetPlanSha256).toBe(second.summary.resetPlanSha256);
+  });
+
+  it("operator principalをreset plan hashとmarkerへ結び付ける", () => {
+    const payload = fixturePayload();
+    const payloadSha256 = canonicalSha256(payload);
+    const first = createTransitionResetContract(
+      payload,
+      payloadSha256,
+      RESET_AT,
+      emulatorExecutionIdentity(),
+    );
+    const second = createTransitionResetContract(
+      payload,
+      payloadSha256,
+      RESET_AT,
+      {
+        ...emulatorExecutionIdentity(),
+        operatorPrincipal: "user:other-operator@example.invalid",
+      },
+    );
+    expect(first.resetPlanSha256).not.toBe(second.resetPlanSha256);
+    expect(first.markerFields.operatorPrincipal).toEqual({
+      stringValue: emulatorExecutionIdentity().operatorPrincipal,
+    });
   });
 });
 
@@ -304,6 +474,42 @@ function fixturePayload(
   };
 }
 
+function productionFixturePayload(): TransitionSnapshotPayloadV1 {
+  const source = fixturePayload();
+  const productionPrefix = `projects/${CUTOVER_PROJECT_ID}`
+    + `/databases/${PRODUCTION_CUTOVER_DATABASE_ID}`;
+  const documents = source.documents.map((document) => {
+    const path = document.name.split("/documents/")[1];
+    const name = `${productionPrefix}/documents/${path}`;
+    return {
+      ...document,
+      name,
+      fieldSha256: snapshotFieldSha256(name, document.fields),
+    };
+  });
+  const inventory = source.manifest.inventory;
+  return {
+    manifest: {
+      ...source.manifest,
+      projectId: CUTOVER_PROJECT_ID,
+      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
+      documentPathSha256: canonicalSha256(documents.map((document) => document.name)),
+      sourceCensusSha256: canonicalSha256({
+        documents: documents.map((document) => ({
+          name: document.name,
+          updateTime: document.updateTime,
+          fieldSha256: document.fieldSha256,
+        })),
+        inventory,
+        marker: null,
+      }),
+      snapshotDocumentsSha256: canonicalSha256(documents),
+    },
+    documents,
+  };
+}
+
 function sourceClient(
   payload: TransitionSnapshotPayloadV1,
   behavior: {
@@ -314,13 +520,22 @@ function sourceClient(
     throwWithoutApply?: boolean;
     delayedApplyAfterThrow?: boolean;
     phantomAfterApply?: boolean;
+    productionAccessTokenProvider?: () => Promise<string>;
+    useRealCommit?: boolean;
   } = {},
 ): FirestoreRestClient {
-  const client = new FirestoreRestClient({
-    projectId: PROJECT_ID,
-    databaseId: DATABASE_ID,
-    emulatorHost: "127.0.0.1:8089",
-  });
+  const client = behavior.productionAccessTokenProvider
+    ? new FirestoreRestClient({
+        projectId: CUTOVER_PROJECT_ID,
+        databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
+        accessTokenProvider: behavior.productionAccessTokenProvider,
+        dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
+      })
+    : new FirestoreRestClient({
+        projectId: PROJECT_ID,
+        databaseId: DATABASE_ID,
+        emulatorHost: "127.0.0.1:8089",
+      });
   const documents = new Map<string, FirestoreRestDocument>();
   payload.documents.forEach((document) => {
     documents.set(document.name, {
@@ -346,7 +561,10 @@ function sourceClient(
 
   let queryCallCount = 0;
   let pendingWrites: FirestoreWrite[] | null = null;
-  client.verifyDatabaseUid = vi.fn(async () => undefined);
+  client.verifyDatabaseUid = vi.fn(async (expectedDatabaseUid: string) => {
+    (client as unknown as { verifiedDatabaseUid?: string }).verifiedDatabaseUid =
+      expectedDatabaseUid;
+  });
   client.beginReadOnlyTransaction = vi.fn(async () => "read-only-token");
   client.rollback = vi.fn(async () => undefined);
   client.listCollectionIds = vi.fn(async () => []);
@@ -364,7 +582,9 @@ function sourceClient(
       readTime: "2026-07-13T00:02:00Z",
     };
   });
-  client.commit = vi.fn(async (writes: FirestoreWrite[]) => {
+  if (behavior.useRealCommit) return client;
+  client.commit = vi.fn(async (...args: unknown[]) => {
+    const writes = (Array.isArray(args[0]) ? args[0] : args[1]) as FirestoreWrite[];
     if (behavior.delayedApplyAfterThrow) {
       pendingWrites = writes;
       throw new Error("connection lost");
@@ -384,7 +604,7 @@ function sourceClient(
       commitTime: "2026-07-13T03:00:01Z",
       writeResults: writes.map(() => ({})),
     };
-  });
+  }) as unknown as FirestoreRestClient["commit"];
   return client;
 }
 

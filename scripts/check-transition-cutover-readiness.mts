@@ -6,7 +6,7 @@ import {
   formatCutoverReadinessReport,
   isExpectedCutoverOriginRemote,
   loadReadinessEvidenceFiles,
-  productionExecuteGatesAreClosed,
+  productionExecuteGatePosture,
 } from "./cutover/cutover-readiness-service";
 import { planCutoverInfrastructure } from "./cutover/cutover-infra-service";
 import { GcloudInfraError } from "./cutover/gcloud-infra-adapter";
@@ -64,7 +64,7 @@ async function main(): Promise<void> {
     human,
     rules,
     data,
-    productionExecuteGatesClosed: await productionExecuteGatesAreClosed(repositoryRoot),
+    productionExecuteGatePosture: await productionExecuteGatePosture(repositoryRoot),
     expectedRulesBaseline: manifest,
     now,
   });

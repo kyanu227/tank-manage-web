@@ -5,7 +5,9 @@
 ## Scope
 
 transition cutover前のGoogle Cloud環境準備を補助する一度限りの運用toolを定義する。
-app runtime、Hosting、Firestore Rules、Firestore document、production reset / restore gateは変更しない。
+infra plan / apply / readiness自体はapp runtime、Hosting、Firestore Rules、Firestore document、
+production reset / restore gateを変更しない。Phase 3でproduction executeは別の固定one-time契約としてarmedされ、
+readinessは「全境界closed」または「全境界が固定契約へ安全にarmed」のどちらかだけを受理する。
 
 toolは`okmarine-tankrental`へ固定され、次だけを扱う。
 
@@ -52,14 +54,14 @@ gcloud version
 
 ```bash
 PROJECT='okmarine-tankrental'
-OPERATOR='user:<cutover-operator-email>'
+OPERATOR='user:okmarineclub@gmail.com'
 RULES_DEPLOY='user:<rules-deploy-email>'
 EXPIRES_AT='<RFC3339-UTC-within-24-hours>'
 KEY_ID='transition-cutover-20260718-v2'
 SNAPSHOT_DIR="$HOME/Library/Mobile Documents/com~apple~CloudDocs/TankCutover"
 SNAPSHOT_STORAGE_MODE='icloud_encrypted' # or local_encrypted
 MAIN_SHA='<final-main-sha>'
-DATABASE_UID='<production-database-uid>'
+DATABASE_UID='8dcf700f-01a3-4861-bee9-d901504f26b4'
 ```
 
 ### Read-only plan
@@ -240,6 +242,10 @@ atomicに移動し、file permission `0600`、owner本人、repository内候補0
 
 ## Readiness
 
+Phase 3 merge後は、そのmergeを含む最終main SHAへ結び付けたRules evidence、data preflight evidence、
+human evidenceをすべて再生成する。15分を超えたRules / data evidence、60分を超えたhuman evidence、
+merge前mainの証跡は再利用しない。
+
 ```bash
 npm run --silent cutover:readiness -- \
   --project="$PROJECT" \
@@ -257,10 +263,37 @@ npm run --silent cutover:readiness -- \
   --data-preflight-evidence="$SNAPSHOT_DIR/data-evidence.json"
 ```
 
-exit codeはGO=`0`、NO-GO=`2`、tool failure=`1`。GOでもproduction execute gateは閉じたままであり、
-reset CLI、restore CLI、reset service、restore service、lower REST commitの5境界は独立したfalse gateである。
-execute解放は一回限りのoperator confirmationとone-time contractを追加する別PRでだけ行う。
-このPR #127ではproduction reset / restore gateを開かない。
+exit codeはGO=`0`、NO-GO=`2`、tool failure=`1`。production execute gate postureは次のどちらかだけを
+GO候補として受理する。
+
+- `closed`: reset CLI、restore CLI、reset service、restore service、lower REST commitの5境界がすべて閉じている。
+- `armed_for_fixed_transition_v1`: 5境界がすべて、後述する同一の固定one-time契約を検証できる。
+
+一部の境界だけが開く、固定契約を構築できない、reset intentをrestoreへ流用できる等は`unsafe`でNO-GOとする。
+
+## Phase 3 production execute contract
+
+armed状態で許可するのは、次へ完全一致する一回限りのtransition v1 reset / restoreだけである。
+
+- project `okmarine-tankrental`
+- database `(default)`
+- database UID `8dcf700f-01a3-4861-bee9-d901504f26b4`
+- data principal `transition-cutover-data@okmarine-tankrental.iam.gserviceaccount.com`
+- operator principal `user:okmarineclub@gmail.com`
+- reset confirmation `EXECUTE_TRANSITION_CUTOVER_RESET_ONCE_20260718`
+- restore confirmation `EXECUTE_TRANSITION_CUTOVER_RESTORE_ONCE_20260718`
+- CLIで明示する`--expected-snapshot-id`、`--expected-snapshot-payload-sha256`、
+  `--expected-source-census-sha256`、`--expected-reset-plan-sha256`
+
+CLI、service、lower REST clientはidentity、operation、snapshot、hash、write列をそれぞれ再検証する。
+markerはversion `2`、operator / data principal、snapshotとhashを保存する。commit authorizationは一回だけ
+consumeされ、ambiguous outcomeでも自動再送しない。reset / restoreのexecute直後には同一processで
+verify-onlyを行い、exact target stateを確認できなければ成功扱いにしない。
+
+実際のguarded execute commandは
+[`transition-plan-v1-runbook.md`](./transition-plan-v1-runbook.md)を正本とする。hash欄には同じsnapshotの
+dry-runで記録した値だけを渡し、秘密値や鍵をCLI引数へ置かない。cutover後は5境界を閉じる専用PRを作成する。
+Hostingは`NEXT_PUBLIC_TANK_ADVISORY_ACTIVATION_ENABLED=false`でbuildし、advisoryを有効化しない。
 
 ## IAM limitations
 

@@ -5,8 +5,8 @@ import {
   relativeDocumentPath,
   validateTransitionSnapshotPayload,
 } from "./canonical-firestore-value";
-import type { FirestoreRestClient } from "./firestore-rest-client";
 import type {
+  CutoverFirestoreClient,
   TransitionSnapshotPayloadV1,
   TransitionSourceCensus,
 } from "./firestore-rest-types";
@@ -17,6 +17,7 @@ import {
   readTransitionSourceCensus,
   resetProjectionFieldsFromSnapshot,
   sourceCensusSha256,
+  transitionExecutionIdentity,
   type RestoreTransitionSnapshotOptions,
 } from "./transition-snapshot-service";
 
@@ -55,6 +56,7 @@ export async function verifyTransitionCutoverState(
   const payload = validateTransitionSnapshotPayload(options.payload);
   assertPayloadSha256(payload, options.snapshotPayloadSha256);
   assertRestoreIdentity(payload, options);
+  const executionIdentity = transitionExecutionIdentity(options);
   const delays = normalizeObservationDelays(options.observationDelaysMs);
   await options.client.verifyDatabaseUid(options.expectedDatabaseUid);
 
@@ -64,6 +66,7 @@ export async function verifyTransitionCutoverState(
       options.client,
       payload,
       options.snapshotPayloadSha256,
+      executionIdentity,
     ));
     const delay = delays[index];
     if (delay !== undefined && delay > 0) await wait(delay);
@@ -88,9 +91,10 @@ export async function verifyTransitionCutoverState(
 }
 
 async function observeTransitionCutoverState(
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
   payload: TransitionSnapshotPayloadV1,
   snapshotPayloadSha256: string,
+  executionIdentity: NonNullable<RestoreTransitionSnapshotOptions["executionIdentity"]>,
 ): Promise<Observation> {
   try {
     const census = await readTransitionSourceCensus(client);
@@ -102,7 +106,15 @@ async function observeTransitionCutoverState(
     if (subcollections.some((entry) => entry.collectionIds.length > 0)) {
       return { status: "unknown", stateSha256 };
     }
-    if (isExactResetState(census, payload, snapshotPayloadSha256, client)) {
+    if (
+      isExactResetState(
+        census,
+        payload,
+        snapshotPayloadSha256,
+        client,
+        executionIdentity,
+      )
+    ) {
       return { status: "reset_applied", stateSha256 };
     }
     if (isExactSourceOrRestoredState(census, payload)) {
@@ -118,7 +130,8 @@ function isExactResetState(
   census: TransitionSourceCensus,
   payload: TransitionSnapshotPayloadV1,
   snapshotPayloadSha256: string,
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
+  executionIdentity: NonNullable<RestoreTransitionSnapshotOptions["executionIdentity"]>,
 ): boolean {
   const marker = census.markerDocument;
   const resetAtValue = marker?.fields?.resetAt;
@@ -135,6 +148,7 @@ function isExactResetState(
     payload,
     snapshotPayloadSha256,
     resetAtValue.timestampValue,
+    executionIdentity,
   ).markerFields;
   if (canonicalStringify(marker.fields ?? {}) !== canonicalStringify(expectedMarkerFields)) {
     return false;
@@ -184,7 +198,7 @@ function isExactSourceOrRestoredState(
 }
 
 async function readSubcollectionInventory(
-  client: FirestoreRestClient,
+  client: CutoverFirestoreClient,
   payload: TransitionSnapshotPayloadV1,
 ): Promise<Array<{ path: string; collectionIds: string[] }>> {
   const paths = [
