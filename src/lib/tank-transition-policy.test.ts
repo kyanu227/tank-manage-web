@@ -3,9 +3,14 @@ import { getTankActionLabel } from "@/lib/tank-action-status-labels";
 import {
   createRecoveryConfirmationFingerprint,
   deriveAffectedCustomers,
+  getInitialTransitionReviewStatus,
+  hasExternalRentalEffect,
+  isOfficialTransitionAggregationEligible,
   isStaffDirectAdvisoryContext,
+  isTransitionReviewStatusConsistent,
   normalizeTankOperationPolicy,
   planTankTransition,
+  requiresTransitionAdminReview,
   resolvePlannerPolicyMode,
   resolveRuntimeTransitionEnforcement,
   type TransitionPlan,
@@ -138,6 +143,116 @@ describe("tank transition planner", () => {
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("strict_transition_required");
+  });
+});
+
+describe("transition review classification", () => {
+  const directLendPlan = requirePlan(planTankTransition({
+    policyMode: "strict",
+    current: { status: "filled", location: "倉庫" },
+    requestedAction: "lend",
+    targetCustomer: customerB,
+    targetLocation: "B社",
+  })).plan;
+  const directReturnPlan = requirePlan(planTankTransition({
+    policyMode: "strict",
+    current: { status: "lent", ...customerA, location: "A社" },
+    requestedAction: "return",
+    targetLocation: "倉庫",
+  })).plan;
+  const recoveryLendPlan = requirePlan(planTankTransition({
+    policyMode: "advisory",
+    current: { status: "empty", location: "倉庫" },
+    requestedAction: "lend",
+    targetCustomer: customerB,
+    targetLocation: "B社",
+  })).plan;
+  const recoveryFillPlan = requirePlan(planTankTransition({
+    policyMode: "advisory",
+    current: { status: "lent", ...customerA, location: "A社" },
+    requestedAction: "fill",
+    targetLocation: "倉庫",
+  })).plan;
+  const recoveryRelendPlan = requirePlan(planTankTransition({
+    policyMode: "advisory",
+    current: { status: "lent", ...customerA, location: "A社" },
+    requestedAction: "lend",
+    targetCustomer: customerB,
+    targetLocation: "B社",
+  })).plan;
+  const internalFillPlan = requirePlan(planTankTransition({
+    policyMode: "advisory",
+    current: { status: "in_house", location: "自社" },
+    requestedAction: "fill",
+    targetLocation: "倉庫",
+  })).plan;
+  const inHouseExternalLendPlan = requirePlan(planTankTransition({
+    policyMode: "advisory",
+    current: { status: "in_house", location: "自社" },
+    requestedAction: "lend",
+    targetCustomer: customerB,
+    targetLocation: "B社",
+  })).plan;
+
+  it.each([
+    ["external lend", directLendPlan],
+    ["external return", directReturnPlan],
+  ] as const)("keeps a direct %s not_required", (_label, plan) => {
+    expect(hasExternalRentalEffect(plan)).toBe(true);
+    expect(requiresTransitionAdminReview(plan)).toBe(false);
+    expect(getInitialTransitionReviewStatus(plan)).toBe("not_required");
+    expect(isTransitionReviewStatusConsistent(plan, "not_required")).toBe(true);
+    expect(isOfficialTransitionAggregationEligible(plan, "not_required")).toBe(true);
+  });
+
+  it.each([
+    ["rental_open", recoveryLendPlan],
+    ["rental_close", recoveryFillPlan],
+    ["rental_close and rental_open", recoveryRelendPlan],
+    ["in-house return followed by external lend", inHouseExternalLendPlan],
+  ] as const)("requires review for external recovery: %s", (_label, plan) => {
+    expect(plan.kind).toBe("recovery");
+    expect(hasExternalRentalEffect(plan)).toBe(true);
+    expect(requiresTransitionAdminReview(plan)).toBe(true);
+    expect(getInitialTransitionReviewStatus(plan)).toBe("pending");
+  });
+
+  it("makes an internal in-house return and operator fill immediately official", () => {
+    expect(internalFillPlan.kind).toBe("recovery");
+    expect(internalFillPlan.steps.map((step) => step.action)).toEqual([
+      "inhouse_return",
+      "fill",
+    ]);
+    expect(hasExternalRentalEffect(internalFillPlan)).toBe(false);
+    expect(requiresTransitionAdminReview(internalFillPlan)).toBe(false);
+    expect(getInitialTransitionReviewStatus(internalFillPlan)).toBe("not_required");
+    expect(isOfficialTransitionAggregationEligible(
+      internalFillPlan,
+      "not_required",
+    )).toBe(true);
+  });
+
+  it("requires review when an otherwise internal recovery has an unknown affected customer", () => {
+    expect(requiresTransitionAdminReview(internalFillPlan, true)).toBe(true);
+    expect(getInitialTransitionReviewStatus(internalFillPlan, true)).toBe("pending");
+    expect(isTransitionReviewStatusConsistent(
+      internalFillPlan,
+      "not_required",
+      true,
+    )).toBe(false);
+  });
+
+  it("rejects review statuses that contradict the plan impact", () => {
+    expect(isTransitionReviewStatusConsistent(internalFillPlan, "pending")).toBe(false);
+    expect(isTransitionReviewStatusConsistent(recoveryLendPlan, "not_required")).toBe(false);
+  });
+
+  it.each([
+    ["pending", false],
+    ["approved", true],
+    ["excluded", false],
+  ] as const)("maps external recovery %s to official=%s", (status, expected) => {
+    expect(isOfficialTransitionAggregationEligible(recoveryLendPlan, status)).toBe(expected);
   });
 });
 

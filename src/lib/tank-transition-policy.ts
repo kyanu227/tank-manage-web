@@ -123,6 +123,11 @@ export type AffectedCustomers = {
   hasUnknownAffectedCustomer: boolean;
 };
 
+export type InitialTransitionReviewStatus = Extract<
+  TransitionReviewStatus,
+  "not_required" | "pending"
+>;
+
 export type RecoveryConfirmationFingerprintInput = {
   tankId: string;
   latestLogId?: string | null;
@@ -430,6 +435,61 @@ export function deriveAffectedCustomers(
     affectedCustomerIds: [...ids].sort(),
     hasUnknownAffectedCustomer,
   };
+}
+
+/** top-level actionではなく、貸出サイクルのstepから外部顧客への影響を判定する。 */
+export function hasExternalRentalEffect(plan: TransitionPlan): boolean {
+  return plan.steps.some((step) => (
+    (step.businessEffect === "rental_open" || step.businessEffect === "rental_close")
+    && isNonEmptyString(step.customerId)
+  ));
+}
+
+/** advisory recoveryのうち、外部顧客への影響があるか影響先不明の場合だけ管理者レビューを要求する。 */
+export function requiresTransitionAdminReview(
+  plan: TransitionPlan,
+  hasUnknownAffectedCustomer = deriveAffectedCustomers(plan).hasUnknownAffectedCustomer,
+): boolean {
+  return plan.kind === "recovery"
+    && (hasExternalRentalEffect(plan) || hasUnknownAffectedCustomer);
+}
+
+/** 初回log作成時のreview状態をplanと顧客影響から一意に決める。 */
+export function getInitialTransitionReviewStatus(
+  plan: TransitionPlan,
+  hasUnknownAffectedCustomer = deriveAffectedCustomers(plan).hasUnknownAffectedCustomer,
+): InitialTransitionReviewStatus {
+  return requiresTransitionAdminReview(plan, hasUnknownAffectedCustomer)
+    ? "pending"
+    : "not_required";
+}
+
+/** 保存済みreview状態がplanの顧客影響契約と整合するかを検証する。 */
+export function isTransitionReviewStatusConsistent(
+  plan: TransitionPlan,
+  reviewStatus: unknown,
+  hasUnknownAffectedCustomer = deriveAffectedCustomers(plan).hasUnknownAffectedCustomer,
+): reviewStatus is TransitionReviewStatus {
+  if (plan.kind === "direct") return reviewStatus === "not_required";
+  if (!requiresTransitionAdminReview(plan, hasUnknownAffectedCustomer)) {
+    return reviewStatus === "not_required";
+  }
+  return reviewStatus === "pending"
+    || reviewStatus === "approved"
+    || reviewStatus === "excluded";
+}
+
+/** 正式な請求・売上・実績投影に算入できるreview状態かを返す。 */
+export function isOfficialTransitionAggregationEligible(
+  plan: TransitionPlan,
+  reviewStatus: unknown,
+  hasUnknownAffectedCustomer = deriveAffectedCustomers(plan).hasUnknownAffectedCustomer,
+): boolean {
+  return isTransitionReviewStatusConsistent(
+    plan,
+    reviewStatus,
+    hasUnknownAffectedCustomer,
+  ) && (reviewStatus === "not_required" || reviewStatus === "approved");
 }
 
 /** batchはtankId順へ正規化し、UIの表示順に依存しないcanonical JSONを返す。 */

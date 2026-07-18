@@ -20,7 +20,10 @@ import {
   type DocumentData,
   type Firestore,
 } from "firebase/firestore";
-import { normalizeTransitionPlan } from "./tank-transition-policy";
+import {
+  isOfficialTransitionAggregationEligible,
+  normalizeTransitionPlan,
+} from "./tank-transition-policy";
 
 /* ════════════════════════════════════════════
    1. 型定義
@@ -57,7 +60,8 @@ export interface TraceResult {
  * ロジック:
  *   1. 未充填返却のログからtankIdを取得
  *   2. そのtankIdの正式なtransitionPlanを時系列降順で検索
- *   3. directまたは承認済みrecoveryのoperator充填を含む直近log = 責任者
+ *   3. 正式集計対象（direct / review不要recovery / 承認済みrecovery）の
+ *      operator充填を含む直近log = 責任者
  */
 export async function traceUnderfilledSource(
   db: Firestore,
@@ -90,10 +94,12 @@ export async function traceUnderfilledSource(
 
 export function isOfficialFillSource(data: DocumentData): boolean {
   const plan = normalizeTransitionPlan(data.transitionPlan);
-  if (!plan) return false;
-  const eligible = plan.kind === "direct"
-    ? data.transitionReviewStatus === "not_required"
-    : data.transitionReviewStatus === "approved";
+  if (!plan || typeof data.hasUnknownAffectedCustomer !== "boolean") return false;
+  const eligible = isOfficialTransitionAggregationEligible(
+    plan,
+    data.transitionReviewStatus,
+    data.hasUnknownAffectedCustomer,
+  );
   // system充填は状態整合の補完であり、担当者の報酬・責任対象にしない。
   return eligible && plan.steps.some(
     (step) => step.action === "fill" && step.actorType === "operator",

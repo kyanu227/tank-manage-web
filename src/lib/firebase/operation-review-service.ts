@@ -24,7 +24,9 @@ import {
   staffEmailKey,
 } from "@/lib/firebase/staff-auth";
 import {
+  isTransitionReviewStatusConsistent,
   normalizeTransitionPlan,
+  requiresTransitionAdminReview,
   type RecoveryEvidenceKey,
   type TransitionPlan,
   type TransitionReviewStatus,
@@ -458,6 +460,17 @@ function getRecoveryValidationError(
   }
   if (!plan || plan.kind !== "recovery" || plan.steps.length === 0) {
     return "自動補完計画を検証できないためレビューできません。";
+  }
+  const hasUnknownAffectedCustomer = data.hasUnknownAffectedCustomer === true;
+  if (
+    !requiresTransitionAdminReview(plan, hasUnknownAffectedCustomer)
+    || !isTransitionReviewStatusConsistent(
+      plan,
+      data.transitionReviewStatus,
+      hasUnknownAffectedCustomer,
+    )
+  ) {
+    return "外部顧客の貸出サイクルに影響しない操作はレビュー対象外です。";
   }
   if (plan.requiredEvidence.some((key) => evidence[key] !== true)) {
     return "実行時に必要だった確認証跡が不足しています。";

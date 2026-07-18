@@ -2,6 +2,8 @@ import type { Timestamp } from "firebase/firestore";
 import type { LogDoc } from "@/lib/firebase/repositories/types";
 import {
   deriveAffectedCustomers,
+  isOfficialTransitionAggregationEligible,
+  isTransitionReviewStatusConsistent,
   normalizeTransitionPlan,
   type TransitionBusinessEffect,
   type TransitionPlan,
@@ -48,13 +50,13 @@ export function assertOfficialAggregationSchemaReady(logs: readonly LogDoc[]): v
     if (log.logKind !== "tank") return [log.id];
     if (log.logStatus !== "active") return [];
     const plan = normalizeTransitionPlan(log.transitionPlan);
-    const reviewStatusValid = plan?.kind === "direct"
-      ? log.transitionReviewStatus === "not_required"
-      : plan?.kind === "recovery"
-        ? log.transitionReviewStatus === "pending"
-          || log.transitionReviewStatus === "approved"
-          || log.transitionReviewStatus === "excluded"
-        : false;
+    const reviewStatusValid = plan
+      ? isTransitionReviewStatusConsistent(
+          plan,
+          log.transitionReviewStatus,
+          log.hasUnknownAffectedCustomer === true,
+        )
+      : false;
     const policyValid = (log.policyMode === "strict" || log.policyMode === "advisory")
       && typeof log.policyRevision === "number"
       && Number.isSafeInteger(log.policyRevision)
@@ -102,17 +104,20 @@ export function projectRentalCycleEvents(log: LogDoc): ProjectedRentalCycleEvent
 
 /**
  * 請求・売上・スタッフ実績に算入できる最終operator操作を返す。
- * directはnot_required、recoveryはapprovedのときだけ対象とする。
+ * directと内部recoveryはnot_required、外部影響recoveryはapprovedのとき対象とする。
  */
 export function projectOfficialAggregationEvent(
   log: LogDoc,
 ): OfficialAggregationEvent | null {
   const plan = getActiveTankTransitionPlan(log);
   if (!plan) return null;
+  if (typeof log.hasUnknownAffectedCustomer !== "boolean") return null;
 
-  const reviewEligible = plan.kind === "direct"
-    ? log.transitionReviewStatus === "not_required"
-    : log.transitionReviewStatus === "approved";
+  const reviewEligible = isOfficialTransitionAggregationEligible(
+    plan,
+    log.transitionReviewStatus,
+    log.hasUnknownAffectedCustomer,
+  );
   if (!reviewEligible) return null;
 
   const transitionAction = normalizeTankActionCode(log.transitionAction);

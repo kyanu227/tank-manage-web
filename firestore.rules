@@ -344,6 +344,126 @@ service cloud.firestore {
         == [snapshot.get("customerId", ""), snapshot.get("customerName", "")];
     }
 
+    function transitionStepHasExternalRentalEffect(step) {
+      return step.get("businessEffect", "") in ["rental_open", "rental_close"];
+    }
+
+    // v1の固定recipeでは外部貸出境界は先頭のcloseと最終のopenだけに現れる。
+    function transitionPlanHasExternalRentalEffect(plan) {
+      let steps = plan.get("steps", []);
+      let firstStep = steps[0];
+      let finalStep = steps[steps.size() - 1];
+      return transitionStepHasExternalRentalEffect(firstStep)
+        || transitionStepHasExternalRentalEffect(finalStep);
+    }
+
+    // 現行v1は外部貸出境界のcustomerId/customerNameを必須とする。
+    // 将来unknownを許可するrecipeを追加する場合も、review要否をclient入力へ委ねない。
+    function transitionPlanHasUnknownAffectedCustomer(plan) {
+      let steps = plan.get("steps", []);
+      let firstStep = steps[0];
+      let finalStep = steps[steps.size() - 1];
+      return (
+          transitionStepHasExternalRentalEffect(firstStep)
+          && firstStep.get("customerId", "") == ""
+        ) || (
+          transitionStepHasExternalRentalEffect(finalStep)
+          && finalStep.get("customerId", "") == ""
+        );
+    }
+
+    function transitionPlanRequiresReview(plan) {
+      return plan.get("kind", "") == "recovery"
+        && (
+          transitionPlanHasExternalRentalEffect(plan)
+          || transitionPlanHasUnknownAffectedCustomer(plan)
+        );
+    }
+
+    function transitionReviewStatusMatchesPlan(plan, data) {
+      return data.get("transitionReviewStatus", "") == (
+        transitionPlanRequiresReview(plan) ? "pending" : "not_required"
+      );
+    }
+
+    // affectedCustomerIdsはclientが自由に広げられないよう、planの外部貸出境界から
+    // 一意に検証する。carry_overだけは既存transaction contextのtop-level customerを
+    // 集計再取得対象として保存するため、現在snapshotとの一致を条件に含める。
+    function transitionAffectedCustomersMatchPlan(plan, data) {
+      let steps = plan.get("steps", []);
+      let firstStep = steps[0];
+      let finalStep = steps[steps.size() - 1];
+      let firstCustomerId = firstStep.get("businessEffect", "") == "rental_close"
+        ? firstStep.get("customerId", "")
+        : "";
+      let finalCustomerId = finalStep.get("businessEffect", "") == "rental_open"
+        ? finalStep.get("customerId", "")
+        : "";
+      let carryOverCustomerId = data.get("transitionAction", "") == "carry_over"
+        ? data.get("customerId", "")
+        : "";
+      let affectedCustomerIds = data.get("affectedCustomerIds", []);
+      let hasTwoCustomers = firstCustomerId != ""
+        && finalCustomerId != ""
+        && firstCustomerId != finalCustomerId;
+      let singleCustomerId = firstCustomerId != ""
+        ? firstCustomerId
+        : finalCustomerId != ""
+          ? finalCustomerId
+          : carryOverCustomerId;
+      return data.get("hasUnknownAffectedCustomer", null)
+          == transitionPlanHasUnknownAffectedCustomer(plan)
+        && (
+          data.get("transitionAction", "") != "carry_over"
+          || carryOverCustomerId == ""
+          || (
+            [data.get("customerId", ""), data.get("customerName", "")]
+              == [
+                data.get("prevTankSnapshot", {}).get("customerId", ""),
+                data.get("prevTankSnapshot", {}).get("customerName", "")
+              ]
+          )
+        )
+        && (
+          hasTwoCustomers
+          ? (
+            affectedCustomerIds.size() == 2
+            && affectedCustomerIds.hasAll([firstCustomerId, finalCustomerId])
+          )
+          : singleCustomerId != ""
+            ? (
+              affectedCustomerIds.size() == 1
+              && affectedCustomerIds.hasAll([singleCustomerId])
+            )
+            : affectedCustomerIds == []
+        );
+    }
+
+    // correctionはdirect 1-step限定であり、式数上限を守るため軽量な同値検証を使う。
+    function directTransitionAffectedCustomersMatchStep(plan, data) {
+      let step = plan.get("steps", [])[0];
+      let affectedCustomerIds = data.get("affectedCustomerIds", []);
+      return data.get("hasUnknownAffectedCustomer", null) == false
+        && (
+          transitionStepHasExternalRentalEffect(step)
+          ? affectedCustomerIds == [step.get("customerId", "")]
+          : data.get("transitionAction", "") == "carry_over"
+            ? (
+              data.get("customerId", "") == ""
+                ? affectedCustomerIds == []
+                : (
+                  affectedCustomerIds == [data.get("customerId", "")]
+                  && [data.get("customerId", ""), data.get("customerName", "")]
+                    == [
+                      data.get("prevTankSnapshot", {}).get("customerId", ""),
+                      data.get("prevTankSnapshot", {}).get("customerName", "")
+                    ]
+                )
+            )
+            : affectedCustomerIds == []
+        );
+    }
+
     function transitionPlanMatchesSnapshots(plan, data) {
       let steps = plan.get("steps", []);
       let firstStep = steps[0];
@@ -499,20 +619,20 @@ service cloud.firestore {
           && data.get("policyRevision", -1) is int
           && data.get("affectedCustomerIds", []) is list
           && data.get("hasUnknownAffectedCustomer", null) is bool
+          && transitionAffectedCustomersMatchPlan(plan, data)
+          && transitionReviewStatusMatchesPlan(plan, data)
           && data.get("revisionCreatedAt", null) == request.time
           && maintenanceProjectionMatchesAction(data)
           && transitionPolicyMatches(data)
           && (
             plan.kind == "direct"
             ? (
-              data.transitionReviewStatus == "not_required"
-              && !data.keys().hasAny([
+              !data.keys().hasAny([
                 "recoveryReason", "recoveryEvidence", "recoveryConfirmationFingerprint"
               ])
             )
             : (
-              data.transitionReviewStatus == "pending"
-              && data.policyMode == "advisory"
+              data.policyMode == "advisory"
               && isStaffDirectRecoveryData(data)
               && data.get("action", "") != "order_lend"
               && !data.keys().hasAny(["recoveryReason"])
@@ -553,6 +673,7 @@ service cloud.firestore {
         && data.get("transitionReviewStatus", "") == "not_required"
         && data.get("affectedCustomerIds", []) is list
         && data.get("hasUnknownAffectedCustomer", null) is bool
+        && directTransitionAffectedCustomersMatchStep(plan, data)
         && data.get("revisionCreatedAt", null) == request.time
         && !data.keys().hasAny([
           "recoveryReason", "recoveryEvidence", "recoveryConfirmationFingerprint",

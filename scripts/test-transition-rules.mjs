@@ -214,6 +214,24 @@ try {
     });
   });
 
+  await succeeds("worker advisory internal recovery is official without review", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "advisory",
+      policyRevision: 2,
+      tankState: "in_house",
+      tankLocation: "自社",
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      actor: WORKER,
+      officialAggregation: true,
+      revisionAffectedCustomerIds: [],
+      logOverrides: internalRecoveryOverrides(WORKER),
+    });
+  });
+
   await succeeds("staff bulk-return recovery uses the same advisory boundary", async () => {
     await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
     await executeOperationBatch({
@@ -307,6 +325,12 @@ try {
     await executeVoid();
   });
 
+  await succeeds("latest internal official recovery may be voided", async () => {
+    await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
+    await seedActiveInternalRecoveryLog();
+    await executeVoid();
+  });
+
   await succeeds("voided recovery is re-executed as a distinct pending log", async () => {
     await resetAndSeed({ size: 0, policyMode: "advisory", policyRevision: 2 });
     await seedActiveRecoveryLog();
@@ -352,6 +376,22 @@ try {
       size: 1,
       kind: "direct",
       logOverrides: directReturnOverrides(CUSTOMER),
+    });
+  });
+
+  await succeeds("customer transaction carry-over preserves affected customer", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "strict",
+      policyRevision: 1,
+      tankState: "lent",
+      tankCustomer: CUSTOMER,
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "direct",
+      revisionAffectedCustomerIds: [CUSTOMER.customerId],
+      logOverrides: directCarryOverOverrides(),
     });
   });
 
@@ -714,6 +754,82 @@ async function runDenialCases() {
     });
   });
 
+  await fails("external recovery cannot bypass review", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      officialAggregation: true,
+      logOverrides: { transitionReviewStatus: "not_required" },
+    });
+  });
+
+  await fails("internal recovery cannot inject pending review", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "advisory",
+      policyRevision: 2,
+      tankState: "in_house",
+      tankLocation: "自社",
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      revisionAffectedCustomerIds: [],
+      logOverrides: internalRecoveryOverrides(ADMIN, {
+        transitionReviewStatus: "pending",
+      }),
+    });
+  });
+
+  await fails("internal recovery cannot inject unknown customer impact", async () => {
+    await resetAndSeed({
+      size: 1,
+      policyMode: "advisory",
+      policyRevision: 2,
+      tankState: "in_house",
+      tankLocation: "自社",
+    });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      officialAggregation: true,
+      revisionAffectedCustomerIds: [],
+      logOverrides: internalRecoveryOverrides(ADMIN, {
+        hasUnknownAffectedCustomer: true,
+      }),
+    });
+  });
+
+  await fails("recovery cannot omit an affected rental customer", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { affectedCustomerIds: [] },
+    });
+  });
+
+  await fails("recovery cannot inject an unrelated affected customer", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: {
+        affectedCustomerIds: [CUSTOMER.customerId, OTHER_CUSTOMER.customerId],
+      },
+    });
+  });
+
+  await fails("recovery cannot inject unknown customer impact", async () => {
+    await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
+    await executeOperationBatch({
+      size: 1,
+      kind: "recovery",
+      logOverrides: { hasUnknownAffectedCustomer: true },
+    });
+  });
+
   await fails("deprecated recoveryReason is rejected", async () => {
     await resetAndSeed({ size: 1, policyMode: "advisory", policyRevision: 2 });
     await executeOperationBatch({
@@ -857,6 +973,7 @@ async function resetAndSeed({
   policyRevision,
   tankState = "empty",
   tankCustomer = null,
+  tankLocation,
 }) {
   await testEnvironment.clearFirestore();
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
@@ -884,6 +1001,7 @@ async function resetAndSeed({
       setDoc(doc(firestore, "tanks", tankId(index)), tankDocument({
         status: tankState,
         customer: tankCustomer,
+        location: tankLocation,
         latestLogId: tankState === "empty" ? null : `previous-${tankId(index)}`,
       }))
     )));
@@ -933,16 +1051,16 @@ function contextFor(actor) {
 function tankDocument({
   status,
   customer = null,
+  location,
   latestLogId = null,
   staff = null,
   logNote = "",
   maintenanceDate,
   nextMaintenanceDate,
 }) {
-  const location = customer?.customerName ?? WAREHOUSE;
   return {
     status,
-    location,
+    location: location ?? customer?.customerName ?? WAREHOUSE,
     customerId: customer?.customerId ?? null,
     customerName: customer?.customerName ?? null,
     ...(staff ? { staff } : {}),
@@ -1123,6 +1241,68 @@ function recoveryInHouseLendPlan() {
   };
 }
 
+function recoveryInternalInHouseFillPlan() {
+  return {
+    version: 1,
+    kind: "recovery",
+    steps: [
+      {
+        action: "inhouse_return",
+        fromStatus: "in_house",
+        toStatus: "empty",
+        actorType: "system",
+        businessEffect: "state_only",
+        location: WAREHOUSE,
+      },
+      {
+        action: "fill",
+        fromStatus: "empty",
+        toStatus: "filled",
+        actorType: "operator",
+        businessEffect: "state_only",
+        location: WAREHOUSE,
+      },
+    ],
+    requiredEvidence: [
+      "physicalTankConfirmed",
+      "possessionConfirmed",
+      "fillStateConfirmed",
+    ],
+  };
+}
+
+function internalRecoveryOverrides(actor = ADMIN, overrides = {}) {
+  return {
+    action: "fill",
+    transitionAction: "fill",
+    location: WAREHOUSE,
+    customerId: null,
+    customerName: null,
+    transitionPlan: recoveryInternalInHouseFillPlan(),
+    transitionReviewStatus: "not_required",
+    affectedCustomerIds: [],
+    hasUnknownAffectedCustomer: false,
+    recoveryEvidence: {
+      physicalTankConfirmed: true,
+      possessionConfirmed: true,
+      fillStateConfirmed: true,
+    },
+    prevStatus: "in_house",
+    newStatus: "filled",
+    prevTankSnapshot: tankSnapshot({
+      status: "in_house",
+      location: "自社",
+    }),
+    nextTankSnapshot: tankSnapshot({
+      status: "filled",
+      location: WAREHOUSE,
+      staff: actor.name,
+    }),
+    previousLogIdOnSameTank: "previous-T001",
+    ...overrides,
+  };
+}
+
 function directReturnOverrides(planCustomer) {
   const prevTankSnapshot = tankSnapshot({ status: "lent", customer: CUSTOMER });
   const nextTankSnapshot = tankSnapshot({ status: "empty", staff: ADMIN.name });
@@ -1151,6 +1331,43 @@ function directReturnOverrides(planCustomer) {
     prevTankSnapshot,
     nextTankSnapshot,
     previousLogIdOnSameTank: "previous-T001",
+  };
+}
+
+function directCarryOverOverrides() {
+  const prevTankSnapshot = tankSnapshot({ status: "lent", customer: CUSTOMER });
+  const nextTankSnapshot = tankSnapshot({
+    status: "unreturned",
+    customer: CUSTOMER,
+    staff: ADMIN.name,
+  });
+  return {
+    action: "carry_over",
+    transitionAction: "carry_over",
+    prevStatus: "lent",
+    newStatus: "unreturned",
+    location: CUSTOMER.customerName,
+    ...CUSTOMER,
+    transitionPlan: {
+      version: 1,
+      kind: "direct",
+      steps: [{
+        action: "carry_over",
+        fromStatus: "lent",
+        toStatus: "unreturned",
+        actorType: "operator",
+        businessEffect: "state_only",
+        location: CUSTOMER.customerName,
+      }],
+      requiredEvidence: [],
+    },
+    affectedCustomerIds: [CUSTOMER.customerId],
+    prevTankSnapshot,
+    nextTankSnapshot,
+    previousLogIdOnSameTank: "previous-T001",
+    source: "return_tag_processing",
+    workflow: "return",
+    transactionId: "return-transaction",
   };
 }
 
@@ -1246,6 +1463,8 @@ function executeOperationBatch({
   kind,
   policyMode = kind === "direct" ? "strict" : "advisory",
   policyRevision = kind === "direct" ? 1 : 2,
+  officialAggregation = kind === "direct",
+  revisionAffectedCustomerIds = kind === "direct" ? [] : [CUSTOMER.customerId],
   actor = ADMIN,
   logOverrides = {},
   omitLogWrites = false,
@@ -1253,7 +1472,6 @@ function executeOperationBatch({
   mismatchedLatestLogId = false,
 }) {
   const firestore = contextFor(actor);
-  const direct = kind === "direct";
   return runTransaction(firestore, async (transaction) => {
     const policyRef = doc(firestore, "settings", "tankOperationPolicy");
     const revisionRef = doc(firestore, "settings", "tankAggregationRevision");
@@ -1267,11 +1485,11 @@ function executeOperationBatch({
     const logIds = logRefs.map((reference) => reference.id);
     transaction.set(revisionRef, revisionDocument({
       tankDataRevision: 6,
-      officialAggregationRevision: direct ? 4 : 3,
+      officialAggregationRevision: officialAggregation ? 4 : 3,
       revisionChangeKind: "operation",
       changedLogIds: logIds,
-      officialAggregationLogIds: direct ? logIds : [],
-      affectedCustomerIds: direct ? [] : [CUSTOMER.customerId],
+      officialAggregationLogIds: officialAggregation ? logIds : [],
+      affectedCustomerIds: revisionAffectedCustomerIds,
       timestamp: serverTimestamp(),
     }));
     tankRefs.forEach((tankRef, index) => {
@@ -1454,6 +1672,33 @@ async function seedActiveRecoveryLog({ withLaterActiveLog = false } = {}) {
       writes.push(setDoc(doc(firestore, "logs", "later-log"), laterLog));
     }
     await Promise.all(writes);
+  });
+}
+
+async function seedActiveInternalRecoveryLog() {
+  await testEnvironment.withSecurityRulesDisabled(async (context) => {
+    const firestore = context.firestore();
+    const id = "T001";
+    const recoveryLog = {
+      ...buildOperationLog({
+        id,
+        kind: "recovery",
+        policyMode: "advisory",
+        policyRevision: 2,
+      }),
+      ...internalRecoveryOverrides(ADMIN, { previousLogIdOnSameTank: null }),
+      rootLogId: "active-log",
+      timestamp: new Date(1_000),
+      originalAt: new Date(1_000),
+      revisionCreatedAt: new Date(1_000),
+    };
+    await Promise.all([
+      setDoc(doc(firestore, "logs", "active-log"), recoveryLog),
+      setDoc(doc(firestore, "tanks", id), {
+        ...recoveryLog.nextTankSnapshot,
+        latestLogId: "active-log",
+      }),
+    ]);
   });
 }
 
