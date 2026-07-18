@@ -421,7 +421,7 @@ async function runSnapshotRestore(
   execute: boolean,
 ): Promise<Record<string, unknown>> {
   const result = await runCli(
-    "scripts/restore-transition-cutover-snapshot.mts",
+    "scripts/restore-transition-cutover-snapshot.ts",
     [
       ...commonArguments(),
       `--snapshot=${snapshotPath}`,
@@ -437,7 +437,7 @@ async function runSnapshotReset(
   execute: boolean,
 ): Promise<{ output: Record<string, unknown>; stdout: string }> {
   const result = await runCli(
-    "scripts/reset-transition-cutover-snapshot.mts",
+    "scripts/reset-transition-cutover-snapshot.ts",
     [
       ...commonArguments(),
       `--snapshot=${snapshotPath}`,
@@ -504,7 +504,7 @@ async function runSnapshotResetExpectFailure(
   failureLabel: string,
 ): Promise<void> {
   const result = await runCli(
-    "scripts/reset-transition-cutover-snapshot.mts",
+    "scripts/reset-transition-cutover-snapshot.ts",
     [...commonArguments(), `--snapshot=${snapshotPath}`],
     false,
   );
@@ -516,7 +516,7 @@ async function runSnapshotRestoreExpectFailure(
   failureLabel: string,
 ): Promise<void> {
   const result = await runCli(
-    "scripts/restore-transition-cutover-snapshot.mts",
+    "scripts/restore-transition-cutover-snapshot.ts",
     [...commonArguments(), `--snapshot=${snapshotPath}`],
     false,
   );
