@@ -15,6 +15,7 @@ describe("underfilled source eligibility", () => {
     expect(isOfficialFillSource({
       transitionPlan: plan,
       transitionReviewStatus: "not_required",
+      hasUnknownAffectedCustomer: false,
     })).toBe(true);
   });
 
@@ -29,6 +30,7 @@ describe("underfilled source eligibility", () => {
     expect(isOfficialFillSource({
       transitionPlan: plan,
       transitionReviewStatus: "approved",
+      hasUnknownAffectedCustomer: false,
     })).toBe(false);
   });
 
@@ -42,11 +44,31 @@ describe("underfilled source eligibility", () => {
     expect(isOfficialFillSource({
       transitionPlan: plan,
       transitionReviewStatus: "approved",
+      hasUnknownAffectedCustomer: false,
     })).toBe(true);
     expect(isOfficialFillSource({
       transitionPlan: plan,
       transitionReviewStatus: "pending",
+      hasUnknownAffectedCustomer: false,
     })).toBe(false);
+  });
+
+  it("accepts an internal recovery operator fill without admin review", () => {
+    const plan = requirePlan(planTankTransition({
+      policyMode: "advisory",
+      current: { status: "in_house", location: "自社" },
+      requestedAction: "fill",
+      targetLocation: "倉庫",
+    }));
+    expect(plan.steps.map((step) => step.action)).toEqual([
+      "inhouse_return",
+      "fill",
+    ]);
+    expect(isOfficialFillSource({
+      transitionPlan: plan,
+      transitionReviewStatus: "not_required",
+      hasUnknownAffectedCustomer: false,
+    })).toBe(true);
   });
 });
 

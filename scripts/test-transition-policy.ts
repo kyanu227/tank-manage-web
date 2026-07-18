@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import {
   createRecoveryConfirmationFingerprint,
   deriveAffectedCustomers,
+  getInitialTransitionReviewStatus,
+  hasExternalRentalEffect,
   isTransitionPlan,
   normalizeTankOperationPolicy,
   planTankTransition,
@@ -66,6 +68,26 @@ assert.deepEqual(deriveAffectedCustomers(relend.plan), {
   affectedCustomerIds: ["customer-a", "customer-b"],
   hasUnknownAffectedCustomer: false,
 });
+assert.equal(hasExternalRentalEffect(relend.plan), true);
+assert.equal(getInitialTransitionReviewStatus(relend.plan), "pending");
+
+const inhouseFill = requirePlan(planTankTransition({
+  policyMode: "advisory",
+  current: { status: "in_house", location: "自社" },
+  requestedAction: "fill",
+  targetLocation: "倉庫",
+}));
+assert.deepEqual(inhouseFill.plan.steps.map((step) => step.action), [
+  "inhouse_return",
+  "fill",
+]);
+assert.equal(hasExternalRentalEffect(inhouseFill.plan), false);
+assert.equal(getInitialTransitionReviewStatus(inhouseFill.plan), "not_required");
+assert.equal(
+  getInitialTransitionReviewStatus(inhouseFill.plan, true),
+  "pending",
+  "影響顧客不明はrecoveryは安全側でreview対象にする",
+);
 
 for (const status of ["damaged", "defective"] as const) {
   const blocked = planTankTransition({

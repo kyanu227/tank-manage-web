@@ -120,21 +120,22 @@ assert.equal(carryOverMatches[0].matchedReturn?.actionCode, "carry_over");
 
 const inhouseRecoveryPlan = requirePlan(planTankTransition({
   policyMode: "advisory",
-  current: { status: "empty", location: "倉庫" },
-  requestedAction: "inhouse_use",
-  targetLocation: "自社",
+  current: { status: "in_house", location: "自社" },
+  requestedAction: "fill",
+  targetLocation: "倉庫",
 }));
-const inhousePending = makeLog({
+const inhouseOfficial = makeLog({
   id: "inhouse-recovery",
-  action: "inhouse_use",
+  action: "fill",
   plan: inhouseRecoveryPlan,
-  status: "pending",
+  status: "not_required",
   at: "2026-01-05T00:00:00+09:00",
 });
-assert.deepEqual(collectPendingTransitionReviewImpact([inhousePending]), {
+assert.notEqual(projectOfficialAggregationEvent(inhouseOfficial), null);
+assert.deepEqual(collectPendingTransitionReviewImpact([inhouseOfficial]), {
   affectedCustomerIds: [],
   hasUnknownAffectedCustomer: false,
-  pendingLogIds: ["inhouse-recovery"],
+  pendingLogIds: [],
 });
 
 process.stdout.write("PASS transition projections, billing cycles, and review timing\n");

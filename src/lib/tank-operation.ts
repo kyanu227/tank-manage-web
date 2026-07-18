@@ -46,6 +46,8 @@ import type {
 import {
   createRecoveryConfirmationFingerprint,
   deriveAffectedCustomers,
+  getInitialTransitionReviewStatus,
+  isOfficialTransitionAggregationEligible,
   normalizeTransitionPlan,
   normalizeTransitionAction,
   pickRequiredRecoveryEvidence,
@@ -53,6 +55,8 @@ import {
   resolvePlannerPolicyMode,
   type RecoveryEvidence,
   type RecoveryEvidenceKey,
+  type AffectedCustomers,
+  type InitialTransitionReviewStatus,
   type TransitionEnforcementMode,
   type TransitionPlan,
 } from "./tank-transition-policy";
@@ -225,6 +229,8 @@ type PreparedTankOperation = PlannedTankOperation & {
   transitionAction: TankActionCode;
   logAction: TankActionCode;
   transitionPlan: TransitionPlan;
+  affectedCustomers: AffectedCustomers;
+  transitionReviewStatus: InitialTransitionReviewStatus;
   policyMode: TransitionEnforcementMode;
   policyRevision: number;
 };
@@ -237,6 +243,7 @@ export type TankRecoveryRequirement = {
   currentCustomerName: string | null;
   requestedAction: TankActionCode;
   plan: TransitionPlan;
+  transitionReviewStatus: InitialTransitionReviewStatus;
 };
 
 /** transaction外のUIにだけ確認を要求するための制御用error。 */
@@ -483,6 +490,10 @@ async function commitPlannedOperations(
       throw new Error(`[${op.input.tankId}] 表示操作と状態遷移操作が一致しません。`);
     }
 
+    const affectedCustomers = deriveAffectedCustomers(
+      planResult.plan,
+      op.input.context.customer?.customerId,
+    );
     return {
       ...op,
       prevSnapshot,
@@ -490,6 +501,11 @@ async function commitPlannedOperations(
       transitionAction: planResult.transitionAction,
       logAction: requestedAction,
       transitionPlan: planResult.plan,
+      affectedCustomers,
+      transitionReviewStatus: getInitialTransitionReviewStatus(
+        planResult.plan,
+        affectedCustomers.hasUnknownAffectedCustomer,
+      ),
       // policyModeは設定snapshot。contextによるstrict固定はtransitionPlanへ反映する。
       policyMode: policy.transitionEnforcement,
       policyRevision: policy.policyRevision,
@@ -532,6 +548,7 @@ async function commitPlannedOperations(
           currentCustomerName: operation.prevSnapshot.customerName ?? null,
           requestedAction: operation.logAction,
           plan: operation.transitionPlan,
+          transitionReviewStatus: operation.transitionReviewStatus,
         })),
       );
     }
@@ -539,22 +556,19 @@ async function commitPlannedOperations(
 
   const results: TankOperationResult[] = [];
   const officialAggregationLogIds = prepared
-    .filter((operation) => operation.transitionPlan.kind === "direct")
+    .filter((operation) => operation.transitionReviewStatus === "not_required")
     .map((operation) => operation.logRef.id)
     .sort();
   const pendingRecoveryLogIds = prepared
-    .filter((operation) => operation.transitionPlan.kind === "recovery")
+    .filter((operation) => operation.transitionReviewStatus === "pending")
     .map((operation) => operation.logRef.id)
     .sort();
-  // Rulesは先頭logをrequest.time anchorにする。正式集計が変わる混在batchではdirectを必ず先頭に置く。
+  // Rulesは先頭logをrequest.time anchorにする。正式集計が変わる混在batchではnot_requiredを必ず先頭に置く。
   const changedLogIds = [...officialAggregationLogIds, ...pendingRecoveryLogIds];
   const affectedCustomerIds = new Set<string>();
   let hasUnknownAffectedCustomer = false;
   prepared.forEach((operation) => {
-    const affected = deriveAffectedCustomers(
-      operation.transitionPlan,
-      operation.input.context.customer?.customerId,
-    );
+    const affected = operation.affectedCustomers;
     affected.affectedCustomerIds.forEach((customerId) => affectedCustomerIds.add(customerId));
     if (affected.hasUnknownAffectedCustomer) hasUnknownAffectedCustomer = true;
   });
@@ -602,11 +616,8 @@ async function commitPlannedOperations(
       logNote: tankLogNote,
       ...nextCustomerProjection,
     }, input.tankExtra, transitionAction);
-    const reviewStatus = transitionPlan.kind === "recovery" ? "pending" : "not_required";
-    const affectedCustomers = deriveAffectedCustomers(
-      transitionPlan,
-      input.context.customer?.customerId,
-    );
+    const reviewStatus = operation.transitionReviewStatus;
+    const affectedCustomers = operation.affectedCustomers;
     const confirmation = input.recoveryConfirmation;
     const now = serverTimestamp();
 
@@ -696,10 +707,13 @@ function requestRecoveryConfirmation(
 
   // 一括操作でもタンクごとに全stepと確認対象を読めるよう、1本ずつ確認する。
   for (const [index, requirement] of error.requirements.entries()) {
+    const aggregationNotice = requirement.transitionReviewStatus === "pending"
+      ? "外部顧客の貸出サイクルに影響するため、管理者レビュー完了まで請求・売上・スタッフ実績へ算入されません。"
+      : "外部顧客の貸出サイクルを変更しない内部補完のため、確定後すぐに正式操作として扱われます。";
     const accepted = window.confirm([
       `状態遷移の自動補完を実行します（${index + 1}/${error.requirements.length}）。`,
       "画面上は指定操作として確定しますが、内部では下記の正規手順を一括記録します。",
-      "補完操作は管理者レビュー完了まで請求・売上・スタッフ実績へ算入されません。",
+      aggregationNotice,
       "表示された現物・貸出先・充填状態等をすべて確認した場合だけ［OK］を押してください。",
       "",
       buildRecoveryRequirementDetails(requirement),
@@ -1559,9 +1573,12 @@ function assertActiveTankLog(log: TankLogData): void {
 
 function isOfficialAggregationTankLog(log: TankLogData): boolean {
   const plan = normalizeTransitionPlan(log.transitionPlan);
-  if (!plan) return false;
-  if (plan.kind === "direct") return log.transitionReviewStatus === "not_required";
-  return log.transitionReviewStatus === "approved";
+  if (!plan || typeof log.hasUnknownAffectedCustomer !== "boolean") return false;
+  return isOfficialTransitionAggregationEligible(
+    plan,
+    log.transitionReviewStatus,
+    log.hasUnknownAffectedCustomer,
+  );
 }
 
 function enforceCorrectionWindow(log: TankLogData, role: StaffCorrectionRole | undefined): void {
