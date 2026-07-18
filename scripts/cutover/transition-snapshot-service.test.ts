@@ -258,7 +258,7 @@ describe("transition snapshot restore core", () => {
     expect(vi.mocked(client.runCollectionQuery).mock.calls.length).toBeGreaterThan(12);
   });
 
-  it("実restore planだけをproduction intentへ結び付け、hash不一致を拒否する", async () => {
+  it("実restore planを検証しつつcutover完了後のproduction認可を発行しない", async () => {
     const payload = productionFixturePayload();
     const client = productionRestoreClient(payload);
     await expect(planTransitionSnapshotRestore({
@@ -298,17 +298,17 @@ describe("transition snapshot restore core", () => {
       sourceCensusSha256: plan.summary.sourceCensusSha256,
       resetPlanSha256: plan.summary.resetPlanSha256,
     };
-    expect(authorizeRestoreServiceExecution({
+    expect(() => authorizeRestoreServiceExecution({
       intent: createProductionExecutionIntent(intentInput),
       plan,
-    })).toBeDefined();
+    })).toThrow("無効");
     expect(() => authorizeRestoreServiceExecution({
       intent: createProductionExecutionIntent({
         ...intentInput,
         resetPlanSha256: "0".repeat(64),
       }),
       plan,
-    })).toThrow("承認済み契約");
+    })).toThrow("無効");
   });
 
   it.each(["statusCounts", "resetPlanSha256", "operatorPrincipal"])(

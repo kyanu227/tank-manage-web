@@ -52,16 +52,16 @@ describe("production cutover .ts entrypoints", () => {
       "reset",
       "reset-transition-cutover-snapshot.ts",
       PRODUCTION_RESET_CONFIRMATION,
-      "RESET_SNAPSHOT_INPUT_FAILED",
+      "RESET_EXECUTION_GATE_FAILED",
     ],
     [
       "restore",
       "restore-transition-cutover-snapshot.ts",
       PRODUCTION_RESTORE_CONFIRMATION,
-      "ENOENT",
+      "PRODUCTION_CUTOVER_EXECUTE_DISABLED",
     ],
   ] as const)(
-    "%sの実entrypointでproduction intent gateを通過し、外部接続前のsnapshot読取で停止する",
+    "%sの実entrypointはcutover完了後にsnapshot読取前で停止する",
     (operation, entrypointName, confirmation, expectedCode) => {
       const markerPath = join(temporaryRoot, `${operation}-network-accessed`);
       const snapshotPath = join(temporaryRoot, `${operation}-missing.snapshot.enc.json`);
@@ -104,7 +104,6 @@ describe("production cutover .ts entrypoints", () => {
       expect(result.stderr.trim()).toBe(
         `cutover command failed (${expectedCode}); sensitive details were suppressed`,
       );
-      expect(result.stderr).not.toContain("RESET_EXECUTION_GATE_FAILED");
       expect(result.stderr).not.toContain(snapshotPath);
       expect(result.stderr).not.toContain(PRODUCTION_CUTOVER_DATA_PRINCIPAL);
       expect(existsSync(markerPath)).toBe(false);
