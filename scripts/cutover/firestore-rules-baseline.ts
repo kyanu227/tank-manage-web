@@ -211,7 +211,6 @@ export async function verifyLiveFirestoreRulesBaseline(
     await request(firstRelease.rulesetName),
     projectId,
     firstRelease.rulesetName,
-    input.manifest.liveRulesSourceFile,
   );
   const secondRelease = parseRelease(
     await request(releasePath),
@@ -225,16 +224,8 @@ export async function verifyLiveFirestoreRulesBaseline(
   const liveSha256 = createHash("sha256").update(liveSource, "utf8").digest("hex");
   const liveBytes = Buffer.byteLength(liveSource, "utf8");
   const baselineSource = normalizeFirestoreRulesSource(input.baselineSource);
-  const metadataMatches = (
-    firstRelease.name === input.manifest.releaseName
-    && firstRelease.createTime === input.manifest.releaseCreateTime
-    && firstRelease.updateTime === input.manifest.releaseUpdateTime
-    && firstRelease.rulesetName === input.manifest.rulesetName
-    && ruleset.name === input.manifest.rulesetName
-    && ruleset.createTime === input.manifest.rulesetCreateTime
-  );
   if (
-    !metadataMatches
+    firstRelease.name !== input.manifest.releaseName
     || liveSource !== baselineSource
     || liveSha256 !== input.manifest.normalizedSha256
     || liveBytes !== input.manifest.normalizedBytes
@@ -337,7 +328,6 @@ function parseRuleset(
   value: unknown,
   projectId: string,
   expectedRulesetName: string,
-  expectedRulesFile: string,
 ): FirebaseRuleset {
   if (!isObject(value)) throw new Error("Firebase Rules ruleset responseが不正です");
   const name = requireRulesetName(value.name, projectId);
@@ -351,7 +341,7 @@ function parseRuleset(
     throw new Error("Firebase Rules ruleset source fileを一意に特定できません");
   }
   const file = value.source.files[0];
-  if (file.name !== expectedRulesFile || typeof file.content !== "string" || !file.content) {
+  if (typeof file.name !== "string" || !file.name || typeof file.content !== "string" || !file.content) {
     throw new Error("Firebase Rules ruleset source fileが不正です");
   }
   return {

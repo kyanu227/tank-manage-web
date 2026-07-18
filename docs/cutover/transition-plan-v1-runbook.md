@@ -197,20 +197,17 @@ npm run --silent cutover:rules:verify-baseline -- \
 `--expected-data-principal`は2 principalが異なることをnetwork access前に検査するためのidentity参照であり、
 このcommandがdata migration credentialを使用することを意味しない。
 
-この検証は、次の4者が一致した場合だけ成功する。
+この検証は、次の3者のRules本文が一致した場合だけ成功する。
 
 - live production Rules source
 - `firestore.cutover-baseline.rules`
-- `firestore.cutover-baseline.manifest.json` v2のhash・release・ruleset metadata・live source filename
 - commit `b7e853c8f38071937951b871cbe0e3281dd22876`の`firestore.rules`
 
-現在のpinned正本は、2026-06-02のGit正本を2026-07-18のReset前abortで再deployしたものである。
-release更新`2026-07-18T08:48:41.527284Z`、ruleset
-`a6a7e85b-1761-44f4-a714-cc53957611e8`、live source file
-`firestore.cutover-baseline.rules`、正規化SHA-256
-`6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8`である。manifest v2は
-Git正本`firestore.rules`とlive source filenameを別fieldで固定し、両者を互換扱いしない。
-取得不能、hash・metadata・Git・fileの不一致はすべてfreeze deploy前にfail closedとする。
+現在のpinned正本は2026-06-02のGit正本で、正規化SHA-256は
+`6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8`である。
+release / ruleset ID、更新日時、live source filenameは毎回のdeployで変わり得る監査情報として記録するが、
+本文・hash・byte数が一致する限りfreezeのblocking条件にはしない。取得不能、本文hash・Git・baseline fileの
+不一致はfreeze deploy前にfail closedとする。
 CLIはlocal `HEAD` / `origin/main`だけでなく、GitHub上の`refs/heads/main`も`git ls-remote`で
 read-only照合する。remote mainを取得できない、または`expected-main-commit`と不一致なら停止する。
 成功後はRules reader credentialのローカルcontextを破棄し、他のRules deploy権限者・CIを動かさず、
@@ -250,15 +247,13 @@ firebase --project okmarine-tankrental \
 ```
 
 baseline artifactはfreeze直前のproduction Rulesと同じsourceを保持する。2026-06-02 Git正本の
-最終変更commit `b7e853c8f38071937951b871cbe0e3281dd22876`、上記hash、manifest metadataの
-いずれかが不一致ならdeployしない。これによりabort・rollbackは作業直前のRules sourceへ戻る。
+最終変更commit `b7e853c8f38071937951b871cbe0e3281dd22876`と上記hashが不一致ならdeployしない。
+これによりabort・rollbackは作業直前と同じRules本文へ戻る。
 
 baseline deployは同じ本文でも新しいimmutable rulesetとrelease update timeを作成する。したがって、
-abort・rollback完了後に次のcutoverを再試行する場合は、release → ruleset → releaseをread-onlyで安定読取し、
-本文hash・byte数がGit正本と一致することを確認したうえで、manifest v2のlive attestationだけを
-独立レビュー・mergeしてから再開する。旧metadataや旧source filenameの許容、hash-only fallback、
-deploy直後のmanifest未更新状態でのfreeze再試行は禁止する。本文hashが変わった場合はmetadata refreshではなく、
-新しいrollback artifactとGit pinとして別レビューする。
+abort・rollback後の再試行ではrelease → ruleset → releaseをread-onlyで安定読取し、本文hash・byte数が
+Git正本と一致すればmanifest metadata更新PRを要求しない。本文hashが変わった場合だけ、新しいrollback
+artifactとGit pinとして別レビューする。
 
 このReset前abortではsnapshot restoreを行わない。Resetは一度も実行されていないため、次の順序で
 pre-cutover状態へ戻し、途中を省略しない。
@@ -328,7 +323,7 @@ npm run --silent cutover:snapshot:reset -- \
 
 上記の実行順は、Rules baseline readerによる照合 → Rules deploy principalによるfreeze →
 Rules reader credential破棄・role剥奪 → data migration credentialへ切り替え → read-only preflight →
-snapshot作成 → reset dry-runとする。後半を前倒ししたり、Rules readerでdata操作を行ったりしない。
+snapshot作成 → reset dry-runとする。Rules readerでdata操作を行わない。
 
 preflightとsnapshot作成結果では対象counts、inventory、`sourceCensusSha256`、
 `documentPathSha256`を比較する。preflightと、そのsnapshotを入力したReset dry-runではstatus集計、

@@ -129,7 +129,7 @@ describe("Firestore Rules rollback baseline", () => {
     )).resolves.toMatchObject({ matched: true });
   });
 
-  it("live本文またはrelease metadataの不一致をfail closedにする", async () => {
+  it("live本文の不一致をfail closedにしstableなrelease metadata更新は許容する", async () => {
     await expect(verifyLiveFirestoreRulesBaseline(
       verificationInput(),
       { fetch: successfulFetch({ source: `${SOURCE}// drift\n` }) },
@@ -138,7 +138,19 @@ describe("Firestore Rules rollback baseline", () => {
     await expect(verifyLiveFirestoreRulesBaseline(
       verificationInput(),
       { fetch: successfulFetch({ releaseUpdateTime: "2026-06-02T08:29:00Z" }) },
-    )).rejects.toThrow("pinned rollback baseline");
+    )).resolves.toMatchObject({
+      matched: true,
+      releaseUpdateTime: "2026-06-02T08:29:00Z",
+    });
+
+    const redeployedRulesetName = `projects/${PROJECT_ID}/rulesets/redeployed-same-source`;
+    await expect(verifyLiveFirestoreRulesBaseline(
+      verificationInput(),
+      { fetch: successfulFetch({ rulesetName: redeployedRulesetName }) },
+    )).resolves.toMatchObject({
+      matched: true,
+      rulesetId: "redeployed-same-source",
+    });
   });
 
   it("releaseがruleset取得中に変化した場合をfail closedにする", async () => {
@@ -172,7 +184,7 @@ describe("Firestore Rules rollback baseline", () => {
     )).rejects.toThrow("一意に特定");
   });
 
-  it("manifest v1とlive source filenameのdriftを拒否する", async () => {
+  it("manifest v1を拒否し一意なlive source filename変更は本文一致なら許容する", async () => {
     const current = manifest();
     const legacy = {
       ...current,
@@ -188,7 +200,10 @@ describe("Firestore Rules rollback baseline", () => {
       { fetch: successfulFetch({ files: [
         { name: "firestore.rules", content: SOURCE },
       ] }) },
-    )).rejects.toThrow("source file");
+    )).resolves.toMatchObject({
+      matched: true,
+      liveRulesSourceFile: "firestore.rules",
+    });
   });
 
   it("HTTP error body・source・tokenを例外へ含めない", async () => {
@@ -286,12 +301,17 @@ function manifest(): FirestoreRulesBaselineManifest {
 function successfulFetch(options: {
   source?: string;
   releaseUpdateTime?: string;
+  rulesetName?: string;
   files?: Array<{ name: string; content: string }>;
 } = {}) {
-  const release = releaseResponse({ updateTime: options.releaseUpdateTime });
+  const release = releaseResponse({
+    rulesetName: options.rulesetName,
+    updateTime: options.releaseUpdateTime,
+  });
   return vi.fn()
     .mockResolvedValueOnce(jsonResponse(release))
     .mockResolvedValueOnce(jsonResponse(rulesetResponse({
+      rulesetName: options.rulesetName,
       source: options.source,
       files: options.files,
     })))
@@ -311,11 +331,12 @@ function releaseResponse(overrides: {
 }
 
 function rulesetResponse(options: {
+  rulesetName?: string;
   source?: string;
   files?: Array<{ name: string; content: string }>;
 } = {}) {
   return {
-    name: RULESET_NAME,
+    name: options.rulesetName ?? RULESET_NAME,
     createTime: RULESET_CREATE_TIME,
     source: {
       files: options.files ?? [{ name: LIVE_RULES_SOURCE_FILE, content: options.source ?? SOURCE }],
