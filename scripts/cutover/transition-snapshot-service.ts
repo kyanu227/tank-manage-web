@@ -295,7 +295,7 @@ export async function planTransitionSnapshotRestore(
   );
   await assertNoSubcollections(options.client, inspectionPaths);
   const writes = buildRestoreWrites(payload, finalCurrent, options.client);
-  const requestBytes = Buffer.byteLength(canonicalStringify({ writes }), "utf8");
+  const requestBytes = deterministicCommitRequestBytes(writes);
   assertCommitBounds(writes.length, requestBytes);
   return sealTransitionRestorePlan({
     writes,
@@ -490,6 +490,42 @@ export function assertCommitBounds(writeCount: number, requestBytes: number): vo
   }
 }
 
+/**
+ * Firestore timestampのfraction桁数は値ごとに異なるため、実bodyのbyte数は同じwrite形状でも変動する。
+ * cutover比較にはtimestampを最大幅へ置換した決定的な上限値を使い、実bodyが必ずその内側にあることも検証する。
+ */
+export function deterministicCommitRequestBytes(
+  writes: readonly FirestoreWrite[],
+): number {
+  const body = { writes };
+  const actualBytes = Buffer.byteLength(canonicalStringify(body), "utf8");
+  const boundedBody = replaceCommitTimestampsForSizing(body);
+  const upperBoundBytes = Buffer.byteLength(canonicalStringify(boundedBody), "utf8");
+  if (actualBytes > upperBoundBytes) {
+    throw new Error("cutover commitの実request bytesが決定的な上限値を超えています");
+  }
+  return upperBoundBytes;
+}
+
+function replaceCommitTimestampsForSizing(value: unknown, key = ""): unknown {
+  if (
+    typeof value === "string"
+    && (key === "timestampValue" || key === "updateTime")
+  ) {
+    return MAX_TIMESTAMP_PRECONDITION;
+  }
+  if (Array.isArray(value)) {
+    return value.map((nested) => replaceCommitTimestampsForSizing(nested));
+  }
+  if (!value || typeof value !== "object") return value;
+  return Object.fromEntries(
+    Object.entries(value).map(([nestedKey, nested]) => [
+      nestedKey,
+      replaceCommitTimestampsForSizing(nested, nestedKey),
+    ]),
+  );
+}
+
 export function assertSnapshotCanRestoreAtomically(
   payloadInput: TransitionSnapshotPayloadV1,
   client: CutoverFirestoreClient,
@@ -512,7 +548,7 @@ export function assertSnapshotCanRestoreAtomically(
   });
   assertCommitBounds(
     writes.length,
-    Buffer.byteLength(canonicalStringify({ writes }), "utf8"),
+    deterministicCommitRequestBytes(writes),
   );
 }
 

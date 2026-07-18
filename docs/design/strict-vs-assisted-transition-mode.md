@@ -221,7 +221,9 @@ npm run --silent reset:transition-plan-v1 -- \
 Reset計画は、tank full overwrite、tank log / transaction delete、`completed` migration marker作成を
 一つのFirestore REST Commitへまとめる。各既存documentにはsnapshot時の`updateTime`、markerには
 `exists:false`をpreconditionとして使用し、400 writes / 8 MiBの内部上限を検査する。
-dry-run stdoutには件数、status集計、write数、request bytes、hashだけを出す。
+dry-run stdoutには件数、status集計、write数、決定的なrequest bytes上限、hashだけを出す。
+request bytes上限は、Firestore timestampを最大幅へ置換した計測用copyから算出する。実際に保存する
+timestampやcommit bodyは変更せず、実bodyがこの上限以下かつ8 MiB以下であることを検査する。
 `resetPlanSha256`は実行時刻の`resetAt`だけを除いた正規化済み契約から生成し、
 別processで行うdry-runとexecuteが同じsnapshot・同じreset計画であることを比較できるようにする。
 

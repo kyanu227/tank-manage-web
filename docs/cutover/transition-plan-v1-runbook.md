@@ -289,7 +289,7 @@ npm run --silent cutover:preflight -- \
   --snapshot-storage-mode=icloud_encrypted
 ```
 
-出力は件数、status集計、write数、request bytes、hash、data用の必要7 permissionの確認数だけとし、document ID、
+出力は件数、status集計、write数、決定的なrequest bytes上限、hash、data用の必要7 permissionの確認数だけとし、document ID、
 顧客名、location、field内容、token、credential pathを含めない。
 
 ## 7. SnapshotとReset dry-run
@@ -322,12 +322,16 @@ snapshot作成 → reset dry-runとする。後半を前倒ししたり、Rules 
 
 preflightとsnapshot作成結果では対象counts、inventory、`sourceCensusSha256`、
 `documentPathSha256`を比較する。preflightと、そのsnapshotを入力したReset dry-runではstatus集計、
-write数、request bytesも比較する。snapshot ID・作成日時を含むpayload hashとreset plan hashは
+write数、決定的なrequest bytes上限も比較する。この上限は全Firestore timestampを最大幅へ置換した
+計測用copyから算出し、実際のtimestampやcommit bodyは変更しない。実bodyはこの上限以下でなければ停止し、
+lower REST clientの認可は引き続き実bodyそのもののSHA-256へ結び付ける。snapshot ID・作成日時を含むpayload hashとreset plan hashは
 preflightごとに変わり得るため比較対象にしない。reset plan hashは、同じ暗号化snapshotを入力した
 dry-runとexecute間でだけ一致させる。
 
 snapshot作成直後にKeychainから鍵を再取得し、同じ暗号化fileの読取・AES-GCM復号・
-payload SHA-256・canonical検証・document count・restore dry-runを実行する。一時平文fileは作らず、
+payload SHA-256・canonical検証・document countをReset dry-runで実行する。snapshot作成時にはrestoreの
+write数・request bytes上限も内部検査するが、この値はsnapshot作成commandの比較証跡には出力しない。migration markerがまだ存在しないため、この時点で実状態を入力にする
+restore dry-runは実行しない。実際のrestore dry-runはReset成功後、最初のstrict業務writeより前に行う。一時平文fileは作らず、
 snapshot鍵・平文payload・document IDをstdout / stderrへ出さない。復号またはhashが一致しなければ停止する。
 
 ### 7.1 固定契約によるproduction Reset
@@ -400,6 +404,7 @@ Reset execute成功後も、次の順序を崩さない。
 
 ```text
 schema verification
+→ 必須restore dry-run・snapshot/hash/write数/request bytes上限の記録
 → rollout gate=falseのHosting deploy
 → dedicated normal Rules deploy
 → 最大10分待機
@@ -409,6 +414,11 @@ schema verification
 → 利用可能ならAudit Logsを補助確認
 → maintenance解除
 ```
+
+schema verification直後、Hosting deployより前にsection 10と同じrestore commandを`--execute`なしで実行する。
+この必須dry-runでreset marker、current exact reset state、snapshot ID、payload / source / reset-plan SHA、
+write数、決定的なrequest bytes上限を確認して作業記録へ保存する。失敗時はHostingや通常Rulesへ進まず、
+freezeを維持して停止する。このdry-runは復元を実行せず、最初のstrict業務writeまでのexact restore可能性を証明する。
 
 schema verification成功後、記録済みのmain commitからrollout gate=falseを明示して静的成果物を生成し、
 `out/`に同期競合copyや想定外fileがないことを確認してから、freeze中にHostingだけへ反映する。
