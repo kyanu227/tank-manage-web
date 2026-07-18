@@ -18,7 +18,8 @@
 - `firebase.json` は PR #50 で `firestore.rules` に接続済み。
 - Firestore Rules の非deploy構文確認は 2026-05-07 に pass 済み。
 - Security Rules deploy は 2026-05-08 に実行済み。これは履歴記録であり、現在の本番Rulesは
-  2026-06-02 release（commit `b7e853c8f38071937951b871cbe0e3281dd22876`）としてread-only確認済み。
+  2026-06-02のcommit `b7e853c8f38071937951b871cbe0e3281dd22876`と同じ本文を
+  2026-07-18のReset前abortで再deployしたreleaseとしてread-only確認済み。
   2026-05-08の結果は [Security Rules Deploy Result](../deploy/security-rules-deploy-result.md) を参照する。
 - Hosting deploy は PR #48 の overview 反映時に実施済みだが、Security Rules deploy とは分離して扱う。
 - `NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS` は変更していない。

@@ -639,7 +639,8 @@ erDiagram
 - 既存フィールドを削除・改名する場合は、互換読み込み期間を設ける。
 - 破壊的変更は migration スクリプトを用意する。
 - 新規書き込みは新スキーマへ寄せる。Portal Auth / customerUsers は Phase 0 として本番確認済み。
-  現在の本番Rulesは2026-06-02 releaseとしてread-only確認済みだが、その後のRules差分は
+  現在の本番Rulesは2026-06-02のGit正本と同じ本文を2026-07-18に再deployしたreleaseとして
+  read-only確認済みだが、その後のRules差分は
   Rules-only operationで別途レビューする。
 - 読み込みは一定期間、旧スキーマを吸収する正規化関数を通す。
 - 本番データの直接手修正は避け、必要な場合は作業内容を `edit_history` または別途作業記録に残す。

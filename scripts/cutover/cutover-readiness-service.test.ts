@@ -30,14 +30,15 @@ const NOW = new Date("2026-07-17T00:05:00.000Z");
 const MAIN = "a".repeat(40);
 const RULES_HASH = "b".repeat(64);
 const RULES_BASELINE: FirestoreRulesBaselineManifest = {
-  version: 1,
+  version: 2,
   projectId: CUTOVER_INFRA_CONTRACT.projectId,
   releaseName: `projects/${CUTOVER_INFRA_CONTRACT.projectId}/releases/cloud.firestore`,
   releaseCreateTime: "2026-03-11T07:36:20.560827Z",
   releaseUpdateTime: "2026-06-02T08:28:53.917Z",
   rulesetName: `projects/${CUTOVER_INFRA_CONTRACT.projectId}/rulesets/ruleset-id`,
   rulesetCreateTime: "2026-06-02T08:28:52.433311Z",
-  rulesFile: "firestore.rules",
+  pinnedGitRulesFile: "firestore.rules",
+  liveRulesSourceFile: "firestore.cutover-baseline.rules",
   gitCommit: "f".repeat(40),
   normalizedSha256: RULES_HASH,
   normalizedBytes: 100,
@@ -235,8 +236,10 @@ describe("cutover readiness assessment", () => {
 
   it.each([
     ["releaseId", { releaseName: `projects/${CUTOVER_INFRA_CONTRACT.projectId}/releases/other-release` }],
+    ["releaseCreateTime", { releaseCreateTime: "2026-03-11T07:36:21.000Z" }],
     ["releaseUpdateTime", { releaseUpdateTime: "2026-06-02T08:28:54.000Z" }],
     ["rulesetId", { rulesetName: `projects/${CUTOVER_INFRA_CONTRACT.projectId}/rulesets/other-ruleset` }],
+    ["rulesetCreateTime", { rulesetCreateTime: "2026-06-02T08:28:53.000Z" }],
     ["normalizedSha256", { normalizedSha256: "0".repeat(64) }],
     ["normalizedBytes", { normalizedBytes: 101 }],
   ] as const)("Rules evidenceの%sがpinned manifestと異なればNO-GO", (_label, change) => {
@@ -245,6 +248,23 @@ describe("cutover readiness assessment", () => {
       ...input,
       expectedRulesBaseline: { ...RULES_BASELINE, ...change },
     });
+    expect(report.blocking).toContain("LIVE_RULES_BASELINE_EVIDENCE_INVALID_OR_STALE");
+  });
+
+  it("live Rules source filenameがpinned manifestと異なればNO-GO", () => {
+    const input = readyInput();
+    const rules = createRulesReadinessEvidence({
+      generatedAt: input.rules!.generatedAt,
+      projectId: input.args.projectId,
+      mainCommit: input.args.expectedMainCommit,
+      principal: input.args.rulesPrincipal,
+      payload: {
+        ...input.rules!.payload,
+        liveRulesSourceFile: "other.rules",
+      },
+    });
+    const report = assessCutoverReadiness({ ...input, rules });
+
     expect(report.blocking).toContain("LIVE_RULES_BASELINE_EVIDENCE_INVALID_OR_STALE");
   });
 });
@@ -342,8 +362,11 @@ function readyInput(
       payload: {
         matched: true,
         releaseId: "cloud.firestore",
+        releaseCreateTime: RULES_BASELINE.releaseCreateTime,
         releaseUpdateTime: "2026-06-02T08:28:53.917Z",
         rulesetId: "ruleset-id",
+        rulesetCreateTime: RULES_BASELINE.rulesetCreateTime,
+        liveRulesSourceFile: RULES_BASELINE.liveRulesSourceFile,
         normalizedSha256: RULES_HASH,
         normalizedBytes: 100,
       },

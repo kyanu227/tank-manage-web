@@ -16,10 +16,11 @@
 ## Rules deploy状態
 
 - `firebase.json`は`firestore.rules`へ接続済み。
-- 現在の本番Rulesは2026-06-02 release（commit
-  `b7e853c8f38071937951b871cbe0e3281dd22876`）としてRules APIでread-only確認済み。
+- 現在の本番Rulesは2026-06-02のcommit
+  `b7e853c8f38071937951b871cbe0e3281dd22876`と同じ本文を、2026-07-18のReset前abortで
+  再deployしたreleaseとしてRules APIでread-only確認済み。
 - 2026-05-08のdeploy結果は履歴記録であり、現在のrollback正本ではない。
-- 2026-06-02 release以後の状態遷移Rules差分は未deployであり、別のRules-only operationが必要。
+- 2026-06-02 Git正本以後の状態遷移Rules差分は未deployであり、別のRules-only operationが必要。
 - 通常Hosting deployへRulesを混ぜない。
 - `customerUsers.customerId` / `customerUsers.customerName` / `disabled` の管理者運用と Rules 制御は次フェーズでレビューする。
 

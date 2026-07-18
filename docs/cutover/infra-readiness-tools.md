@@ -196,8 +196,15 @@ npm run --silent cutover:preflight -- \
 
 各証跡はproject、main SHA、credential principalのSHA-256、生成時刻、payload hashへ結び付く。
 15分を超えた証跡、未来時刻、別project/main/principal、改ざん、database不一致は拒否する。
-Rules evidenceはhashだけで判定せず、pinned manifestのrelease ID、release update time、ruleset ID、
-normalized SHA-256、normalized byte数のすべてと一致する場合だけ有効とする。
+Rules evidenceはhashだけで判定せず、pinned manifest v2のrelease ID、release update time、ruleset ID、
+normalized SHA-256、normalized byte数のすべてと一致する場合だけ有効とする。manifest v2は
+`pinnedGitRulesFile`と`liveRulesSourceFile`を分離し、証跡生成時にはlive rulesetのsource filenameも
+完全一致で検証する。
+
+baseline Rulesをabort・rollbackで再deployすると、本文が同じでもruleset ID、release update time、
+live source filenameが新しいdeploymentを表す。次回cutoverの前に安定したrelease → ruleset → releaseを取得し、
+Git正本・hash・byte数が不変であることを確認してmanifestのlive attestationをレビュー付きcommitで更新する。
+metadataが古いままの証跡生成や、旧filenameの互換受理はfail closedとする。
 
 ## Human evidence
 

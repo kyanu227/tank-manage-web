@@ -43,7 +43,7 @@ async function main(): Promise<void> {
   );
   const gitSource = execFileSync(
     "git",
-    ["show", `${manifest.gitCommit}:${manifest.rulesFile}`],
+    ["show", `${manifest.gitCommit}:${manifest.pinnedGitRulesFile}`],
     { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
   );
   const result = await runRulesBaselineRuntime({
@@ -69,8 +69,11 @@ async function main(): Promise<void> {
     payload: {
       matched: result.matched,
       releaseId: result.releaseId,
+      releaseCreateTime: result.releaseCreateTime,
       releaseUpdateTime: result.releaseUpdateTime,
       rulesetId: result.rulesetId,
+      rulesetCreateTime: result.rulesetCreateTime,
+      liveRulesSourceFile: result.liveRulesSourceFile,
       normalizedSha256: result.normalizedSha256,
       normalizedBytes: result.normalizedBytes,
     },

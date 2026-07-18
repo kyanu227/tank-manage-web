@@ -20,6 +20,7 @@ const RULESET_NAME = `projects/${PROJECT_ID}/rulesets/${RULESET_ID}`;
 const RELEASE_CREATE_TIME = "2026-03-11T07:36:20.560827Z";
 const RELEASE_UPDATE_TIME = "2026-06-02T08:28:53.917518Z";
 const RULESET_CREATE_TIME = "2026-06-02T08:28:52.433311Z";
+const LIVE_RULES_SOURCE_FILE = "firestore.cutover-baseline.rules";
 
 describe("Firestore Rules rollback baseline", () => {
   it("改行形式と末尾改行数だけを正規化する", () => {
@@ -51,7 +52,7 @@ describe("Firestore Rules rollback baseline", () => {
     );
     const gitSource = execFileSync(
       "git",
-      ["show", `${manifest.gitCommit}:${manifest.rulesFile}`],
+      ["show", `${manifest.gitCommit}:${manifest.pinnedGitRulesFile}`],
       { cwd: repositoryRoot, encoding: "utf8", stdio: ["ignore", "pipe", "pipe"] },
     );
 
@@ -64,6 +65,11 @@ describe("Firestore Rules rollback baseline", () => {
     expect(manifest.normalizedSha256).toBe(
       "6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8",
     );
+    const baselineConfig = JSON.parse(await readFile(
+      `${repositoryRoot}/firebase.cutover-baseline.json`,
+      "utf8",
+    )) as { firestore?: { rules?: unknown } };
+    expect(baselineConfig.firestore?.rules).toBe(manifest.liveRulesSourceFile);
   });
 
   it("release GET→ruleset GET→release GETでstableなlive baselineを確認する", async () => {
@@ -91,6 +97,7 @@ describe("Firestore Rules rollback baseline", () => {
       projectId: PROJECT_ID,
       releaseId: "cloud.firestore",
       rulesetId: RULESET_ID,
+      liveRulesSourceFile: LIVE_RULES_SOURCE_FILE,
       normalizedSha256: normalizedFirestoreRulesSha256(SOURCE),
     });
     expect(JSON.stringify(result)).not.toContain(SOURCE.trim());
@@ -159,10 +166,29 @@ describe("Firestore Rules rollback baseline", () => {
     await expect(verifyLiveFirestoreRulesBaseline(
       verificationInput(),
       { fetch: successfulFetch({ files: [
-        { name: "firestore.rules", content: SOURCE },
+        { name: LIVE_RULES_SOURCE_FILE, content: SOURCE },
         { name: "other.rules", content: SOURCE },
       ] }) },
     )).rejects.toThrow("一意に特定");
+  });
+
+  it("manifest v1とlive source filenameのdriftを拒否する", async () => {
+    const current = manifest();
+    const legacy = {
+      ...current,
+      version: 1,
+      rulesFile: "firestore.rules",
+    } as Record<string, unknown>;
+    delete legacy.pinnedGitRulesFile;
+    delete legacy.liveRulesSourceFile;
+    expect(() => parseFirestoreRulesBaselineManifest(legacy)).toThrow("field");
+
+    await expect(verifyLiveFirestoreRulesBaseline(
+      verificationInput(),
+      { fetch: successfulFetch({ files: [
+        { name: "firestore.rules", content: SOURCE },
+      ] }) },
+    )).rejects.toThrow("source file");
   });
 
   it("HTTP error body・source・tokenを例外へ含めない", async () => {
@@ -242,14 +268,15 @@ function verificationInput() {
 function manifest(): FirestoreRulesBaselineManifest {
   const normalized = normalizeFirestoreRulesSource(SOURCE);
   return {
-    version: 1,
+    version: 2,
     projectId: PROJECT_ID,
     releaseName: RELEASE_NAME,
     releaseCreateTime: RELEASE_CREATE_TIME,
     releaseUpdateTime: RELEASE_UPDATE_TIME,
     rulesetName: RULESET_NAME,
     rulesetCreateTime: RULESET_CREATE_TIME,
-    rulesFile: "firestore.rules",
+    pinnedGitRulesFile: "firestore.rules",
+    liveRulesSourceFile: LIVE_RULES_SOURCE_FILE,
     gitCommit: "b7e853c8f38071937951b871cbe0e3281dd22876",
     normalizedSha256: createHash("sha256").update(normalized, "utf8").digest("hex"),
     normalizedBytes: Buffer.byteLength(normalized, "utf8"),
@@ -291,7 +318,7 @@ function rulesetResponse(options: {
     name: RULESET_NAME,
     createTime: RULESET_CREATE_TIME,
     source: {
-      files: options.files ?? [{ name: "firestore.rules", content: options.source ?? SOURCE }],
+      files: options.files ?? [{ name: LIVE_RULES_SOURCE_FILE, content: options.source ?? SOURCE }],
     },
   };
 }

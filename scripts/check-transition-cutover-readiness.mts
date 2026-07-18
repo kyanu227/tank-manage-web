@@ -17,7 +17,7 @@ import {
 import { parseFirestoreRulesBaselineManifest } from "./cutover/firestore-rules-baseline";
 import type {
   DataReadinessEvidenceV1,
-  RulesReadinessEvidenceV1,
+  RulesReadinessEvidenceV2,
 } from "./cutover/readiness-evidence";
 import { reportCutoverCliError } from "./cutover/snapshot-cli-common";
 
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   }
 
   let human = parseCutoverHumanEvidence(undefined);
-  let rules: RulesReadinessEvidenceV1 | null = null;
+  let rules: RulesReadinessEvidenceV2 | null = null;
   let data: DataReadinessEvidenceV1 | null = null;
   let evidenceFileBlocker: string | undefined;
   try {

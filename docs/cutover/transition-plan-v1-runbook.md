@@ -201,12 +201,15 @@ npm run --silent cutover:rules:verify-baseline -- \
 
 - live production Rules source
 - `firestore.cutover-baseline.rules`
-- `firestore.cutover-baseline.manifest.json`のhash・release・ruleset metadata
+- `firestore.cutover-baseline.manifest.json` v2のhash・release・ruleset metadata・live source filename
 - commit `b7e853c8f38071937951b871cbe0e3281dd22876`の`firestore.rules`
 
-現在のpinned正本は、release更新`2026-06-02T08:28:53.917518Z`、ruleset
-`5e97d441-b926-473a-a983-b77e41293db4`、正規化SHA-256
-`6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8`である。
+現在のpinned正本は、2026-06-02のGit正本を2026-07-18のReset前abortで再deployしたものである。
+release更新`2026-07-18T08:48:41.527284Z`、ruleset
+`a6a7e85b-1761-44f4-a714-cc53957611e8`、live source file
+`firestore.cutover-baseline.rules`、正規化SHA-256
+`6c9d126dad4980f20f92feda660d13a7d3840b1625d3ac4c74da27ce9e31e1a8`である。manifest v2は
+Git正本`firestore.rules`とlive source filenameを別fieldで固定し、両者を互換扱いしない。
 取得不能、hash・metadata・Git・fileの不一致はすべてfreeze deploy前にfail closedとする。
 CLIはlocal `HEAD` / `origin/main`だけでなく、GitHub上の`refs/heads/main`も`git ls-remote`で
 read-only照合する。remote mainを取得できない、または`expected-main-commit`と不一致なら停止する。
@@ -246,9 +249,16 @@ firebase --project okmarine-tankrental \
   deploy --only firestore:rules
 ```
 
-baseline artifactはfreeze直前のproduction Rulesと同じsourceを保持する。2026-06-02 releaseの
+baseline artifactはfreeze直前のproduction Rulesと同じsourceを保持する。2026-06-02 Git正本の
 最終変更commit `b7e853c8f38071937951b871cbe0e3281dd22876`、上記hash、manifest metadataの
 いずれかが不一致ならdeployしない。これによりabort・rollbackは作業直前のRules sourceへ戻る。
+
+baseline deployは同じ本文でも新しいimmutable rulesetとrelease update timeを作成する。したがって、
+abort・rollback完了後に次のcutoverを再試行する場合は、release → ruleset → releaseをread-onlyで安定読取し、
+本文hash・byte数がGit正本と一致することを確認したうえで、manifest v2のlive attestationだけを
+独立レビュー・mergeしてから再開する。旧metadataや旧source filenameの許容、hash-only fallback、
+deploy直後のmanifest未更新状態でのfreeze再試行は禁止する。本文hashが変わった場合はmetadata refreshではなく、
+新しいrollback artifactとGit pinとして別レビューする。
 
 このReset前abortではsnapshot restoreを行わない。Resetは一度も実行されていないため、次の順序で
 pre-cutover状態へ戻し、途中を省略しない。

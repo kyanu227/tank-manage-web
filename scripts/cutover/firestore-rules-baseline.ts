@@ -6,14 +6,15 @@ const FIREBASE_RULES_REQUEST_TIMEOUT_MS = 30_000;
 const FIREBASE_RULES_MAX_RESPONSE_BYTES = 512 * 1024;
 
 export type FirestoreRulesBaselineManifest = {
-  version: 1;
+  version: 2;
   projectId: string;
   releaseName: string;
   releaseCreateTime: string;
   releaseUpdateTime: string;
   rulesetName: string;
   rulesetCreateTime: string;
-  rulesFile: "firestore.rules";
+  pinnedGitRulesFile: "firestore.rules";
+  liveRulesSourceFile: "firestore.cutover-baseline.rules";
   gitCommit: string;
   normalizedSha256: string;
   normalizedBytes: number;
@@ -28,6 +29,7 @@ export type VerifiedLiveFirestoreRulesBaseline = {
   releaseUpdateTime: string;
   rulesetId: string;
   rulesetCreateTime: string;
+  liveRulesSourceFile: string;
   gitCommit: string;
   normalizedSha256: string;
   normalizedBytes: number;
@@ -49,6 +51,7 @@ type FirebaseRulesRelease = {
 type FirebaseRuleset = {
   name: string;
   createTime: string;
+  sourceFile: string;
   source: string;
 };
 
@@ -85,7 +88,8 @@ export function parseFirestoreRulesBaselineManifest(
     "releaseUpdateTime",
     "rulesetName",
     "rulesetCreateTime",
-    "rulesFile",
+    "pinnedGitRulesFile",
+    "liveRulesSourceFile",
     "gitCommit",
     "normalizedSha256",
     "normalizedBytes",
@@ -101,9 +105,19 @@ export function parseFirestoreRulesBaselineManifest(
     throw new Error("Rules baseline manifestのreleaseNameがprojectと一致しません");
   }
   const rulesetName = requireRulesetName(value.rulesetName, projectId);
-  const rulesFile = requireString(value.rulesFile, "rulesFile");
-  if (rulesFile !== "firestore.rules") {
-    throw new Error("Rules baseline manifestのrulesFileが不正です");
+  const pinnedGitRulesFile = requireString(
+    value.pinnedGitRulesFile,
+    "pinnedGitRulesFile",
+  );
+  if (pinnedGitRulesFile !== "firestore.rules") {
+    throw new Error("Rules baseline manifestのpinnedGitRulesFileが不正です");
+  }
+  const liveRulesSourceFile = requireString(
+    value.liveRulesSourceFile,
+    "liveRulesSourceFile",
+  );
+  if (liveRulesSourceFile !== "firestore.cutover-baseline.rules") {
+    throw new Error("Rules baseline manifestのliveRulesSourceFileが不正です");
   }
   const gitCommit = requireString(value.gitCommit, "gitCommit");
   if (!/^[0-9a-f]{40}$/u.test(gitCommit)) {
@@ -116,17 +130,18 @@ export function parseFirestoreRulesBaselineManifest(
   if (!Number.isSafeInteger(value.normalizedBytes) || Number(value.normalizedBytes) <= 0) {
     throw new Error("Rules baseline manifestのbyte数が不正です");
   }
-  if (value.version !== 1) throw new Error("Rules baseline manifest versionが不正です");
+  if (value.version !== 2) throw new Error("Rules baseline manifest versionが不正です");
 
   return {
-    version: 1,
+    version: 2,
     projectId,
     releaseName,
     releaseCreateTime: requireTimestamp(value.releaseCreateTime, "releaseCreateTime"),
     releaseUpdateTime: requireTimestamp(value.releaseUpdateTime, "releaseUpdateTime"),
     rulesetName,
     rulesetCreateTime: requireTimestamp(value.rulesetCreateTime, "rulesetCreateTime"),
-    rulesFile,
+    pinnedGitRulesFile,
+    liveRulesSourceFile,
     gitCommit,
     normalizedSha256,
     normalizedBytes: Number(value.normalizedBytes),
@@ -196,7 +211,7 @@ export async function verifyLiveFirestoreRulesBaseline(
     await request(firstRelease.rulesetName),
     projectId,
     firstRelease.rulesetName,
-    input.manifest.rulesFile,
+    input.manifest.liveRulesSourceFile,
   );
   const secondRelease = parseRelease(
     await request(releasePath),
@@ -236,6 +251,7 @@ export async function verifyLiveFirestoreRulesBaseline(
     releaseUpdateTime: firstRelease.updateTime,
     rulesetId: firstRelease.rulesetName.slice(firstRelease.rulesetName.lastIndexOf("/") + 1),
     rulesetCreateTime: ruleset.createTime,
+    liveRulesSourceFile: ruleset.sourceFile,
     gitCommit: input.manifest.gitCommit,
     normalizedSha256: liveSha256,
     normalizedBytes: liveBytes,
@@ -341,6 +357,7 @@ function parseRuleset(
   return {
     name,
     createTime: requireTimestamp(value.createTime, "ruleset.createTime"),
+    sourceFile: file.name,
     source: file.content,
   };
 }

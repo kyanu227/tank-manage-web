@@ -14,7 +14,7 @@ import {
   assertFreshReadinessEvidence,
   parseCutoverReadinessEvidence,
   type DataReadinessEvidenceV1,
-  type RulesReadinessEvidenceV1,
+  type RulesReadinessEvidenceV2,
 } from "./readiness-evidence";
 import {
   probeProductionExecuteGatePosture,
@@ -45,7 +45,7 @@ export async function loadReadinessEvidenceFiles(input: {
   homeDirectory?: string;
 }): Promise<{
   human: CutoverHumanEvidence;
-  rules: RulesReadinessEvidenceV1 | null;
+  rules: RulesReadinessEvidenceV2 | null;
   data: DataReadinessEvidenceV1 | null;
 }> {
   const [humanValue, rulesValue, dataValue] = await Promise.all([
@@ -91,7 +91,7 @@ export function assessCutoverReadiness(input: {
   infra: CutoverInfraPlanReport | null;
   infraFailureCode?: string;
   human: CutoverHumanEvidence;
-  rules: RulesReadinessEvidenceV1 | null;
+  rules: RulesReadinessEvidenceV2 | null;
   data: DataReadinessEvidenceV1 | null;
   productionExecuteGatePosture: ProductionExecuteGatePosture;
   expectedRulesBaseline: FirestoreRulesBaselineManifest;
@@ -151,8 +151,12 @@ export function assessCutoverReadiness(input: {
       if (
         input.expectedRulesBaseline.projectId !== input.args.projectId
         || input.rules.payload.releaseId !== expectedReleaseId
+        || input.rules.payload.releaseCreateTime !== input.expectedRulesBaseline.releaseCreateTime
         || input.rules.payload.releaseUpdateTime !== input.expectedRulesBaseline.releaseUpdateTime
         || input.rules.payload.rulesetId !== expectedRulesetId
+        || input.rules.payload.rulesetCreateTime !== input.expectedRulesBaseline.rulesetCreateTime
+        || input.rules.payload.liveRulesSourceFile
+          !== input.expectedRulesBaseline.liveRulesSourceFile
         || input.rules.payload.normalizedSha256 !== input.expectedRulesBaseline.normalizedSha256
         || input.rules.payload.normalizedBytes !== input.expectedRulesBaseline.normalizedBytes
       ) {

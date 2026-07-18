@@ -14,11 +14,20 @@ const DATA_PRINCIPAL = "data@okmarine-tankrental.iam.gserviceaccount.com";
 describe("cutover readiness evidence", () => {
   it("Rules証跡をcanonical hashへ固定し、改ざんを拒否する", () => {
     const evidence = rulesEvidence();
+    expect(evidence.version).toBe(2);
     expect(parseCutoverReadinessEvidence(evidence)).toEqual(evidence);
     expect(() => parseCutoverReadinessEvidence({
       ...evidence,
       payload: { ...evidence.payload, normalizedBytes: evidence.payload.normalizedBytes + 1 },
     })).toThrow("hash");
+  });
+
+  it("旧version 1のRules証跡をfail closedで拒否する", () => {
+    const evidence = rulesEvidence();
+    expect(() => parseCutoverReadinessEvidence({
+      ...evidence,
+      version: 1,
+    })).toThrow("version");
   });
 
   it("data証跡をprincipal・project・main・freshnessへ結び付ける", () => {
@@ -86,8 +95,11 @@ function rulesEvidence() {
     payload: {
       matched: true,
       releaseId: "cloud.firestore",
+      releaseCreateTime: "2026-03-11T07:36:20.560827Z",
       releaseUpdateTime: "2026-06-02T08:28:53.917518Z",
       rulesetId: "ruleset-id",
+      rulesetCreateTime: "2026-06-02T08:28:52.433311Z",
+      liveRulesSourceFile: "firestore.cutover-baseline.rules",
       normalizedSha256: "b".repeat(64),
       normalizedBytes: 100,
     },
