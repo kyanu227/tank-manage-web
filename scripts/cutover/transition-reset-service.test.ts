@@ -3,10 +3,7 @@ import {
   canonicalSha256,
   snapshotFieldSha256,
 } from "./canonical-firestore-value";
-import {
-  FirestoreRestClient,
-  serializeFirestoreRestBody,
-} from "./firestore-rest-client";
+import { FirestoreRestClient } from "./firestore-rest-client";
 import type {
   FirestoreCommitResponse,
   FirestoreRestDocument,
@@ -31,10 +28,7 @@ import {
   productionExecutionIdentity,
 } from "./production-execution-contract";
 import { createTransitionResetContract } from "./transition-reset-contract";
-import {
-  assertFirestoreCommitAllowed,
-  authorizeResetServiceExecution,
-} from "./production-execute-gates";
+import { authorizeResetServiceExecution } from "./production-execute-gates";
 import { CUTOVER_PROJECT_ID } from "./infra-contract";
 import { safeCutoverErrorCode } from "./cutover-diagnostic-error";
 
@@ -130,14 +124,10 @@ describe("transition atomic reset service", () => {
     expect(statusCountsFromSnapshot(payload)).toEqual({ missing: 1, unknown: 1 });
   });
 
-  it("実plannerの凍結planだけをoperation・exact bodyへ拘束しtoken待機中の改変を送らない", async () => {
-    let resolveToken!: (token: string) => void;
-    const tokenPromise = new Promise<string>((resolve) => {
-      resolveToken = resolve;
-    });
+  it("実plannerの凍結planでもcutover完了後のproduction認可を発行しない", async () => {
     const payload = productionFixturePayload();
     const client = sourceClient(payload, {
-      productionAccessTokenProvider: () => tokenPromise,
+      productionAccessTokenProvider: async () => "unused-test-token",
       useRealCommit: true,
     });
     const options = {
@@ -171,51 +161,10 @@ describe("transition atomic reset service", () => {
       sourceCensusSha256: plan.summary.sourceCensusSha256,
       resetPlanSha256: plan.summary.resetPlanSha256,
     });
-    const authorization = authorizeResetServiceExecution({ intent, plan });
-    if (!authorization) throw new Error("production authorizationがありません");
-    const originalWrites = structuredClone(plan.writes) as FirestoreWrite[];
-    const mutableWrites = structuredClone(originalWrites);
-
-    expect(() => assertFirestoreCommitAllowed({
-      operation: "reset",
-      authorization: Object.freeze({ ...authorization }),
-      projectId: CUTOVER_PROJECT_ID,
-      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
-      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
-      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
-      serializedRequestBody: serializeFirestoreRestBody({ writes: mutableWrites }),
-      writeCount: mutableWrites.length,
-    })).toThrow("authorization");
-
-    expect(() => assertFirestoreCommitAllowed({
-      operation: "restore",
-      authorization,
-      projectId: CUTOVER_PROJECT_ID,
-      databaseId: PRODUCTION_CUTOVER_DATABASE_ID,
-      databaseUid: PRODUCTION_CUTOVER_DATABASE_UID,
-      dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
-      serializedRequestBody: serializeFirestoreRestBody({ writes: mutableWrites }),
-      writeCount: mutableWrites.length,
-    })).toThrow("operation/write契約");
-
-    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
-      commitTime: "2026-07-18T00:00:00Z",
-      writeResults: originalWrites.map(() => ({})),
-    }), { status: 200 }));
-    const commitPromise = client.commit("reset", mutableWrites, authorization);
-    mutableWrites[0].delete = `${mutableWrites[0].delete}-tampered`;
-    mutableWrites.push({ delete: client.fullDocumentName("tanks/T-EXTRA") });
-    resolveToken("short-lived-test-token");
-    await expect(commitPromise).resolves.toMatchObject({
-      commitTime: "2026-07-18T00:00:00Z",
-    });
-    const request = fetchMock.mock.calls[0]?.[1];
-    expect(request?.body).toBe(serializeFirestoreRestBody({ writes: originalWrites }));
-    expect(String(request?.body)).not.toContain("tampered");
-    expect(String(request?.body)).not.toContain("T-EXTRA");
+    expect(() => authorizeResetServiceExecution({ intent, plan })).toThrow("無効");
   });
 
-  it("本番相当192-write planをproduction serviceからlower REST exact bodyまで通す", async () => {
+  it("本番相当192-write planを維持しつつproduction service認可を拒否する", async () => {
     const payload = productionSizedFixturePayload();
     const client = sourceClient(payload, {
       productionAccessTokenProvider: async () => "short-lived-test-token",
@@ -247,19 +196,13 @@ describe("transition atomic reset service", () => {
       sourceCensusSha256: plan.summary.sourceCensusSha256,
       resetPlanSha256: plan.summary.resetPlanSha256,
     });
-    const authorization = authorizeResetServiceExecution({ intent, plan });
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(JSON.stringify({
       commitTime: "2026-07-18T00:00:00Z",
       writeResults: plan.writes.map(() => ({})),
     }), { status: 200 }));
     fetchMock.mockClear();
-
-    await expect(client.commit("reset", plan.writes, authorization)).resolves.toMatchObject({
-      commitTime: "2026-07-18T00:00:00Z",
-    });
-    expect(fetchMock).toHaveBeenCalledTimes(1);
-    expect(fetchMock.mock.calls[0]?.[1]?.body)
-      .toBe(serializeFirestoreRestBody({ writes: plan.writes }));
+    expect(() => authorizeResetServiceExecution({ intent, plan })).toThrow("無効");
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -268,7 +211,7 @@ describe("transition atomic reset service", () => {
     ["snapshotPayloadSha256", "0".repeat(64)],
     ["sourceCensusSha256", "1".repeat(64)],
     ["resetPlanSha256", "2".repeat(64)],
-  ] as const)("実reset planとintentの%s不一致をservice境界で拒否する", async (key, value) => {
+  ] as const)("intentの%sを変えても閉鎖済みservice境界を通過できない", async (key, value) => {
     const payload = productionFixturePayload();
     const client = sourceClient(payload, {
       productionAccessTokenProvider: async () => "unused-test-token",
@@ -306,7 +249,7 @@ describe("transition atomic reset service", () => {
     expect(() => authorizeResetServiceExecution({
       intent: mismatchedIntent,
       plan,
-    })).toThrow("承認済み契約");
+    })).toThrow("無効");
   });
 
   it("service境界でpayloadのcanonical SHA不一致を読取前に拒否する", async () => {

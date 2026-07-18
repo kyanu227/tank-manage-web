@@ -22,12 +22,12 @@ import {
   type TransitionRestorePlan,
 } from "./transition-snapshot-service";
 
-// 後続の再close PRでは5境界を個別にfalseへ戻す。
-const RESET_CLI_PRODUCTION_EXECUTE_ENABLED = true as const;
-const RESTORE_CLI_PRODUCTION_EXECUTE_ENABLED = true as const;
-const RESET_SERVICE_PRODUCTION_EXECUTE_ENABLED = true as const;
-const RESTORE_SERVICE_PRODUCTION_EXECUTE_ENABLED = true as const;
-const FIRESTORE_REST_PRODUCTION_COMMIT_ENABLED = true as const;
+// transition v1 cutover完了後の定常状態。再実行は別の明示レビューなしに開放しない。
+const RESET_CLI_PRODUCTION_EXECUTE_ENABLED = false as const;
+const RESTORE_CLI_PRODUCTION_EXECUTE_ENABLED = false as const;
+const RESET_SERVICE_PRODUCTION_EXECUTE_ENABLED = false as const;
+const RESTORE_SERVICE_PRODUCTION_EXECUTE_ENABLED = false as const;
+const FIRESTORE_REST_PRODUCTION_COMMIT_ENABLED = false as const;
 
 export type ProductionExecuteGatePosture =
   | "closed"

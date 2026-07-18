@@ -41,11 +41,11 @@ describe("production cutover execute gates", () => {
     expect(PRODUCTION_RESET_CONFIRMATION).not.toBe(PRODUCTION_RESTORE_CONFIRMATION);
   });
 
-  it("5境界が固定transition v1契約へ完全armedされている", () => {
-    expect(probeProductionExecuteGatePosture()).toBe("armed_for_fixed_transition_v1");
+  it("cutover完了後は5境界がすべて閉じている", () => {
+    expect(probeProductionExecuteGatePosture()).toBe("closed");
   });
 
-  it("resetとrestoreのconfirmationおよびintentを相互利用できない", () => {
+  it("resetとrestoreのconfirmationを相互利用できず、実行gateも閉じている", () => {
     expect(() => createProductionExecutionIntent({
       ...intentInput("reset"),
       confirmation: PRODUCTION_RESTORE_CONFIRMATION,
@@ -57,7 +57,7 @@ describe("production cutover execute gates", () => {
     expect(() => assertResetCliExecutionAllowed({
       execute: true,
       intent: intent("restore"),
-    })).toThrow("reset用");
+    })).toThrow("無効");
   });
 
   it("production CLIは全期待値を一度だけ要求し、旧tokenを拒否する", () => {
@@ -116,11 +116,11 @@ describe("production cutover execute gates", () => {
     })).toThrow("凍結plan");
   });
 
-  it("plain intent・authorizationなしのproduction経路を拒否する", () => {
+  it("有効なintentでもproduction CLIとREST commitを拒否する", () => {
     expect(() => assertResetCliExecutionAllowed({
       execute: true,
-      intent: {} as ProductionExecutionIntent,
-    })).toThrow("intent");
+      intent: intent("reset"),
+    })).toThrow("無効");
     expect(() => assertFirestoreCommitAllowed({
       operation: "reset",
       projectId: CUTOVER_PROJECT_ID,
@@ -129,7 +129,7 @@ describe("production cutover execute gates", () => {
       dataPrincipal: PRODUCTION_CUTOVER_DATA_PRINCIPAL,
       serializedRequestBody: serializeFirestoreRestBody({ writes: WRITES }),
       writeCount: WRITES.length,
-    })).toThrow("authorization");
+    })).toThrow("無効");
   });
 
   it("dry-runとEmulatorはproduction authorizationなしで通す", () => {
