@@ -28,7 +28,7 @@ Route / Page
 
 1. **Feature間の直接import禁止**。現行HEADで違反0件（残差監査 §5）。この状態を維持する。複数featureの組み合わせは composition 層（page / OperationsTerminal / layout）でのみ行う
 2. **業務別 workflow service の分離**。次の業務を1つの汎用serviceへ統合しない:
-   手動貸出・返却・充填 / 受注貸出 / 貸出先別一括返却 / 返却申請処理 / 破損 / 修理 / 耐圧検査 / 自社利用・自社返却 / ログ訂正・取消。
+   手動貸出・返却・充填 / 受注貸出 / 貸出先別一括返却 / 返却申請の確定処理 / 破損 / 修理 / 耐圧検査 / 自社利用・自社返却 / ログ訂正・取消。
    `UniversalTankOperationService` や action を受け取る巨大汎用 workflow service は禁止
 3. **共通化の上限**: OperationContext / identity解決 / タンクID正規化 / 共通入力型・結果型 / 純粋な変換関数 / スキャンUI / キュー表示 / 確認UI / 結果表示 まで。
    **各featureに残すもの**: 業務validation / action決定 / location決定 / note生成 / 関連transaction更新
@@ -100,7 +100,7 @@ Route / Page
 
 - 入口route: `/staff/inhouse`（現状page内に検証・tag復元/保存・payload・operationが同居 R-20）
 - Target: ★`src/features/inhouse/` を新設し `services/inhouse-use-workflow.ts` / `services/inhouse-return-workflow.ts` を分離
-- tag markerの read/write は `tank-tag-service` 経由を維持し、呼び出しはPR-05でinhouse-return-workflow経由に移す。maintenanceへの統合禁止
+- tag markerのreadは現行どおりtanks読取（useTanks）+ `storedMarkerToReturnTag` 変換、writeのみ `tank-tag-service`（write専用helper）。write呼び出しはPR-05でinhouse-return-workflow経由に移す。maintenanceへの統合禁止
 
 ### 4.4 staff-dashboard（3段階で分離。同一PR禁止）
 

@@ -16,12 +16,12 @@
 
 | field | owner（許可されるwrite経路） | 備考 |
 |---|---|---|
-| status / location / staff / customerId / customerName / maintenanceDate / nextMaintenanceDate / latestLogId / logNote / updatedAt | `applyTankOperation` / `applyBulkTankOperations` / `commitPlannedOperations`（tank-operation.ts:364-675。snapshot一括反映は:1138-1161）、訂正 `applyLogCorrection`（:817-1030）、取消 `voidLog`（:1036-1095） | operation projectionが書くfield一式。`note`はoperationでは書かない |
-| type / note / createdAt（作成時初期値） | `submitTankEntryBatch`（submitTankEntryBatch.ts:131-140） | 新規tank作成時のみ。operation経路はこれらを書かない |
+| 既存tankの更新: status / location / staff / customerId / customerName / maintenanceDate / nextMaintenanceDate / latestLogId / logNote / updatedAt | `applyTankOperation` / `applyBulkTankOperations` / `commitPlannedOperations`（tank-operation.ts:364-675。snapshot一括反映は:1138-1161）、訂正 `applyLogCorrection`（:817-1030）、取消 `voidLog`（:1036-1095） | operation projectionが書くfield一式。`note`はoperationでは書かない |
+| 新規tank doc作成時の初期値: status / location / type / note / nextMaintenanceDate / updatedAt / createdAt | `submitTankEntryBatch`（submitTankEntryBatch.ts:131-140） | 新規作成の唯一経路。既存tankに対して type / note / createdAt を書くruntime経路はない |
 | customerId / customerName | 同上（operation projection） | 現在貸出projection（tank-types.ts:9-12）。**顧客identityの正本ではない**（正本はcustomers / logs）。operation経由以外の書き込み禁止 |
 | logNote | ①operation時のtankNote反映: tank-operation.ts:601-618,1146 ②返却tag marker単独write: `updateTankReturnTagMarker`（tank-tag-service.ts:5-17） | **二重owner（暫定容認）**。②の呼び出し元は useBulkReturnByLocation と inhouse page — PR-09 / PR-05 で各workflow service経由へ移管する（owner関数は変えない）。返却確定前の一時tag stateとしての利用（R-17）は機能干渉リスクとして認識済み。解消はschema変更を伴うため構造化PRと分離した別設計 |
 
-禁止される直接write: 上記以外からの `tanks` の部分update一切。
+禁止される直接write: 既存tankに対する上記以外の部分update一切。新規tank docの作成は `submitTankEntryBatch` のみ。
 
 ## 3. logs
 
