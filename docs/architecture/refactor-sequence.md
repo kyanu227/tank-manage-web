@@ -28,9 +28,11 @@
 - `npx tsc --noEmit --pretty false`
 - `npm run build`
 - `npm test`（vitest run — 既存unit test群の回帰確認）
-- PR固有のテスト・smoke（各PRに記載）
-- PR-06〜09は、保存payload・エラーメッセージ・確認文言・処理順序・失敗時挙動を固定するcharacterization test（純粋部分）または手動シナリオ表をPR本文に必須とする
-- smokeは本番Firestoreへ書き込まない。現行のWeb SDK初期化（config.ts）にはEmulator接続切替が無いため、ブラウザUI経由ではなく**scriptによるEmulator smoke**とする: `firebase emulators:exec` + `tsx` スクリプトからworkflow service関数を直接呼ぶ（既存の `scripts/test-transition-*.ts` パターンに倣う）。fixture投入と後始末をPR本文に記載する。ブラウザ経由のEmulator接続harnessが必要になった場合は、コード変更を伴うため独立PRとして別途設計する
+- `npm run test:rules:transition` / `npm run test:transition-policy` / `npm run test:transition-projections`（既存の遷移系回帰スイート）
+- PR固有のテスト（各PRに記載）
+- 抽出系PR（PR-01〜PR-10）は、tank-operation境界をmockした**payload固定テスト（vitest）**を必須とする: operation inputを固定するcharacterization testとして、代表入力に対し抽出前後で `applyTankOperation` / `applyBulkTankOperations` / `applyLogCorrection` / `voidLog` へ渡る引数（action・location・note・OperationContextを含むpayload全体）が完全一致することを固定する。エラーメッセージ・確認文言・処理順序・失敗時挙動はテストまたは手動シナリオ表で固定する
+- 既存UIでの手動シナリオ確認: 対象フローをdev環境で1周し、挙動不変を確認して結果をPR本文へ記載する（実DBへの試験書き込みを伴うため対象・件数は最小にし、必要に応じて訂正・取消フローで戻す）
+- **workflow serviceを直接呼ぶEmulator smokeは必須条件にしない**。現行のWeb SDK初期化（config.ts）は`connectFirestoreEmulator()`を呼ばず（環境変数`FIRESTORE_EMULATOR_HOST`で自動接続するのはAdmin SDKのみ）、`tank-operation.ts`はそのsingleton `db`を直接importするため、`firebase emulators:exec`内でserviceをimport・実行してもEmulator接続は保証されず、環境次第で本番接続となり得る（fail-closedでない）。既存のRulesテスト（`initializeTestEnvironment`の専用instance）・cutoverテスト（明示的なREST emulator client）もworkflow serviceを直接呼ぶ前例ではない。Emulator integration testはPR-D5のharness整備後の独立PRとする
 
 ## 3. PR一覧（実行順）
 
@@ -40,8 +42,8 @@
 
 | PR | 対象 | 触るファイル候補 | 触らない | 固有の不変条件・テスト |
 |---|---|---|---|---|
-| **PR-01** damage workflow service（パイロット） | /staff/damage の業務部分を `features/maintenance/services/damage-workflow.ts` へ | damage/page.tsx、新service | tank-operation.ts、tank-rules.ts、他page | ACTION.DAMAGE_REPORT・location・note文言・payload・context（actorのみ）完全一致。Emulator script smoke: 破損報告1件 |
-| **PR-02** repair workflow service | /staff/repair → `repair-workflow.ts` | repair/page.tsx、新service | 同上 | ACTION.REPAIRED・current status受け渡し一致。Emulator script smoke: 修理完了1件 |
+| **PR-01** damage workflow service（パイロット） | /staff/damage の業務部分を `features/maintenance/services/damage-workflow.ts` へ | damage/page.tsx、新service | tank-operation.ts、tank-rules.ts、他page | ACTION.DAMAGE_REPORT・location・note文言・payload・context（actorのみ）完全一致。payload固定テスト（破損報告の代表入力1件以上） |
+| **PR-02** repair workflow service | /staff/repair → `repair-workflow.ts` | repair/page.tsx、新service | 同上 | ACTION.REPAIRED・current status受け渡し一致。payload固定テスト（修理完了の代表入力1件以上） |
 | **PR-03** inspection workflow service + 期限算出純粋関数 | /staff/inspection → `inspection-workflow.ts` + `lib/inspection-schedule.ts` | inspection/page.tsx、新service、新lib+unit test | 同上、settings write経路 | 期限算出結果が現行と同一であることをunit testで固定。tankExtra内容一致 |
 | **PR-04** inhouse-use workflow service | /staff/inhouse の自社利用を `features/inhouse/services/inhouse-use-workflow.ts` へ | inhouse/page.tsx、新feature dir | tank-tag-service.ts | ACTION.IN_HOUSE_USE_RETRO・location=自社・事後報告note一致 |
 | **PR-05** inhouse-return workflow service | 自社返却を `inhouse-return-workflow.ts` へ。tag marker write呼び出しも同service経由に移す | inhouse/page.tsx、新service | tank-tag-service.ts（owner関数は変更しない） | tag復元・保存タイミング・tag別action一致。開始条件: PR-04 |
@@ -59,7 +61,7 @@
 
 | PR | 対象 | 要点 |
 |---|---|---|
-| **PR-10** log-correction workflow service | 単一訂正 / 単一取消 / 一括貸出先変更 / 一括取消の4経路を `features/staff-dashboard/services/log-correction-workflow.ts` へ(R-21前半) | editReason必須・latest-only制約はtank-operation.ts側のまま。一括loopの順序・失敗時挙動一致。Emulator script smoke: 訂正1件+取消1件 |
+| **PR-10** log-correction workflow service | 単一訂正 / 単一取消 / 一括貸出先変更 / 一括取消の4経路を `features/staff-dashboard/services/log-correction-workflow.ts` へ(R-21前半) | editReason必須・latest-only制約はtank-operation.ts側のまま。一括loopの順序・失敗時挙動一致。payload固定テスト（訂正・取消それぞれ代表入力） |
 | **PR-11** dashboard query / read model分離 | 取得・集計を `features/staff-dashboard/queries/` へ | 開始条件: PR-10マージ + **個別設計note**（新設ファイル名・query条件・limit・sort・集計出力・履歴取得の範囲を本docの改訂として確定してから発注）。集計値の一致確認 |
 | **PR-12** dashboard UI再編 | 表示構造の整理 | 開始条件: PR-11完了後、pageがthin wrapper化しているかを確認して個別設計。thin wrapperでない場合はClaude UI-only条件（AGENTS.md）を適用せずCodexが実装 |
 
@@ -71,6 +73,7 @@
 | **PR-D2** 機械的リネーム（R-35） | `useDestinations` → `useCustomerOptions` へrename（read先はcustomers-serviceのため）。変更ファイル: hooks/useDestinations.ts（ファイル名含む）と OperationsTerminal.tsx:10,141-166,272。関連型名も追随（定義位置は実装時に確認）。挙動変更なし | 随時 |
 | **PR-D3** dead code整理 | `updateTransaction`（repositories/transactions.ts）等、caller 0を機械確認の上で削除 | 随時 |
 | **PR-D4** docs整理 | CLAUDE.md / SITEMAP.md / AGENTS.mdのディレクトリ記述現行化 + progress.md運用縮小の提案 | 随時。docs-only単独PR、ユーザー承認前提（[document-authority.md](./document-authority.md)参照） |
+| **PR-D5** Emulator smoke harness | workflow serviceをEmulatorで実行するtest harnessを独立設計・新設。fail-closed要件: ①`firebase emulators:exec --project demo-structural-smoke`（CLIと同じdemo-*固定）配下でのみ動作 ②`FIRESTORE_EMULATOR_HOST`未設定なら即異常終了 ③接続先をlocalhostのEmulatorに限定し、それ以外への接続を拒否 ④`connectFirestoreEmulator()`を**workflow serviceのimport・実行より前に**明示呼び出し ⑤Rules用mock staff認証context（Auth Emulator）+ staff / staffByEmail / tanks のfixture投入 ⑥emulators:exec終了で状態破棄（完全な後始末）。触るのはscripts/・専用firebase config（新規ファイル）・package.jsonのscript追加のみ。検証はdemo projectでのwrite→read roundtrip | Emulator上の実行検証が必要になった時のみ（本sequenceの必須前提ではない）。**PR-01のdamage抽出には混ぜない** |
 
 ## 4. sequence対象外（別設計 or 別トラック）
 
