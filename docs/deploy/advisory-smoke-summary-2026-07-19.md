@@ -5,23 +5,174 @@
 Hosting / Rules / FirestoreのAPI timestampはUTC表記で記録する。
 
 ```text
-Advisory smoke status: ROLLED BACK
+Initial advisory smoke status: ROLLED BACK
+Follow-up advisory smoke status: COMPLETED
+Final runtime: strict / activation gate=false
 ```
 
-ここでの`ROLLED BACK`は、一時的なadvisory activation、policy、synthetic test dataをstrict運用へ
-戻したことを指す。PR #138の管理者レビュー条件コードと、それに対応する通常Firestore Rulesは本番に残す。
+`ROLLED BACK`は2026-07-18 UTC（2026-07-19 JST）の初回試行を指す。この試行では、一時的な
+advisory activation、policy、synthetic test dataをstrict運用へ戻した。PR #138の管理者レビュー
+条件コードと、それに対応する通常Firestore Rulesは本番に残した。2026-07-19のfollow-upでは、
+通常ブラウザによるキャンセルの書込み0件を最初に証明し、残っていたSmoke C〜Eとcleanupを完了した。
 
-外部顧客の貸出サイクルへ影響するrecoveryだけを管理者レビュー対象にする変更は、PR #138で
-実装・検証・本番反映した。strict regression、direct操作、外部顧客recoveryのpending・承認・
-正式集計・請求印刷停止／解除までは本番で確認できた。
+初回試行では、外部顧客の貸出サイクルへ影響するrecoveryだけを管理者レビュー対象にする変更を
+PR #138で実装・検証・本番反映した。strict regression、direct操作、外部顧客recoveryのpending・
+承認・正式集計・請求印刷停止／解除までは本番で確認できた。
 
-一方、Smoke Cの実行前キャンセル確認を、デバッグ接続中のChromeで`Escape`により行ったところ、
+一方、初回試行のSmoke Cで実行前キャンセル確認をデバッグ接続中のChromeから`Escape`で行ったところ、
 確認画面を閉じた後にも操作が確定した。ソース上は`window.confirm()`が`false`なら例外で中止し、
 再transactionへ進まない実装であるため、製品挙動とブラウザ自動化のどちらに原因があるかは未確定である。
-本番smokeとして「キャンセル時の書込み0件」を証明できなかったため、以後のSmoke C〜Eを停止し、
-policyをstrict、activation gateをfalseへ戻した。作成済みのテスト操作は全て最新順にvoidした。
+初回試行では「キャンセル時の書込み0件」を証明できなかったため、以後のSmoke C〜Eを停止し、policyを
+strict、activation gateをfalseへ戻した。作成済みのテスト操作は全て最新順にvoidした。
 
-## 実施前
+## 2026-07-19 follow-up: Smoke C〜E完了
+
+### Follow-up前提
+
+- main SHA: `5166662451563a0512661a0c530bf3edfbd8799f`
+- 開始時policy: `strict / revision 2`
+- 開始時revision: `tankDataRevision=18 / officialAggregationRevision=15`
+- 開始時pending: 0件
+- `A-02` / `A-04` / `A-05`: `empty / 倉庫 / latestLogIdなし`
+- synthetic customer A / B: inactive
+- Rules: 変更・再deployなし
+- Data Reset、snapshot、freeze Rules、migration IAM、production reset / restore: 未実施
+
+follow-up用にgate=trueを一時deployした。
+
+- release: `sites/okmarine-tankrental/releases/1784447878379000`
+- version: `sites/okmarine-tankrental/versions/7a90f912edb12709`
+- release time: `2026-07-19T07:57:58.379Z`
+- build: `NEXT_PUBLIC_TANK_ADVISORY_ACTIVATION_ENABLED=true`
+- policy: `advisory / revision 3`
+
+### 通常ブラウザでの実行前キャンセル
+
+自動化・デバッグ接続のない通常ブラウザで、`A-04`の`empty`からsynthetic customer Aへの貸出を
+選び、recovery確認画面の「キャンセル」を明示クリックした。キャンセル前後を別のread-only経路で
+比較し、次が全て不変であることを確認した。
+
+- `tanks/A-04`: `empty / 倉庫 / customerIdなし / latestLogIdなし`
+- tank document update time: `2026-07-18T16:27:30.581883Z`
+- A-04のlog ID集合・4件の既存log状態
+- A-04 active log: 0件
+- `tankDataRevision=18`
+- `officialAggregationRevision=15`
+- revision document update time: `2026-07-18T16:28:14.495751Z`
+- pending: 0件
+- review event ID集合
+
+したがって、製品の通常ブラウザ操作ではキャンセル時のFirestore書込みは0件である。初回試行で
+`Escape`後に確定した事象は、デバッグ接続中のnative dialog処理に固有のものと判断した。
+
+### Smoke C: 外部顧客recovery・excluded
+
+`A-04: empty`からsynthetic customer Aへ貸し出し、次の1 recovery logを作成した。
+
+```text
+system fill: empty -> filled (state_only)
+operator lend: filled -> lent (rental_open)
+```
+
+作成直後:
+
+- top-level log: 1件
+- `logStatus=active`
+- `transitionPlan.kind=recovery`
+- `transitionReviewStatus=pending`
+- `affectedCustomerIds`: synthetic customer Aのみ
+- tank: synthetic customer Aへの`lent`
+- revision: `19 / 15`
+- pending: 1件
+- 正式集計: 未反映
+
+管理画面で理由`本番スモーク集計除外`を入力し、「正式集計から除外」を実行した。
+
+- `transitionReviewStatus=excluded`
+- append-only review event: 1件
+- event decision: `excluded`
+- `requiresAggregationRebuild=false`
+- pending: 0件
+- revision: `20 / 15`
+- tank snapshot: 貸出状態のまま
+- 正式集計: 未反映のまま
+
+### Smoke D: internal-only recovery
+
+`A-05: empty`で自社利用の事後報告を行い、次の1 recovery logを作成した。
+
+```text
+system fill: empty -> filled (state_only)
+operator inhouse_use_retro: filled -> in_house (state_only)
+```
+
+- `transitionPlan.kind=recovery`
+- `transitionReviewStatus=not_required`
+- `affectedCustomerIds=[]`
+- `hasUnknownAffectedCustomer=false`
+- required evidence: physical tank / fill state
+- pending: 0件
+- 管理review: 不要
+- 正式集計: 即時反映
+- revision: `21 / 16`
+
+### Smoke E: recoveryのvoid・再実行
+
+Smoke Dの最新active logを理由`本番スモーク取消確認`でvoidした。
+
+- 元log: `voided / not_required`
+- `A-05`: `empty / 倉庫 / latestLogIdなし`へ復元
+- revision: `22 / 17`
+
+同じ自社利用事後報告をもう一度実行した。
+
+- 新旧log ID: 異なる
+- 新log: `active / recovery / not_required`
+- revision: `23 / 18`
+- 新しいplan、evidence、fingerprintを持つ別logとして作成
+
+voidで同じ前提snapshotへ完全復元したため、新旧fingerprintは同値となった。これはfingerprintが
+同一入力を決定的にhash化する契約どおりであり、旧logの書換えではない。
+
+### Follow-up cleanupと最終状態
+
+再実行後のA-05 log、Smoke CのA-04 logを最新順にvoidし、synthetic customer Aをinactive化した。
+policyを`strict / revision 4`へ戻した後、gate=falseでHostingだけをdeployした。
+
+- A-05再実行log void後: revision `24 / 19`
+- A-04 excluded log void後: revision `25 / 19`
+- policy: `strict / revision 4`
+- policy update time: `2026-07-19T08:51:05.811585Z`
+- pending: 0件
+- `A-02` / `A-04` / `A-05`: `empty / 倉庫 / customerIdなし / latestLogIdなし`
+- 対象tankのactive test log: 0件
+- synthetic customer A / B: inactive
+- Smoke Cのexcluded review event: append-only履歴として残存
+- Smoke Dと再実行log: ともに`voided / not_required`
+- Smoke C log: `voided / excluded`
+
+最終Hosting:
+
+- release: `projects/okmarine-tankrental/sites/okmarine-tankrental/channels/live/releases/1784451136956000`
+- version: `projects/okmarine-tankrental/sites/okmarine-tankrental/versions/e5f9bc3cdc444368`
+- release time: `2026-07-19T08:52:16.956Z`
+- status: `FINALIZED`
+- build: `NEXT_PUBLIC_TANK_ADVISORY_ACTIVATION_ENABLED=false`
+- 配信中`/staff/lend`とローカル成果物のSHA-256:
+  `ee13bf66f4a12861b88c21c231eeed74aa3197dfd6a20fae895f2bad9ad388a7`で一致
+
+最終判定:
+
+```text
+Manual cancel zero-write: PASS
+Smoke C excluded: PASS
+Smoke D internal-only recovery: PASS
+Smoke E void / rerun: PASS
+Cleanup: PASS
+Production runtime: strict / gate=false
+```
+
+## 初回試行の実施前
 
 ### Repository / Hosting / Rules
 
@@ -124,7 +275,7 @@ external rental effectなしのinternal-only recovery
 古いタブにはgate=false bundleが残り得たため、以後の確認はquery付きの新規navigationで最新bundleを
 取得した。最新画面にはadvisory有効中のbannerが表示された。
 
-## Smoke結果
+## 初回Smoke結果
 
 ### Smoke A: direct
 
@@ -180,7 +331,7 @@ system return from smoke-customer-a (rental_close)
 
 このapproved logはcleanup時にvoidしたが、append-only review eventは監査履歴として残した。
 
-### Smoke C: キャンセル検証で停止
+### 初回Smoke C: キャンセル検証で停止
 
 `A-04`をsynthetic customer BからAへ再貸出する確認画面を開き、実行前キャンセルの書込み0件を
 検証した。確認画面自体は、現在状態、旧顧客、新顧客、3step、最終状態を正しく表示した。
@@ -213,7 +364,7 @@ pending=1
 製品の通常ブラウザ操作としてのキャンセル挙動は未確定である。ただし本番smokeの必須条件を満たせないため、
 原因を推測して続行せず停止条件を適用した。
 
-### 未実施
+### 初回中止時点の未実施（follow-upで完了）
 
 - Smoke Cのexcluded判断・review event確認
 - Smoke Dのinternal-only recovery `not_required`
@@ -221,7 +372,7 @@ pending=1
 
 これらは自動テストとRules EmulatorではPASSしているが、今回の本番smokeでは成功扱いにしない。
 
-## Rollback / Cleanup
+## 初回Rollback / Cleanup
 
 停止後は次の順で通常運用へ戻した。
 
@@ -282,7 +433,7 @@ npx vitest run scripts/cutover/production-execute-gates.test.ts \
 
 cutover専用service account / roleは今回のsmokeでは使用・再作成・変更していない。
 
-## 構造化後に再確認すべき回帰基準
+## 初回停止時に定めたfollow-up回帰基準
 
 次回は、デバッグ接続や自動dialog handlerのない通常ブラウザで、最初に人間が`キャンセル`ボタンを
 明示クリックし、別経路のread-only監査で次を確認する。
