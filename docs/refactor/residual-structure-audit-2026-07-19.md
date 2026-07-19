@@ -195,3 +195,18 @@ src/features配下のimport specifierをalias（@/features/...）とrelative pat
 - tank-traceの一部はrepository外queryとaction == lend条件を使う（R-30）。
 - useDestinations名称、staffSession分散、CustomEvent、customerSession remove分散が残る（R-35〜R-38）。
 - dev-staffの実データ衝突有無とtyped identity query用Console index状態はrepository内の証拠だけではunknown（R-40、R-41）。
+
+## 7. レビュー補遺（2026-07-19 read-onlyレビューによる追加）
+
+docs PR #142 のread-onlyレビューで、§4「collection別write経路一覧」に以下の漏れが確認されたため補記する。§1〜6の本文は監査時点のまま保持する。
+
+| collection | write関数・経路 |
+|---|---|
+| priceMaster / rankMaster | writeBatch一括保存: src/lib/firebase/admin-money-settings.ts:65-139（caller: src/app/admin/money/page.tsx:104） |
+| orderMaster | writeBatch一括保存: src/lib/firebase/order-master-settings.ts:26-74（caller: src/app/admin/order-master/page.tsx:80） |
+| lineConfigs | src/lib/firebase/admin-notification-settings.ts:86-118 |
+| staffJoinRequests | 本人作成・更新: src/lib/firebase/staff-join-requests.ts:132-180 / 承認・却下: src/lib/firebase/staff-join-request-review-service.ts:64-168 |
+| operationReviewEvents | src/lib/firebase/operation-review-service.ts:187,296-310 |
+| notifySettings/config | src/lib/firebase/admin-notification-settings.ts:79-84（§4に行が無かったため補記。二重保存の論点はR-10） |
+
+軽微訂正: §3.1の「実transactionは src/lib/tank-operation.ts:384-403,435-675」について、runTransaction開始行は :413-418。

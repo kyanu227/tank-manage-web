@@ -27,7 +27,10 @@
 - 変更ファイルのeslint
 - `npx tsc --noEmit --pretty false`
 - `npm run build`
+- `npm test`（vitest run — 既存unit test群の回帰確認）
 - PR固有のテスト・manual smoke（各PRに記載）
+- PR-06〜09は、保存payload・エラーメッセージ・確認文言・処理順序・失敗時挙動を固定するcharacterization test（純粋部分）または手動シナリオ表をPR本文に必須とする
+- manual smokeは本番Firestoreへ書き込まない。Firestore Emulator（`firebase emulators:exec`、既存configを流用）で実施し、fixture投入と後始末をPR本文に記載する
 
 ## 3. PR一覧（実行順）
 
@@ -41,33 +44,33 @@
 | **PR-02** repair workflow service | /staff/repair → `repair-workflow.ts` | repair/page.tsx、新service | 同上 | ACTION.REPAIRED・current status受け渡し一致。smoke: 修理完了1件 |
 | **PR-03** inspection workflow service + 期限算出純粋関数 | /staff/inspection → `inspection-workflow.ts` + `lib/inspection-schedule.ts` | inspection/page.tsx、新service、新lib+unit test | 同上、settings write経路 | 期限算出結果が現行と同一であることをunit testで固定。tankExtra内容一致 |
 | **PR-04** inhouse-use workflow service | /staff/inhouse の自社利用を `features/inhouse/services/inhouse-use-workflow.ts` へ | inhouse/page.tsx、新feature dir | tank-tag-service.ts | ACTION.IN_HOUSE_USE_RETRO・location=自社・事後報告note一致 |
-| **PR-05** inhouse-return workflow service | 自社返却を `inhouse-return-workflow.ts` へ | inhouse/page.tsx、新service | tank-tag-service.ts（呼び出しは維持） | tag復元・保存タイミング・tag別action一致。開始条件: PR-04 |
+| **PR-05** inhouse-return workflow service | 自社返却を `inhouse-return-workflow.ts` へ。tag marker write呼び出しも同service経由に移す | inhouse/page.tsx、新service | tank-tag-service.ts（owner関数は変更しない） | tag復元・保存タイミング・tag別action一致。開始条件: PR-04 |
 
 ### Phase B — staff-operations核心
 
 | PR | 対象 | 要点 |
 |---|---|---|
 | **PR-06** manual-operation workflow service | `useManualTankOperation` のconfirm以降を `services/manual-operation-workflow.ts` へ（R-12） | 最大のPR。transition判定結果・queue挙動・confirm文言・`applyBulkTankOperations`呼び出し内容の完全一致。hookはUI stateへ縮小。開始条件: Phase Aでパターン確立済み |
-| **PR-07** order-fulfillment validation移動 | 顧客・数量・種別validationをhookからserviceへ（R-13） | write経路・atomicity変更なし |
+| **PR-07** order-fulfillment validation移動 | 承認前check（useOrderFulfillment.ts:100-117）と確定時validation（同:219-257）の業務判定をserviceへ（R-13）。scan中のUI valid/error表示（同:128-187）はhookに残す | 触るのは useOrderFulfillment.ts と order-fulfillment-service.ts のみ。エラー文言・発火タイミングを不変条件とする。write経路・atomicity変更なし |
 | **PR-08** bulk-return read/grouping query分離 | `queries/bulk-return-candidates.ts` 新設（R-15前半） | grouping結果・updatedAt近似・tag復元値の一致。write側は触らない |
-| **PR-09** bulk-return workflow service | tag別action/location・payload構築・operation呼び出しを `services/bulk-return-workflow.ts` へ（R-15後半） | logNote marker・空tankNote・returnCondition非送出を維持（R-17は解消しない）。開始条件: PR-08 |
+| **PR-09** bulk-return workflow service | tag別action/location・payload構築・operation呼び出しを `services/bulk-return-workflow.ts` へ（R-15後半）。tag marker write呼び出しも同service経由に移す（tank-tag-serviceのowner関数は変更しない） | logNote marker・空tankNote・returnCondition非送出を維持（R-17は解消しない）。開始条件: PR-08 |
 
 ### Phase C — dashboard（厳密に3分割）
 
 | PR | 対象 | 要点 |
 |---|---|---|
 | **PR-10** log-correction workflow service | 単一訂正 / 単一取消 / 一括貸出先変更 / 一括取消の4経路を `features/staff-dashboard/services/log-correction-workflow.ts` へ(R-21前半) | editReason必須・latest-only制約はtank-operation.ts側のまま。一括loopの順序・失敗時挙動一致。smoke: 訂正1件+取消1件 |
-| **PR-11** dashboard query / read model分離 | 取得・集計をqueries/read modelへ | 開始条件: PR-10マージ。集計値の一致確認 |
-| **PR-12** dashboard UI再編 | 表示構造の整理 | 開始条件: PR-11。AGENTS.mdのClaude UI境界と協調可 |
+| **PR-11** dashboard query / read model分離 | 取得・集計を `features/staff-dashboard/queries/` へ | 開始条件: PR-10マージ + **個別設計note**（新設ファイル名・query条件・limit・sort・集計出力・履歴取得の範囲を本docの改訂として確定してから発注）。集計値の一致確認 |
+| **PR-12** dashboard UI再編 | 表示構造の整理 | 開始条件: PR-11完了後、pageがthin wrapper化しているかを確認して個別設計。thin wrapperでない場合はClaude UI-only条件（AGENTS.md）を適用せずCodexが実装 |
 
-### Phase D — 収穫（gated）
+### Phase D — 収穫（gate条件を満たせば順不同。D番号は識別子であり実行順ではない）
 
-| PR | 対象 | 開始条件 |
+| PR | 対象 | gate条件 |
 |---|---|---|
-| **PR-13以降** 共通UI抽出（スキャンUI・キュー表示・確認UI・結果表示） | 1PR=1component。同一責務・同一props・同一挙動が実証されたものだけ | Phase A+B完了 |
-| **PR-14** 機械的リネーム（useDestinations等 R-35） | 名称のみ。挙動変更なし | 随時 |
-| **PR-15** dead code整理（updateTransaction等） | caller 0を確認の上で削除 | 随時 |
-| **docs-sync PR** | CLAUDE.md / SITEMAP.md / AGENTS.mdのディレクトリ記述現行化 + progress.md運用縮小の提案 | 随時。docs-only単独PR、ユーザー承認前提（[document-authority.md](./document-authority.md)参照） |
+| **PR-D1系列** 共通UI抽出（スキャンUI・キュー表示・確認UI・結果表示） | 1PR=1component（D1-1, D1-2, …と採番）。同一責務・同一props・同一挙動が実証されたものだけ | Phase A+B完了 |
+| **PR-D2** 機械的リネーム（R-35） | `useDestinations` → `useCustomerOptions` へrename（read先はcustomers-serviceのため）。変更ファイル: hooks/useDestinations.ts（ファイル名含む）と OperationsTerminal.tsx:10,141-166。関連型名も追随（定義位置は実装時に確認）。挙動変更なし | 随時 |
+| **PR-D3** dead code整理 | `updateTransaction`（repositories/transactions.ts）等、caller 0を機械確認の上で削除 | 随時 |
+| **PR-D4** docs整理 | CLAUDE.md / SITEMAP.md / AGENTS.mdのディレクトリ記述現行化 + progress.md運用縮小の提案 | 随時。docs-only単独PR、ユーザー承認前提（[document-authority.md](./document-authority.md)参照） |
 
 ## 4. sequence対象外（別設計 or 別トラック）
 
@@ -107,4 +110,4 @@
 ## 7. 追跡方法
 
 - 進捗はcodex-companionのjob status + PR本文 + `.codex-logs/`（gitignore済み）で追跡する
-- tracked `progress.md` への毎回追記を本sequenceの前提にしない。現行CLAUDE.mdの追記運用との整合は docs-sync PR で扱い、それまでは既存運用を維持してよい
+- tracked `progress.md` への毎回追記を本sequenceの前提にしない。現行CLAUDE.mdの追記運用との整合は PR-D4（docs整理）で扱い、それまでは既存運用を維持してよい

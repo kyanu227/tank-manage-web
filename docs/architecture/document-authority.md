@@ -23,11 +23,13 @@
 
 構造化リファクタにおいて、実装上の「親」は上記4の architecture 4文書とする。矛盾を発見した場合は、上位を正としつつ architecture 文書を更新する。
 
+**規範と事実記述の区別**: `AGENTS.md` のうち規範ルール（許可・禁止・手順・優先方針）は常に最上位とする。一方、事実記述（ディレクトリ構成・実装状態の説明）が現行コードと食い違う場合は現行コードを正とし、乖離を §2 に記録して AGENTS.md 更新候補（PR-D4）とする。規範ルール自体の変更はユーザー承認事項。この区別により「AGENTS.mdが上位なのにAGENTS.mdの記述を古いと判定する」矛盾は生じない。
+
 ## 2. 現行コードと矛盾が確認された資料（2026-07-19時点の証拠付き）
 
 | 資料 | 矛盾内容 | 現行の事実 |
 |---|---|---|
-| `AGENTS.md` | ディレクトリ図に `staff/orders` `staff/returns` `staff/maintenance` `staff/bulk-return` を記載 | いずれもroute実在せず。現行は lend / return / fill（OperationsTerminal薄wrapper）+ damage / repair / inspection / inhouse / dashboard / mypage / supply-order / tank-purchase / tank-register |
+| `AGENTS.md` | ディレクトリ図に `staff/orders` `staff/returns` `staff/maintenance` `staff/bulk-return` を記載 | いずれもroute実在せず。現行は lend / return / fill（OperationsTerminal薄wrapper）+ damage / repair / inspection / inhouse / dashboard / mypage / supply-order / tank-purchase / tank-register。`/staff` は `/staff/lend` へ、`/staff/order` は `/staff/supply-order` への互換redirect |
 | `AGENTS.md` | 「`tanks.customerId` の追加は未決事項として扱い、勝手に実装しない」 | 現在貸出projectionとして実装済み（tank-types.ts:9-12、tank-operation.ts経由で書き込み。監査R-28） |
 | `CLAUDE.md` | ディレクトリ構造（orders/returns/bulk-return記載、supply-order・tank-purchase・tank-register・inspection・repair・admin配下の新ページ群が欠落） | 上と同じroute構成。admin側も operation-reviews / security-rules / state-diagram / order-master / staff / customers/users / settings/portal / settings/tank-operations が存在 |
 | `CLAUDE.md` | 顧客ポータル認証に「パスコード」経路を記載。`destinations` を現役コレクションとして記載 | 旧customers.passcode経路はPortal Auth Phase 0で廃止済み（AGENTS.md）。destinationsは廃止済み・コード参照なし |
@@ -45,7 +47,7 @@
 | `docs/architecture/` 4文書 | 構造化リファクタの実装上の親 |
 | `docs/design/strict-vs-assisted-transition-mode.md` | strict/advisory・transitionPlan・review・atomic上限の意味定義（実装済み R-42） |
 | `docs/identity-and-operation-logging-design.md` | OperationContext・typed identity・provenanceの意味定義（R-24実装済み。R-25残差はrefactor-sequenceが管理） |
-| `docs/project-direction.md` / `docs/firestore-data-model-policy.md` / `docs/return-flow-policy.md` / `docs/implementation-roadmap.md` | AGENTS.mdが指定するdirection正本（今回は内容の再分類をしていない） |
+| `docs/project-direction.md` / `docs/firestore-data-model-policy.md` / `docs/return-flow-policy.md` / `docs/implementation-roadmap.md` | AGENTS.mdが指定するdirection正本（今回は内容の再分類をしていない）。implementation-roadmap.mdは業務意味の安定化トラック、refactor-sequence.mdは挙動不変の構造抽出トラックとして**並行**する。同一領域で順序衝突が生じた場合はPR-D4でユーザー判断を仰ぐ |
 | `docs/cutover/transition-plan-v1-runbook.md` | cutover運用の正本（AGENTS.md指定） |
 
 ### historical凍結（削除も移動もしない。冒頭にsuperseded注記を追記する）
@@ -56,7 +58,7 @@
 | `docs/refactor/page-feature-boundary-audit.md` | as-of監査（2026-05-04）。残差はresidual auditへ |
 | `docs/refactor/firestore-write-boundary-audit.md` | as-of監査（2026-05-05）。write ownerはwrite-ownership.mdが正本 |
 | `docs/design/system-code-and-data-structure-audit.md` | as-of監査（2026-05-21）。残差はresidual auditへ |
-| `docs/refactor/staff-operation-service-boundary-design.md` | 対象serviceは実装済み（R-13/R-14）。設計経緯の参考資料 |
+| `docs/refactor/staff-operation-service-boundary-design.md` | write/atomicity部分のみ実装済み（R-14解消。R-13の数量・種別validation移管は未了でPR-07が引き継ぐ）。設計経緯の参考資料 |
 | `docs/design/implementation-layer-architecture.md` | 層構造の旧計画。feature-boundaries.mdが置き換え |
 | `docs/refactor/residual-structure-audit-2026-07-19.md` | **対象commit時点のスナップショット**。PR進行に伴い陳腐化するが更新しない（更新先はarchitecture文書） |
 

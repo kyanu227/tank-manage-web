@@ -22,7 +22,7 @@ Route / Page
 - 全機能に機械的に全レイヤーを強制しない。単純な設定保存は「page → 保存service」の薄い経路で足りる（settings系service群は現状のままでよい）
 - Feature Workflow Service 境界を必須とするのは高リスク操作のみ:
   tank lifecycle書き込み / 複数collection更新 / identity解決を伴う操作 / 監査（訂正・取消）/ atomicityを持つ操作
-- 参照実装は return-tag-processing（R-14 解消済み）: hookは選択・通知のみ、serviceが再取得・変換・operation・transaction完了を担う
+- write側の参照実装は return-tag-processing（R-14 解消済み）: 業務write（再取得・変換・operation・transaction完了）はservice側にある。hookにはtransaction取得・grouping・actor解決が残る（useReturnTagProcessing.ts:35-54,74-79）ため「hookが空」ではなく、write境界の手本として参照する
 
 ## 2. 共通原則
 
@@ -37,12 +37,12 @@ Route / Page
    Feature Workflow Service から `applyTankOperation` / `applyBulkTankOperations` / `applyLogCorrection` / `voidLog` を直接呼ぶ構造が**正規経路**
 5. **共通Component抽出の時期**: 2〜3機能の縦分離が完了し、同一責務・同一props・同一挙動が実証されたUIだけを機械的に抽出する。先回りで共通Componentを設計しない
 
-## 3. Shared Domain Core（featureから共有してよい既存モジュール)
+## 3. Shared Domain Core（featureから共有してよい既存モジュール）
 
 | module | 責務 |
 |---|---|
 | `src/lib/operation-context.ts` | OperationContext型・identity表現 |
-| `src/lib/tank-operation.ts` | tank lifecycle atomic writer（唯一） |
+| `src/lib/tank-operation.ts` | tank lifecycle atomic writer（既存tankの状態遷移の唯一writer。新規tank作成はprocurementの`submitTankEntryBatch`が唯一の例外） |
 | `src/lib/tank-id.ts` | タンクID正規化 |
 | `src/lib/tank-rules.ts` / `tank-action-status-codes.ts` / `tank-action-status-labels.ts` / `tank-action-status-display.ts` | action・status code正本と表示変換 |
 | `src/lib/return-tag-rules.ts` / `return-tag-labels.ts` | 返却タグの純粋変換 |
@@ -54,7 +54,7 @@ Route / Page
 
 ### 4.1 staff-operations（複合feature）
 
-- 入口route: `/staff`（メイン）, `/staff/lend`, `/staff/return`, `/staff/fill` — いずれも薄いwrapper（監査 §3.1で確認済み）
+- 入口route: `/staff/lend`, `/staff/return`, `/staff/fill` — いずれも薄いwrapper（監査 §3.1で確認済み）。`/staff` は `/staff/lend` へのredirect
 - composition層: `src/features/staff-operations/OperationsTerminal.tsx`。sub-feature同士の直接依存は禁止し、束ねはTerminalのみが行う
 
 #### a) manual-operation（手動貸出・返却・充填）
@@ -75,9 +75,10 @@ Route / Page
 - As-Is残差: 顧客・数量・種別validationがhook内（R-13）
 - Target: validationをservice側へ移す。write経路・atomicityは変更しない
 
-#### c) return-tag-processing（返却申請処理）
+#### c) return-tag-processing（返却申請の確定処理）
 
-- R-14解消済み。**変更不要領域**（本設計の参照実装）
+- portal返却申請（transactions）をstaffが確定し、tanks/logs更新とtransaction完了を行う処理。返却申請と返却確定の分離（AGENTS.md）に従い「申請の作成」はportal側、「確定」が本sub-feature
+- R-14解消済み。**変更不要領域**（write境界の参照実装）
 
 #### d) bulk-return-by-location（貸出先別一括返却）
 
@@ -85,7 +86,7 @@ Route / Page
 |---|---|
 | As-Is | hookにread/grouping・local state・tag操作・返却workflowが同居（R-15）。tag一時stateは`tanks.logNote` marker（R-17）。日付poolは`updatedAt`近似（R-28） |
 | Target | ★`queries/bulk-return-candidates.ts`（read・grouping・日付pool）と ★`services/bulk-return-workflow.ts`（tag別action/location・payload構築・operation呼び出し）へ分離。hookはUI stateとtag選択のみ |
-| 制約 | `logNote` markerの意味・保存値・タイミングを変えない（解消はschema変更を伴うため別設計）。returnCondition非送出も現状維持（provenance追加は別PR） |
+| 制約 | `logNote` markerの意味・保存値・タイミングを変えない（解消はschema変更を伴うため別設計）。marker writeの呼び出しはPR-09でworkflow service経由に移す（owner関数は`tank-tag-service`のまま）。returnCondition非送出も現状維持（provenance追加は別PR） |
 
 ### 4.2 maintenance（破損・修理・耐圧 — 3つの独立workflow）
 
@@ -99,14 +100,14 @@ Route / Page
 
 - 入口route: `/staff/inhouse`（現状page内に検証・tag復元/保存・payload・operationが同居 R-20）
 - Target: ★`src/features/inhouse/` を新設し `services/inhouse-use-workflow.ts` / `services/inhouse-return-workflow.ts` を分離
-- tag markerの read/write は `tank-tag-service` 経由を維持。maintenanceへの統合禁止
+- tag markerの read/write は `tank-tag-service` 経由を維持し、呼び出しはPR-05でinhouse-return-workflow経由に移す。maintenanceへの統合禁止
 
 ### 4.4 staff-dashboard（3段階で分離。同一PR禁止）
 
 - 入口route: `/staff/dashboard`（取得・集計・品質報告・訂正・取消・履歴・一括loopが集中 R-21）
 - 第1段: ★`src/features/staff-dashboard/services/log-correction-workflow.ts` — 単一訂正 / 単一取消 / 一括貸出先変更 / 一括取消の4経路をservice化。atomic本体は`tank-operation.ts`の`applyLogCorrection` / `voidLog`のまま
 - 第2段: ★query / read model 分離
-- 第3段: UI分割（AGENTS.mdのClaude UI境界と協調可）
+- 第3段: UI分割（PR-11完了後にpageがthin wrapper化していれば AGENTS.md のClaude UI境界と協調可。そうでなければCodexが実装）
 - `mode=revert`はruntime caller無しの現状を維持。新規caller追加は別設計
 
 ### 4.5 procurement — 変更不要領域
