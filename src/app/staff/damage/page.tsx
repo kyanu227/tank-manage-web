@@ -2,12 +2,11 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Send, CheckCircle2, Loader2, X } from "lucide-react";
-import { ACTION } from "@/lib/tank-rules";
 import { tryParseTankId } from "@/lib/tank-id";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
 import TankIdInput from "@/components/TankIdInput";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
+import { submitDamageReport } from "@/features/maintenance/services/damage-workflow";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
@@ -60,16 +59,11 @@ export default function DamageReportPage() {
     if (!confirm(`${queue.length}本の破損報告を送信しますか？`)) return;
     setSubmitting(true);
     try {
-      const context = { actor: requireStaffIdentity() };
-      await applyBulkTankOperations(
-        queue.map((item) => ({
-          tankId: item.tankId,
-          transitionAction: ACTION.DAMAGE_REPORT,
-          context,
-          location: "倉庫",
-          logNote: note,
-        }))
-      );
+      await submitDamageReport({
+        tankIds: queue.map((item) => item.tankId),
+        note,
+        actor: requireStaffIdentity(),
+      });
       setResult({ success: true, message: `${queue.length}本の破損報告を完了しました` });
       setQueue([]);
       setNote("");
