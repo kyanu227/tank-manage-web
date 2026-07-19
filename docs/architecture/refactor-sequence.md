@@ -31,7 +31,7 @@
 - `npm run test:rules:transition` / `npm run test:transition-policy` / `npm run test:transition-projections`（既存の遷移系回帰スイート）
 - PR固有のテスト（各PRに記載）
 - 抽出系PR（PR-01〜PR-10）は、tank-operation境界をmockした**payload固定テスト（vitest）**を必須とする: operation inputを固定するcharacterization testとして、代表入力に対し抽出前後で `applyTankOperation` / `applyBulkTankOperations` / `applyLogCorrection` / `voidLog` へ渡る引数（action・location・note・OperationContextを含むpayload全体）が完全一致することを固定する。エラーメッセージ・確認文言・処理順序・失敗時挙動はテストまたは手動シナリオ表で固定する
-- 既存UIでの手動シナリオ確認: 対象フローをdev環境で1周し、挙動不変を確認して結果をPR本文へ記載する（実DBへの試験書き込みを伴うため対象・件数は最小にし、必要に応じて訂正・取消フローで戻す）
+- 抽出系PR（PR-01〜PR-10）のみ: 既存UIでの手動シナリオ確認。現行dev環境は本番Firestoreへ接続している（DB分離は将来課題）ため、実施は [full-app-flow-verification-plan.md](../verification/full-app-flow-verification-plan.md) の検証level運用と停止条件に従う — L0（read-only確認）は常時実施し、writeを伴う確認は検証用tank・note等を明記した上で、L2該当操作（tank status / logs / transactions 等）は**ユーザー個別承認の下で**実施する。確認結果と戻し方をPR本文へ記載する。docs-onlyや非抽出PRには適用しない
 - **workflow serviceを直接呼ぶEmulator smokeは必須条件にしない**。現行のWeb SDK初期化（config.ts）は`connectFirestoreEmulator()`を呼ばず（環境変数`FIRESTORE_EMULATOR_HOST`で自動接続するのはAdmin SDKのみ）、`tank-operation.ts`はそのsingleton `db`を直接importするため、`firebase emulators:exec`内でserviceをimport・実行してもEmulator接続は保証されず、環境次第で本番接続となり得る（fail-closedでない）。既存のRulesテスト（`initializeTestEnvironment`の専用instance）・cutoverテスト（明示的なREST emulator client）もworkflow serviceを直接呼ぶ前例ではない。Emulator integration testはPR-D5のharness整備後の独立PRとする
 
 ## 3. PR一覧（実行順）

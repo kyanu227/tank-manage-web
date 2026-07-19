@@ -49,6 +49,7 @@
 | `docs/identity-and-operation-logging-design.md` | OperationContext・typed identity・provenanceの意味定義（R-24実装済み。R-25残差はrefactor-sequenceが管理） |
 | `docs/project-direction.md` / `docs/firestore-data-model-policy.md` / `docs/return-flow-policy.md` / `docs/implementation-roadmap.md` | AGENTS.mdが指定するdirection正本（今回は内容の再分類をしていない）。implementation-roadmap.mdは業務意味の安定化トラック、refactor-sequence.mdは挙動不変の構造抽出トラックとして**並行**する。同一領域で順序衝突が生じた場合はPR-D4でユーザー判断を仰ぐ |
 | `docs/cutover/transition-plan-v1-runbook.md` | cutover運用の正本（AGENTS.md指定） |
+| `docs/verification/full-app-flow-verification-plan.md` | 本番appフロー検証の手順正本（検証level L0〜L3・停止条件。refactor-sequenceの手動シナリオ確認はこれに従う） |
 
 ### historical凍結（削除も移動もしない。冒頭にsuperseded注記を追記する）
 
