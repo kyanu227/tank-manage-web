@@ -74,11 +74,93 @@ Security Rules deploy 後に、主要画面と業務フローが本番 Firebase 
 |---|---|
 | verification customer | 実業務に影響しない customer。既存顧客を使う場合は明示承認が必要 |
 | setup-complete portal account | 検証用 customerUser。実顧客 account は使わない |
-| verification tank | 実運用に使われていない tank。貸出 / 返却 / 充填 / 破損 / 修理 / 耐圧検査の状態変更に使ってよいもの |
-| verification note | `VERIFY-YYYYMMDD` など、後で検索できる marker を使う |
+| verification tank | **`A-99`（専用L2検証タンク、実運用外）。定義は §5.1**。貸出 / 返却 / 充填 / 破損 / 修理 / 耐圧検査の状態変更に使ってよい |
+| verification note | `VERIFY-PR<NN>-<YYYYMMDD>`（抽出系PR）/ `VERIFY-<PURPOSE>-<YYYYMMDD>`（その他）。後で検索できる marker を使う。運用は §5.2 |
 | rollback expectation | 通常フローで戻せるのか、履歴が残るだけで戻せないのかを事前に書く |
 
 Firestore Console / script で検証用 data を直接作成・更新・削除しない。必要な data はアプリ通常フローで作る。
+
+---
+
+### 5.1 専用L2検証タンク（確定: `A-99`）
+
+更新: 2026-07-22。従来この plan は「verification tank = 実運用に使われていない tank」と概念定義するのみで具体的 tank ID が未指定だった。そのため抽出系PR（PR-01〜PR-10）の L2 手動確認が停止条件（§4「検証用 tank が決まっていない write 操作」）に該当し、PR-01（#143）でも L2 は未実施のまま merge された。本節でこれを解消し、専用 L2 検証 tank を 1 本確定する。
+
+| item | value |
+|---|---|
+| tank ID | `A-99`（入力 `A99` / `A-99` は helper で canonical `A-99` に正規化される） |
+| 初期 status | `空`（`empty`） |
+| location | `倉庫` |
+| 種別（type） | 任意（例: `アルミ`）。検証用のため業務的意味は持たせない |
+| memo（tank.note） | `L2検証専用タンク（実運用外）` を推奨。data 上で test tank と判別できるようにする |
+| 位置づけ | 実物のない construct-isolated な検証専用 tank。実運用の貸出 rotation には入れない |
+| 現況 | **作成済み（2026-07-22）**。`/staff/tank-register` 経由で作成。`/staff/dashboard` で `status=空` / `location=倉庫` / `action=タンク登録`（logKind=procurement）を確認済み |
+
+なぜ `空/倉庫` 開始か:
+
+- `破損報告`（`ACTION.DAMAGE_REPORT`）の許容元 status は `空 / 充填済み / 自社利用中`、遷移先は `破損`、location は `倉庫` に設定される。
+- `修理済み`（`ACTION.REPAIRED`）の許容元は `破損 / 不良`、遷移先は `空`、location は `倉庫` に設定される。
+- したがって `空/倉庫` から開始すると、破損→修理は `空/倉庫 → 破損/倉庫 → 空/倉庫` の完全往復になり、**net の状態変化はゼロ・追加されるのは logs 2 本のみ**。delete / void なしで自然復元できる（§5.2 の rollback）。
+
+#### 作成手順（一度きりの L3 write。ユーザー個別承認済み）
+
+Firestore Console / script による直接 create は禁止（§4）。必ずアプリ通常フローで作成する。
+
+1. 経路: `/staff/tank-register`（`TankEntryScreen` mode=`register`）。staff ログイン必須（`requireStaffIdentity()`）。
+2. 入力:
+   - タンクID: `A99`（`追加` で `A-99` に正規化される）
+   - タンク種別: 任意（例: `アルミ`）
+   - 初期ステータス: `空`
+   - 保管場所: `倉庫`
+   - 次回耐圧期限: 空欄
+   - メモ: `L2検証専用タンク（実運用外）`
+3. `1本を登録` → 確認ダイアログ `1本を登録しますか？` → 実行。
+4. 期待 write（1 transaction, atomic）:
+   - `tanks/A-99` create: `{ status: empty, location: 倉庫, type, note, createdAt, updatedAt }`
+   - `tankProcurements/*` create: `{ kind: "register", tankIds: ["A-99"], initialStatus: empty, unitCost: 0, totalCost: 0, ... }`（register mode は unitCost=0 固定 → **費用計上なし**）
+   - `logs/*` create: `{ action: "タンク登録", newStatus: empty, logKind: "procurement", logStatus: "active", ... }`
+5. 既存 `A-99` があると register transaction は `A-99 は既に登録されています` で throw する（上書き事故は起きない）。
+6. 期待表示: `1本を登録しました`。
+
+#### 非干渉の根拠（本番 Firestore 直結環境での安全性）
+
+現行 dev は本番 Firestore に直結する（`config.ts` に Emulator 切替なし。`FIRESTORE_EMULATOR_HOST` で自動接続するのは Admin SDK のみで、Web SDK singleton `db` は本番へ向く）。その前提で `A-99` が他フローと干渉しない理由:
+
+- **ID衝突なし**: `A-99` は実物のない専用 ID。register の存在チェックと form の `tankMap` チェックにより、既存 tank を上書きしない。
+- **貸出 rotation 非参加**: `A-99` は実物がないため現場 scan されず、実顧客へ貸し出されない。触るのは検証実行者のみ。
+- **請求非対象**: register は `unitCost=0`（費用計上なし）。請求は customerId 単位の貸出で数えるため、実顧客へ貸さない `A-99` は請求・売上集計に入らない。破損/修理は請求に影響しない。
+- **集計フットプリント（唯一の常設コスト）**: `A-99` は tank 総数 +1 として dashboard / 一覧に出る。検証実行中のみ一時的に `修理待ち`（破損）に現れる。緩和策: memo で test tank と明示 / 破損→修理を連続実行して `破損` の窓を最小化 / 検証間は `空/倉庫` の idle 状態で待機（実運用の予備 tank と区別がつかない良性状態）。
+- **原子性・追記型**: 全操作は通常 app-flow 遷移（`applyBulkTankOperations` / `applyTankOperation` 経由、transaction・追記型ログ）。partial update は §4 で即停止。
+- **恒久廃止時**: `A-99` を将来完全に廃止する場合も、delete ではなく通常フローの `破棄`（`ACTION.DISPOSE`）で行い、履歴を残す。
+
+---
+
+### 5.2 標準L2手順: 破損 → 修理 ラウンドトリップ
+
+抽出系PR（PR-01 damage-workflow / PR-02 repair-workflow 等）の L2 手動シナリオ確認は、この固定手順で行う。対象 tank は §5.1 の `A-99`。marker は当該 PR に応じて `VERIFY-PR<NN>-<YYYYMMDD>`（例: PR-02 を 2026-07-22 に確認 → `VERIFY-PR02-20260722`）。
+
+前提: 本手順は L2（tank status / logs への write）。§2 の停止条件に該当がないこと、ユーザー個別承認があること、記録者・記録先PRが決まっていることを確認してから開始する。
+
+| # | step | 操作 | 期待結果 / 期待 write |
+|---:|---|---|---|
+| 0 | 事前 read 記録 | `/staff/dashboard` 等で `A-99` の現在 status / location を読み、記録する | 期待: `空 / 倉庫`。異なる場合は通常フローで `空/倉庫` に戻すか、原因を記録して停止（§4） |
+| 1 | 破損報告 | `/staff/damage` で `A-99` を queue 追加 → note に marker（例 `VERIFY-PR02-20260722`）を入力 → `1件の破損報告` → 確認 `1本の破損報告を送信しますか？` → 送信 | `tanks/A-99`: `status → 破損`, `location → 倉庫`。`logs` に active log（`action=破損報告`, `logNote=marker`, prev/next snapshot）。表示 `1本の破損報告を完了しました` |
+| 2 | 期待結果確認 | `/staff/repair` の `修理待ち` と `/staff/dashboard` の最近ログを確認 | `A-99` が `破損` として `修理待ち` に出る。dashboard の最近ログに `破損報告` + marker が active で見える |
+| 3 | 修理完了 | `/staff/repair` で `A-99` を選択 → `修理完了（1本）` → 確認 `修理完了：1本を処理しますか？` → 処理 | `tanks/A-99`: `status → 空`, `location → 倉庫`。`logs` に active log（`action=修理済み`）。表示 `1本の修理完了を処理しました` |
+| 4 | 復元確認 | `/staff/repair` と `/staff/dashboard` を再確認 | `A-99` が `空/倉庫` に復元。`修理待ち` から消える。marker で `破損報告 → 修理済み` の 2 ログチェーンを追跡できる |
+
+rollback / cleanup:
+
+- **不要**。往復で `A-99` は `空/倉庫` に自然復元される（追加されるのは検証履歴ログのみ）。
+- delete / void / Firestore 直接編集は行わない。破損報告・修理済みログは本番アプリ通常フローの検証履歴として残す。
+
+記録:
+
+- 結果は §9 Result Recording Template に沿って、当該 PR 本文（または `docs/verification/<pr>-l2-result.md`）へ記載する。`検証用 tank = A-99`、`marker = VERIFY-PR<NN>-<YYYYMMDD>`、事前 read 値、各 step の actual / result を残す。
+
+他 L2 フローへの拡張:
+
+- 充填・貸出・返却・自社利用・耐圧検査など他の抽出系 PR も、同じ `A-99` を使い「事前 read → 対象 action → 期待遷移確認 → 通常フローで `空/倉庫` へ戻す → 履歴確認」の型で行う。貸出系は §5 の verification customer / portal account の決定も併せて必要（`A-99` を実顧客へ貸さない運用を守る）。
 
 ---
 
