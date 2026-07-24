@@ -2,12 +2,11 @@
 
 import { useState, useMemo } from "react";
 import { Wrench, CheckCircle2, Send, Loader2, Sparkles, AlertTriangle } from "lucide-react";
-import { ACTION } from "@/lib/tank-rules";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { getLegacyTankStatusLabel } from "@/lib/tank-action-status-labels";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
+import { submitRepairCompletion } from "@/features/maintenance/services/repair-workflow";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
@@ -69,16 +68,14 @@ export default function RepairPage() {
     if (!confirm(`修理完了：${selected.length}本を処理しますか？`)) return;
     setSubmitting(true);
     try {
-      const context = { actor: requireStaffIdentity() };
-      await applyBulkTankOperations(
-        selected.map((t) => ({
+      const actor = requireStaffIdentity();
+      await submitRepairCompletion({
+        tanks: selected.map((t) => ({
           tankId: t.id,
-          transitionAction: ACTION.REPAIRED,
           currentStatus: t.status,
-          context,
-          location: "倉庫",
-        }))
-      );
+        })),
+        actor,
+      });
       setResult({ success: true, message: `${selected.length}本の修理完了を処理しました` });
       setSelectedIds(new Set());
       refetch();
