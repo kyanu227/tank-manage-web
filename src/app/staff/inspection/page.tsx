@@ -2,11 +2,10 @@
 
 import { useState, useMemo } from "react";
 import { ShieldCheck, CheckCircle2, Send, Loader2, Sparkles, AlertTriangle } from "lucide-react";
-import { ACTION } from "@/lib/tank-rules";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
+import { submitInspectionCompletion } from "@/features/maintenance/services/inspection-workflow";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import { useInspectionSettings } from "@/hooks/useInspectionSettings";
@@ -34,14 +33,6 @@ function toDate(v: unknown): Date | null {
     return isNaN(d.getTime()) ? null : d;
   }
   return null;
-}
-
-/** Date を "YYYY/MM/DD" 形式に整形（Firestore 保存用） */
-function formatDateYMD(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, "0");
-  const day = String(d.getDate()).padStart(2, "0");
-  return `${y}/${m}/${day}`;
 }
 
 /**
@@ -109,26 +100,19 @@ export default function InspectionPage() {
     if (!confirm(`耐圧検査完了：${selected.length}本を処理しますか？\n次回期限は ${settings.validityYears}年後 に更新されます。`)) return;
     setSubmitting(true);
     try {
-      const context = { actor: requireStaffIdentity() };
-      // 次回期限 = 今日 + validityYears年。旧GAS互換で "YYYY/MM/DD" 文字列として保存
-      const next = new Date();
-      next.setFullYear(next.getFullYear() + settings.validityYears);
-      const todayStr = formatDateYMD(new Date());
-      const nextStr = formatDateYMD(next);
-
-      await applyBulkTankOperations(
-        selected.map((t) => ({
+      const actor = requireStaffIdentity();
+      const nextInspectionDateBase = new Date();
+      const inspectionDate = new Date();
+      await submitInspectionCompletion({
+        tanks: selected.map((t) => ({
           tankId: t.id,
-          transitionAction: ACTION.INSPECTION,
           currentStatus: t.status,
-          context,
-          location: "倉庫",
-          tankExtra: {
-            maintenanceDate: todayStr,
-            nextMaintenanceDate: nextStr,
-          },
-        }))
-      );
+        })),
+        validityYears: settings.validityYears,
+        nextInspectionDateBase,
+        inspectionDate,
+        actor,
+      });
       setResult({ success: true, message: `${selected.length}本の耐圧検査完了を処理しました` });
       setSelectedIds(new Set());
       refetch();
