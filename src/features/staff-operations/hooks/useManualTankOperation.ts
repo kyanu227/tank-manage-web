@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
-import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { useTankOperationPolicy } from "@/hooks/useTankOperationPolicy";
 import type { Locale } from "@/lib/locale";
 import {
@@ -12,21 +11,17 @@ import {
   getManualReturnSuccessMessage,
 } from "@/lib/operation-messages";
 import { tryParseTankId } from "@/lib/tank-id";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
-import type { CustomerSnapshot, OperationContext } from "@/lib/operation-context";
+import type { CustomerSnapshot } from "@/lib/operation-context";
 import { planTankTransition } from "@/lib/tank-transition-policy";
-import {
-  returnTagToReturnCondition,
-  returnTagToStoredLogNote,
-} from "@/lib/return-tag-rules";
 import {
   RETURN_TAG,
   type ReturnTag,
   resolveReturnActionCode,
   validateTransitionCode,
 } from "@/lib/tank-rules";
+import { submitManualTankOperation } from "../services/manual-operation-workflow";
 import type { ModeConfigItem, OpMode, QueueItem, TagType, TankMap } from "../types";
 
 interface UseManualTankOperationParams {
@@ -282,61 +277,12 @@ export function useManualTankOperation({
 
     setSubmitting(true);
     try {
-      const actor = requireStaffIdentity();
-      const baseContext: OperationContext = {
-        actor,
-        source: "manual",
-        workflow: "tank_operation",
-        ...(mode === "lend" && effectiveCustomer
-          ? { customer: effectiveCustomer }
-          : {}),
-      };
-
-      await applyBulkTankOperations(
-        validItems.map((item) => {
-          const tag = (item.tag || RETURN_TAG.NORMAL) as ReturnTag;
-          const statusCode = coerceTankStatusCode(item.status ?? "");
-          if (!statusCode) {
-            throw new Error(`[${item.tankId}] タンク状態が不正です`);
-          }
-          const resolvedAction = mode === "return"
-            ? resolveReturnActionCode(tag, statusCode)
-            : mode;
-
-          const currentTank = allTanks[item.tankId];
-          let finalLocation = "倉庫";
-          let finalTankNote = "";
-          let finalLogNote = "";
-
-          if (mode === "lend") {
-            finalLocation = effectiveCustomer?.customerName ?? "";
-          } else if (mode === "return") {
-            if (tag === RETURN_TAG.KEEP) {
-              finalLocation = currentTank?.location || "不明";
-              finalLogNote = "持ち越し";
-            } else {
-              const storedLogNote = returnTagToStoredLogNote(tag);
-              finalTankNote = storedLogNote;
-              finalLogNote = storedLogNote;
-            }
-          }
-
-          return {
-            tankId: item.tankId,
-            transitionAction: resolvedAction,
-            currentStatus: item.status || "",
-            context: mode === "return"
-              ? {
-                  ...baseContext,
-                  returnCondition: returnTagToReturnCondition(tag),
-                }
-              : baseContext,
-            location: finalLocation,
-            tankNote: finalTankNote,
-            logNote: finalLogNote,
-          };
-        })
-      );
+      await submitManualTankOperation({
+        mode,
+        items: validItems,
+        customer: effectiveCustomer,
+        tanks: allTanks,
+      });
 
       const successMessage = mode === "return"
         ? getManualReturnSuccessMessage(locale, {
