@@ -65,6 +65,17 @@
 | **PR-11** dashboard query / read model分離 | 取得・集計を `features/staff-dashboard/queries/` へ | 開始条件: PR-10マージ + **個別設計note**（新設ファイル名・query条件・limit・sort・集計出力・履歴取得の範囲を本docの改訂として確定してから発注）。集計値の一致確認 |
 | **PR-12** dashboard UI再編 | 表示構造の整理 | 開始条件: PR-11完了後、pageがthin wrapper化しているかを確認して個別設計。thin wrapperでない場合はClaude UI-only条件（AGENTS.md）を適用せずCodexが実装 |
 
+#### PR-11 個別設計gate（2026-07-27）
+
+- **前提・開始条件**: PR-10はmerge済み。PR-11実装は、個別設計正本 [staff-dashboard-read-model-design.md](../design/staff-dashboard-read-model-design.md) を追加する本docs-only PRのmerge後に開始する
+- **想定変更5件**: 新設 `src/features/staff-dashboard/queries/dashboard-query.ts` / `dashboard-query.test.ts` / `dashboard-read-model.ts` / `dashboard-read-model.test.ts`、更新 `src/app/staff/dashboard/page.tsx`。追加のtypes、hook、component、repositoryは新設しない
+- **initial logs**: `logsRepository.getActiveLogs({ orderBy: null })`を使用する。`logStatus == "active"`以外のfilter、Firestore orderBy、limitは追加せず、repository返却順の先頭200件をclient sort前に採用する
+- **customers / uncharged reports**: `listActiveCustomerSnapshots()`の返却順を維持する。`getUnchargedReports()`はtype以外のfilter、Firestore orderBy、limitを追加せず、現行のcreatedAt comparator（finite/nullish keyだけなら降順、`NaN`混在時は全体順を保証しない）で最大10件を保持し、表示は5件とする
+- **tanks / read model**: tanksは`useTanks()`を維持する。read modelはtotal tank数、status別件数、貸出先別件数、今日の操作total/breakdown、最近の未充填報告を出力し、log表示sortを純粋関数へ分離する
+- **today / timestamp**: today境界は注入した`nowMillis`のbrowser runtime local dayとする。数値`0`とraw `NaN`は`null`、Invalid Date・`±Infinity`・無効な`toDate()`／`toMillis()`は`NaN`になり得る現行挙動をcharacterizationとして維持し、日付正規化は別設計・別PRとする
+- **root history**: `getLogsByRoot(rootLogId)`でroot chain全件を取得し、logStatus/logKind filter、Firestore orderBy、limit、paginationを追加せず、client側でrevision昇順（欠損=`0`）にする
+- **変更しない境界**: repository API、Firestore query/index、schema、write workflowは変更しない。UI/JSX/CSS/component再編はPR-12へ分離し、PR-11完了後にpageのthin-wrapper化を確認して個別設計する
+
 ### Phase D — 収穫（gate条件を満たせば順不同。D番号は識別子であり実行順ではない）
 
 | PR | 対象 | gate条件 |
