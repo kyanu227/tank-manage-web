@@ -20,21 +20,22 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { logsRepository, transactionsRepository } from "@/lib/firebase/repositories";
 import type { TransactionDoc } from "@/lib/firebase/repositories/types";
 import PrefixNumberPicker from "@/components/PrefixNumberPicker";
 import { requireStaffIdentity, useStaffLocale, useStaffSession } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
-import {
-  buildCustomerIdentityGroup,
-  normalizeCustomerIdentityText,
-} from "@/lib/customer-identity-read";
-import type {
-  StaffCorrectionRole,
-  TankSnapshot,
-} from "@/lib/tank-operation";
+import type { StaffCorrectionRole } from "@/lib/tank-operation";
 import type { CustomerSnapshot } from "@/lib/operation-context";
-import { listActiveCustomerSnapshots } from "@/lib/firebase/customers-service";
+import {
+  fetchStaffDashboardLogHistory,
+  fetchStaffDashboardSourceData,
+} from "@/features/staff-dashboard/queries/dashboard-query";
+import {
+  buildStaffDashboardReadModel,
+  sortStaffDashboardLogs,
+  type DashboardLogEntry,
+  type DashboardLogSortOrder,
+} from "@/features/staff-dashboard/queries/dashboard-read-model";
 import {
   correctDashboardLogLocations,
   correctDashboardLogTankId,
@@ -52,50 +53,6 @@ import { getDashboardActionBadgeTone } from "@/lib/tank-action-status-display";
 import { getLegacyTankActionLabel, getLegacyTankStatusLabel } from "@/lib/tank-action-status-labels";
 import type { Locale } from "@/lib/locale";
 
-type LogSortOrder = "desc" | "asc";
-
-interface TankSummary {
-  [status: string]: number;
-}
-
-type DateValue = Date | number | string | { toDate: () => Date } | { toMillis: () => number } | null;
-type LogStatus = "active" | "superseded" | "voided";
-
-interface LogEntry {
-  id: string;
-  tankId: string;
-  action: string;
-  transitionAction?: string;
-  staffId?: string;
-  staffName?: string;
-  staffEmail?: string;
-  customerId?: string;
-  customerName?: string;
-  location?: string;
-  timestamp?: DateValue;
-  originalAt?: DateValue;
-  revisionCreatedAt?: DateValue;
-  note?: string;
-  logNote?: string;
-  logStatus?: LogStatus;
-  logKind?: string;
-  transitionPlan?: { kind?: "direct" | "recovery" };
-  transitionReviewStatus?: "not_required" | "pending" | "approved" | "excluded";
-  rootLogId?: string;
-  revision?: number;
-  editedByStaffId?: string;
-  editedByStaffName?: string;
-  editedByStaffEmail?: string;
-  editReason?: string;
-  voidedByStaffId?: string;
-  voidedByStaffName?: string;
-  voidedByStaffEmail?: string;
-  voidReason?: string;
-  voidedAt?: DateValue;
-  prevTankSnapshot?: TankSnapshot;
-  nextTankSnapshot?: TankSnapshot;
-}
-
 interface EditForm {
   tankId: string | null;
   reason: string;
@@ -107,16 +64,6 @@ type BulkLocationOption = {
   customer: CustomerSnapshot | null;
 };
 type BulkLocationMode = "lend" | "inhouse" | null;
-
-type CustomerIdentitySummary = {
-  key: string;
-  customerId?: string;
-  displayName: string;
-  lent: number;
-  unreturned: number;
-  total: number;
-  isLegacy: boolean;
-};
 
 const LIMIT_MS = 72 * 60 * 60 * 1000;
 const IN_HOUSE_LOCATION_VALUE = "__inhouse__";
@@ -131,19 +78,19 @@ export default function StaffDashboard() {
   const { tanks, loading: tanksLoading, refetch: refetchTanks } = useTanks();
   const tankIds = useMemo(() => tanks.map((t) => t.id), [tanks]);
 
-  const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [logs, setLogs] = useState<DashboardLogEntry[]>([]);
   const [unfilledReports, setUnfilledReports] = useState<TransactionDoc[]>([]);
   const [customerOptions, setCustomerOptions] = useState<CustomerSnapshot[]>([]);
-  const [logSortOrder, setLogSortOrder] = useState<LogSortOrder>("desc");
+  const [logSortOrder, setLogSortOrder] = useState<DashboardLogSortOrder>("desc");
   const [dashboardLoading, setDashboardLoading] = useState(true);
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
 
-  const [editingLog, setEditingLog] = useState<LogEntry | null>(null);
+  const [editingLog, setEditingLog] = useState<DashboardLogEntry | null>(null);
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [savingEdit, setSavingEdit] = useState(false);
 
-  const [voidingLog, setVoidingLog] = useState<LogEntry | null>(null);
+  const [voidingLog, setVoidingLog] = useState<DashboardLogEntry | null>(null);
   const [voidReason, setVoidReason] = useState("");
   const [savingVoid, setSavingVoid] = useState(false);
 
@@ -157,31 +104,16 @@ export default function StaffDashboard() {
   const [savingBulkVoid, setSavingBulkVoid] = useState(false);
 
   const [expandedRootId, setExpandedRootId] = useState<string | null>(null);
-  const [historyByRoot, setHistoryByRoot] = useState<Record<string, LogEntry[]>>({});
+  const [historyByRoot, setHistoryByRoot] = useState<Record<string, DashboardLogEntry[]>>({});
   const [historyLoadingRoot, setHistoryLoadingRoot] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setDashboardLoading(true);
     try {
-      const [logs, customers, unfilledReports] = await Promise.all([
-        // orderBy: null は Firestore 側で timestamp desc を付けない指定。
-        // dashboard はクライアントで originalAt ?? timestamp で再ソートするため、
-        // timestamp フィールドを持たない revision ログ等の取りこぼしを防ぐ。
-        logsRepository.getActiveLogs({ orderBy: null }),
-        listActiveCustomerSnapshots(),
-        // 顧客未充填報告は品質報告として read-only 表示する。tank/logs の状態はここでは動かさない。
-        transactionsRepository.getUnchargedReports(),
-      ]);
-
-      // 取得時点の素のログを保持し、表示時に sort order に従って並べ替える。
-      const entries = logs as unknown as LogEntry[];
-      setLogs(entries.slice(0, 200));
-      const sortedReports = [...unfilledReports].sort(
-        (a, b) => (timestampToMillis(b.createdAt) ?? 0) - (timestampToMillis(a.createdAt) ?? 0)
-      );
-      setUnfilledReports(sortedReports.slice(0, 10));
-
-      setCustomerOptions(customers);
+      const source = await fetchStaffDashboardSourceData();
+      setLogs(source.logs);
+      setUnfilledReports(source.unfilledReports);
+      setCustomerOptions(source.customerOptions);
     } catch (e) {
       console.error(e);
     } finally {
@@ -197,93 +129,40 @@ export default function StaffDashboard() {
     setSelectedLogIds((prev) => prev.filter((id) => logs.some((log) => log.id === id)));
   }, [logs]);
 
-  const summary = useMemo<TankSummary>(() => {
-    const counts: TankSummary = {};
-    tanks.forEach((tank) => {
-      const status = coerceTankStatusCode(tank.status) ?? tank.status ?? "不明";
-      counts[status] = (counts[status] || 0) + 1;
-    });
-    return counts;
-  }, [tanks]);
+  const todayInputs = useMemo(
+    () => ({
+      logs,
+      staffLocale,
+      nowMillis: new Date().getTime(),
+    }),
+    [logs, staffLocale],
+  );
 
-  const totalTanks = tanks.length;
+  const dashboardReadModel = useMemo(
+    () =>
+      buildStaffDashboardReadModel({
+        tanks,
+        logs: todayInputs.logs,
+        customerOptions,
+        unfilledReports,
+        staffLocale: todayInputs.staffLocale,
+        nowMillis: todayInputs.nowMillis,
+      }),
+    [tanks, customerOptions, unfilledReports, todayInputs],
+  );
 
-  const customerNameById = useMemo(() => {
-    const map = new Map<string, string>();
-    customerOptions.forEach((customer) => {
-      map.set(customer.customerId, customer.customerName);
-    });
-    return map;
-  }, [customerOptions]);
+  const {
+    totalTanks,
+    tankSummary: summary,
+    byLocation,
+    todayStats,
+    recentUnfilledReports,
+  } = dashboardReadModel;
 
-  const sortedLogs = useMemo(() => {
-    const copy = [...logs];
-    copy.sort((a, b) => {
-      const aTime = timestampToMillis(a.originalAt ?? a.timestamp) ?? 0;
-      const bTime = timestampToMillis(b.originalAt ?? b.timestamp) ?? 0;
-      return logSortOrder === "desc" ? bTime - aTime : aTime - bTime;
-    });
-    return copy;
-  }, [logs, logSortOrder]);
-
-  const byLocation = useMemo(() => {
-    const map = new Map<string, CustomerIdentitySummary>();
-    tanks.forEach((tank) => {
-      const statusCode = coerceTankStatusCode(tank.status);
-      if (statusCode !== "lent" && statusCode !== "unreturned") return;
-
-      const customerId = normalizeCustomerIdentityText(tank.customerId);
-      const identity = buildCustomerIdentityGroup(
-        {
-          customerId: tank.customerId,
-          customerName: tank.customerName,
-          location: tank.location,
-        },
-        {
-          currentCustomerName: customerId ? customerNameById.get(customerId) : undefined,
-          legacyUnknownLabel: "未設定",
-        },
-      );
-      const current = map.get(identity.key) ?? {
-        key: identity.key,
-        customerId: identity.customerId,
-        displayName: identity.displayName,
-        lent: 0,
-        unreturned: 0,
-        total: 0,
-        isLegacy: identity.isLegacy,
-      };
-      if (statusCode === "lent") current.lent += 1;
-      else current.unreturned += 1;
-      current.total = current.lent + current.unreturned;
-      map.set(identity.key, current);
-    });
-
-    return Array.from(map.values())
-      .sort((a, b) => b.total - a.total || a.displayName.localeCompare(b.displayName));
-  }, [customerNameById, tanks]);
-
-  const todayStats = useMemo(() => {
-    const now = new Date();
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const byAction: Record<string, number> = {};
-    let total = 0;
-
-    logs.forEach((log) => {
-      const ms = timestampToMillis(log.originalAt ?? log.timestamp);
-      if (ms == null || ms < startOfDay) return;
-      total += 1;
-      const key = formatActionLabel(log.action, staffLocale);
-      byAction[key] = (byAction[key] || 0) + 1;
-    });
-
-    const breakdown = Object.entries(byAction)
-      .map(([action, count]) => ({ action, count }))
-      .sort((a, b) => b.count - a.count || a.action.localeCompare(b.action));
-    return { total, breakdown };
-  }, [logs, staffLocale]);
-
-  const recentUnfilledReports = useMemo(() => unfilledReports.slice(0, 5), [unfilledReports]);
+  const sortedLogs = useMemo(
+    () => sortStaffDashboardLogs(logs, logSortOrder),
+    [logs, logSortOrder],
+  );
 
   const loading = dashboardLoading || tanksLoading;
 
@@ -332,7 +211,7 @@ export default function StaffDashboard() {
     return [];
   }, [bulkLocationMode, customerOptions]);
 
-  const openEdit = (log: LogEntry) => {
+  const openEdit = (log: DashboardLogEntry) => {
     if (canCorrectLogReason(log, correctionRole)) return;
     setEditingLog(log);
     setEditForm({
@@ -488,7 +367,7 @@ export default function StaffDashboard() {
     }
   };
 
-  const toggleHistory = async (log: LogEntry) => {
+  const toggleHistory = async (log: DashboardLogEntry) => {
     const rootId = log.rootLogId ?? log.id;
     if (expandedRootId === rootId) {
       setExpandedRootId(null);
@@ -499,8 +378,7 @@ export default function StaffDashboard() {
 
     setHistoryLoadingRoot(rootId);
     try {
-      const entries = (await logsRepository.getLogsByRoot(rootId)) as unknown as LogEntry[];
-      entries.sort((a, b) => (a.revision ?? 0) - (b.revision ?? 0));
+      const entries = await fetchStaffDashboardLogHistory(rootId);
       setHistoryByRoot((prev) => ({ ...prev, [rootId]: entries }));
     } catch (e: unknown) {
       alert("履歴取得エラー: " + errorMessage(e));
@@ -1456,11 +1334,11 @@ function tankStatusColor(status: string): string {
   return STATUS_COLORS[legacyStatus] || "#cbd5e1";
 }
 
-function canModifyLog(log: LogEntry, role: StaffCorrectionRole): boolean {
+function canModifyLog(log: DashboardLogEntry, role: StaffCorrectionRole): boolean {
   return canModifyLogReason(log, role) == null;
 }
 
-function canCorrectLogReason(log: LogEntry, role: StaffCorrectionRole): string | null {
+function canCorrectLogReason(log: DashboardLogEntry, role: StaffCorrectionRole): string | null {
   const baseReason = canModifyLogReason(log, role);
   if (baseReason) return baseReason;
   if (!log.transitionPlan?.kind) {
@@ -1475,7 +1353,7 @@ function canCorrectLogReason(log: LogEntry, role: StaffCorrectionRole): string |
   return null;
 }
 
-function canModifyLogReason(log: LogEntry, role: StaffCorrectionRole): string | null {
+function canModifyLogReason(log: DashboardLogEntry, role: StaffCorrectionRole): string | null {
   if (log.logKind !== "tank") return "タンク操作ログではありません";
   if (log.logStatus && log.logStatus !== "active") return "有効なログではありません";
   if (role === "管理者" || role === "準管理者") return null;
@@ -1487,7 +1365,7 @@ function canModifyLogReason(log: LogEntry, role: StaffCorrectionRole): string | 
 
 function getEditDisabledReason(
   editForm: EditForm | null,
-  editingLog: LogEntry | null,
+  editingLog: DashboardLogEntry | null,
   savingEdit: boolean
 ): string | null {
   if (savingEdit) return "保存中です";
@@ -1563,14 +1441,14 @@ function formatReportStatus(status?: string): string {
   return status;
 }
 
-function statusLabel(status?: LogStatus): string {
+function statusLabel(status?: DashboardLogEntry["logStatus"]): string {
   if (status === "active") return "有効";
   if (status === "superseded") return "置換済";
   if (status === "voided") return "取消済";
   return "不明";
 }
 
-function statusColor(status?: LogStatus): string {
+function statusColor(status?: DashboardLogEntry["logStatus"]): string {
   if (status === "active") return "#16a34a";
   if (status === "superseded") return "#64748b";
   if (status === "voided") return "#dc2626";
