@@ -29,15 +29,18 @@ import {
   buildCustomerIdentityGroup,
   normalizeCustomerIdentityText,
 } from "@/lib/customer-identity-read";
-import {
-  applyLogCorrection,
-  voidLog,
-  type LogCorrectionPatch,
-  type StaffCorrectionRole,
-  type TankSnapshot,
+import type {
+  StaffCorrectionRole,
+  TankSnapshot,
 } from "@/lib/tank-operation";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import { listActiveCustomerSnapshots } from "@/lib/firebase/customers-service";
+import {
+  correctDashboardLogLocations,
+  correctDashboardLogTankId,
+  voidDashboardLog,
+  voidDashboardLogs,
+} from "@/features/staff-dashboard/services/log-correction-workflow";
 import { STATUS_COLORS } from "@/lib/tank-rules";
 import {
   coerceTankActionCode,
@@ -344,16 +347,12 @@ export default function StaffDashboard() {
 
     setSavingEdit(true);
     try {
-      const patch: LogCorrectionPatch = {
-        tankId: editForm.tankId,
-      };
-      await applyLogCorrection({
+      await correctDashboardLogTankId({
         targetLogId: editingLog.id,
-        mode: "replace",
-        patch,
+        tankId: editForm.tankId,
         reason: editForm.reason,
-        editor: requireStaffIdentity(),
         editedByRole: correctionRole,
+        resolveActor: requireStaffIdentity,
       });
       setEditingLog(null);
       setEditForm(null);
@@ -372,11 +371,11 @@ export default function StaffDashboard() {
 
     setSavingVoid(true);
     try {
-      await voidLog({
+      await voidDashboardLog({
         logId: voidingLog.id,
-        voider: requireStaffIdentity(),
-        voidedByRole: correctionRole,
         reason: voidReason,
+        voidedByRole: correctionRole,
+        resolveActor: requireStaffIdentity,
       });
       setVoidingLog(null);
       setVoidReason("");
@@ -435,21 +434,14 @@ export default function StaffDashboard() {
         alert("貸出先が選択されていません");
         return;
       }
-      const failures: string[] = [];
-      for (const log of selectedLogs) {
-        try {
-          await applyLogCorrection({
-            targetLogId: log.id,
-            mode: "replace",
-            patch: { location: selectedOption.location, customer: selectedOption.customer },
-            reason: bulkLocationReason,
-            editor: requireStaffIdentity(),
-            editedByRole: correctionRole,
-          });
-        } catch (e: unknown) {
-          failures.push(`${log.tankId}: ${errorMessage(e)}`);
-        }
-      }
+      const failures = await correctDashboardLogLocations({
+        logs: selectedLogs,
+        location: selectedOption.location,
+        customer: selectedOption.customer,
+        reason: bulkLocationReason,
+        editedByRole: correctionRole,
+        resolveActor: requireStaffIdentity,
+      });
 
       setBulkLocationModalOpen(false);
       setSelectedLogIds([]);
@@ -472,19 +464,12 @@ export default function StaffDashboard() {
 
     setSavingBulkVoid(true);
     try {
-      const failures: string[] = [];
-      for (const log of selectedLogs) {
-        try {
-          await voidLog({
-            logId: log.id,
-            voider: requireStaffIdentity(),
-            voidedByRole: correctionRole,
-            reason: bulkVoidReason,
-          });
-        } catch (e: unknown) {
-          failures.push(`${log.tankId}: ${errorMessage(e)}`);
-        }
-      }
+      const failures = await voidDashboardLogs({
+        logs: selectedLogs,
+        reason: bulkVoidReason,
+        voidedByRole: correctionRole,
+        resolveActor: requireStaffIdentity,
+      });
 
       setBulkVoidModalOpen(false);
       setBulkVoidReason("");
