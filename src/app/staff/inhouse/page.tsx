@@ -2,14 +2,16 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-import { resolveReturnActionCode, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { tryParseTankId } from "@/lib/tank-id";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
-import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
 import TankIdInput from "@/components/TankIdInput";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
+import {
+  submitInHouseBulkReturn,
+  updateInHouseReturnTagMarker,
+} from "@/features/inhouse/services/inhouse-return-workflow";
 import { submitInHouseUseReport } from "@/features/inhouse/services/inhouse-use-workflow";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
@@ -68,7 +70,7 @@ export default function InHousePage() {
   const updateTag = async (tankId: string, newTag: TagType) => {
     setTagOverrides((prev) => ({ ...prev, [tankId]: newTag }));
     try {
-      await updateTankReturnTagMarker(tankId, newTag);
+      await updateInHouseReturnTagMarker(tankId, newTag);
     } catch (e) {
       console.error("Failed to update tag", e);
       // 失敗時はオーバーライドを取り消して最新状態を取り直す
@@ -126,23 +128,14 @@ export default function InHousePage() {
     if (!confirm(`自社利用中のタンク全 ${inHouseTanks.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`)) return;
     setReturning(true);
     try {
-      const context = {
-        actor: requireStaffIdentity(),
-        source: "manual" as const,
-        workflow: "tank_operation" as const,
-      };
-      await applyBulkTankOperations(
-        inHouseTanks.map((tank) => {
-          const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
-          return {
-            tankId: tank.id,
-            transitionAction: resolveReturnActionCode(tag, "in_house"),
-            currentStatus: "in_house",
-            context,
-            location: "倉庫",
-          };
-        })
-      );
+      const actor = requireStaffIdentity();
+      await submitInHouseBulkReturn({
+        tanks: inHouseTanks.map((tank) => ({
+          tankId: tank.id,
+          tag: tank.tag,
+        })),
+        actor,
+      });
       alert("一括返却が完了しました。");
       setTagOverrides({});
       refetch();
