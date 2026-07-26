@@ -2,14 +2,15 @@
 
 import { useState, useEffect, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
-import { ACTION, resolveReturnActionCode, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
+import { resolveReturnActionCode, type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { storedMarkerToReturnTag } from "@/lib/return-tag-rules";
 import { tryParseTankId } from "@/lib/tank-id";
-import { applyTankOperation, applyBulkTankOperations } from "@/lib/tank-operation";
+import { applyBulkTankOperations } from "@/lib/tank-operation";
 import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
 import TankIdInput from "@/components/TankIdInput";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
+import { submitInHouseUseReport } from "@/features/inhouse/services/inhouse-use-workflow";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 
@@ -92,11 +93,7 @@ export default function InHousePage() {
     setReporting(true);
     setReportResult(null);
     try {
-      const context = {
-        actor: requireStaffIdentity(),
-        source: "manual" as const,
-        workflow: "tank_operation" as const,
-      };
+      const actor = requireStaffIdentity();
       const tank = tankMap[tankId];
       if (!tank) {
         setReportResult({ success: false, message: `${tankId} は登録されていません` });
@@ -106,13 +103,10 @@ export default function InHousePage() {
         setReportResult({ success: true, message: `${tankId} は既に自社利用中です` });
         return;
       }
-      await applyTankOperation({
+      await submitInHouseUseReport({
         tankId,
-        transitionAction: ACTION.IN_HOUSE_USE_RETRO,
         currentStatus: tank.status,
-        context,
-        location: "自社",
-        logNote: "事後報告",
+        actor,
       });
       setLastAdded(tankId);
       if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
