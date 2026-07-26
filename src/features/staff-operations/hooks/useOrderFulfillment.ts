@@ -6,6 +6,8 @@ import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import {
   approveOrder as approveOrderTransaction,
   fulfillOrder as fulfillOrderTransaction,
+  getOrderApprovalValidationError,
+  validateOrderFulfillment,
 } from "@/lib/firebase/order-fulfillment-service";
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import {
@@ -98,8 +100,9 @@ export function useOrderFulfillment({
   }, []);
 
   const approveOrder = useCallback(async (order: PendingOrder) => {
-    if (!order.customerId) {
-      alert("顧客に紐付いていない受注は承認できません。管理画面で紐付けてください。");
+    const validationError = getOrderApprovalValidationError(order);
+    if (validationError) {
+      alert(validationError);
       return;
     }
     if (!confirm(`${order.customerName} の受注を承認しますか？`)) return;
@@ -218,23 +221,16 @@ export function useOrderFulfillment({
 
   const fulfillOrder = useCallback(async () => {
     if (!selectedOrder) return;
-    const validTanks = scannedTanks.filter((t) => t.valid);
-    const totalRequired = totalOrderQuantity(selectedOrder.items);
-
-    // items 配列の各種別について、必要本数をスキャンしきったか確認する
-    const scannedByType = new Map<string, number>();
-    validTanks.forEach((t) => {
-      const tk = allTanks[t.id];
-      const tType = tk?.type ?? "";
-      scannedByType.set(tType, (scannedByType.get(tType) ?? 0) + 1);
+    const validation = validateOrderFulfillment({
+      order: selectedOrder,
+      scannedTanks,
+      allTanks,
     });
-    const unmetItems = selectedOrder.items.filter(
-      (it) => (scannedByType.get(it.tankType) ?? 0) !== it.quantity
-    );
-    if (validTanks.length !== totalRequired || unmetItems.length > 0) {
-      alert(`数量が一致しません (${validTanks.length}/${totalRequired})`);
+    if (!validation.ok) {
+      alert(validation.message);
       return;
     }
+    const { validTanks } = validation;
     setOrderSubmitting(true);
     try {
       const actor = requireStaffIdentity();
