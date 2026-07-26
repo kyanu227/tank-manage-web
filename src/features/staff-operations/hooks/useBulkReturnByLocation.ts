@@ -2,15 +2,17 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
-import { updateTankReturnTagMarker } from "@/lib/firebase/tank-tag-service";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
-import { coerceTankStatusCode, type TankStatusCode } from "@/lib/tank-action-status-codes";
-import { RETURN_TAG, resolveReturnActionCode, type ReturnTag } from "@/lib/tank-rules";
+import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
+import { RETURN_TAG } from "@/lib/tank-rules";
 import {
   fetchBulkReturnCandidates,
   getBulkReturnGroupKeys,
   type BulkTankWithTag,
 } from "../queries/bulk-return-candidates";
+import {
+  submitBulkReturnGroup,
+  updateBulkReturnTagMarker,
+} from "../services/bulk-return-workflow";
 import type { BulkReturnGroupMeta, BulkTagType } from "../types";
 
 export interface UseBulkReturnByLocationResult {
@@ -66,7 +68,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       return g;
     });
     try {
-      await updateTankReturnTagMarker(tankId, newTag);
+      await updateBulkReturnTagMarker(tankId, newTag);
     } catch (e) {
       console.error("Failed to update tag", e);
       fetchBulkTanks();
@@ -93,27 +95,13 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
 
     setReturning(prev => ({ ...prev, [groupKey]: true }));
     try {
-      const context = {
-        actor: requireStaffIdentity(),
-        source: "bulk_return" as const,
-        workflow: "tank_operation" as const,
-      };
+      const actor = requireStaffIdentity();
 
-      await applyBulkTankOperations(
-        tanksToReturn.map((tank) => {
-          const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
-          const isKeep = tag === RETURN_TAG.KEEP;
-          return {
-            tankId: tank.id,
-            transitionAction: resolveReturnActionCode(tag, requireBulkTankStatusCode(tank.status, tank.id)),
-            currentStatus: tank.status,
-            context,
-            location: isKeep ? tank.location || loc || "不明" : "倉庫",
-            tankNote: "",
-            logNote: isKeep ? "持ち越し" : "",
-          };
-        })
-      );
+      await submitBulkReturnGroup({
+        tanks: tanksToReturn,
+        fallbackLocation: loc,
+        actor,
+      });
 
       const completeMessage = keepCount > 0
         ? `${groupLabel} の処理が完了しました。\n返却: ${returnCount}本 / 持ち越し: ${keepCount}本`
@@ -144,14 +132,6 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     updateTag,
     handleBulkReturnForGroup,
   };
-}
-
-function requireBulkTankStatusCode(status: string, tankId: string): TankStatusCode {
-  const code = coerceTankStatusCode(status);
-  if (!code) {
-    throw new Error(`[${tankId}] status が不正です`);
-  }
-  return code;
 }
 
 function errorMessage(error: unknown): string {
