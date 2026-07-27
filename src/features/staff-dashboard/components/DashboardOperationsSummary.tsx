@@ -23,6 +23,7 @@ export type DashboardUnfilledReportRowView = Readonly<{
   id: string;
   tankId: string;
   customerName: string;
+  customerTitle: string;
   statusLabel: string;
   timeLabel: string;
   sourceLabel: string;
@@ -180,7 +181,7 @@ export function DashboardOperationsSummary({
                   {report.tankId}
                 </span>
                 <span
-                  title={report.customerName}
+                  title={report.customerTitle}
                   style={{
                     fontSize: 13,
                     fontWeight: 800,

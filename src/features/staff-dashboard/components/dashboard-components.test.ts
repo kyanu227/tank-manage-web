@@ -425,7 +425,7 @@ describe("summary components static render", () => {
         customerLoans: [
           {
             key: "customer-1",
-            displayName: "顧客A",
+            displayName: "貸出先A",
             lent: 2,
             unreturned: 1,
           },
@@ -437,12 +437,22 @@ describe("summary components static render", () => {
             count: 4,
           },
         ],
-        unfilledReportCount: 1,
+        unfilledReportCount: 2,
         recentUnfilledReports: [
           {
-            id: "report-1",
+            id: "report-configured",
+            tankId: "A-01",
+            customerName: "顧客A",
+            customerTitle: "顧客A",
+            statusLabel: "記録済み",
+            timeLabel: "7/27 10:00",
+            sourceLabel: "顧客ポータル",
+          },
+          {
+            id: "report-missing",
             tankId: "-",
             customerName: "顧客未設定",
+            customerTitle: "",
             statusLabel: "status未設定",
             timeLabel: "-",
             sourceLabel: "source未設定",
@@ -452,7 +462,7 @@ describe("summary components static render", () => {
     );
 
     expect(html).toContain("業務状況");
-    expect(html).toContain("顧客A");
+    expect(html).toContain("貸出先A");
     expect(html).toContain("貸出 2");
     expect(html).toContain("未返却 1");
     expect(html).toContain("今日の操作");
@@ -462,6 +472,15 @@ describe("summary components static render", () => {
     expect(html).toContain("status未設定");
     expect(html).toContain("source未設定");
     expect(html).toContain("read-only");
+    expect(html).toMatch(
+      /title="顧客A"[^>]*>顧客A<\/span>/,
+    );
+    expect(html).toMatch(
+      /title=""[^>]*>顧客未設定<\/span>/,
+    );
+    expect(html).not.toContain(
+      'title="顧客未設定"',
+    );
     expect(html.indexOf("貸出先別")).toBeLessThan(
       html.indexOf("今日の操作"),
     );
@@ -960,6 +979,109 @@ describe("page/controller AST and source contract", () => {
     });
   });
 
+  it("未充填報告projectionの本文・title fallbackをASTで固定する", () => {
+    const page = readTypeScriptSource(PAGE_PATH);
+    const reportRows = findVariableDeclaration(page, "reportRows");
+
+    expect(reportRows?.initializer).toBeDefined();
+    if (!reportRows?.initializer) return;
+
+    const properties = new Map<string, ts.Expression>();
+    visit(reportRows.initializer, (node) => {
+      if (!ts.isPropertyAssignment(node)) return;
+      const name = node.name.getText(page);
+      if (!properties.has(name)) {
+        properties.set(name, node.initializer);
+      }
+    });
+
+    const customerName = properties.get("customerName");
+    const customerTitle = properties.get("customerTitle");
+
+    expect(customerName).toBeDefined();
+    expect(customerTitle).toBeDefined();
+    if (!customerName || !customerTitle) return;
+
+    expectLogicalOrExpression(
+      page,
+      customerName,
+      "report.customerName",
+      "\"顧客未設定\"",
+    );
+    expectLogicalOrExpression(
+      page,
+      customerTitle,
+      "report.customerName",
+      "\"\"",
+    );
+
+    const projectionSource =
+      reportRows.initializer.getText(page);
+    expect(projectionSource).not.toContain("??");
+    expect(projectionSource).not.toContain(".trim(");
+  });
+
+  it("未充填報告componentの本文・title分離をASTで固定する", () => {
+    const componentPath =
+      `${COMPONENT_DIRECTORY}/DashboardOperationsSummary.tsx`;
+    const sourceFile = readTypeScriptSource(componentPath);
+    let reportCustomerSpan: ts.JsxElement | undefined;
+    let hasForbiddenTitle = false;
+
+    visit(sourceFile, (node) => {
+      if (
+        !ts.isJsxAttribute(node)
+        || !ts.isIdentifier(node.name)
+        || node.name.text !== "title"
+      ) {
+        return;
+      }
+      if (
+        !node.initializer
+        || !ts.isJsxExpression(node.initializer)
+        || !node.initializer.expression
+      ) {
+        return;
+      }
+      const expression = compact(
+        node.initializer.expression.getText(sourceFile),
+      );
+      if (expression === "report.customerName") {
+        hasForbiddenTitle = true;
+      }
+      if (expression !== "report.customerTitle") return;
+
+      const attributes = node.parent;
+      const openingElement = attributes.parent;
+      const jsxElement = openingElement.parent;
+      if (ts.isJsxElement(jsxElement)) {
+        reportCustomerSpan = jsxElement;
+      }
+    });
+
+    expect(reportCustomerSpan).toBeDefined();
+    expect(hasForbiddenTitle).toBe(false);
+    const bodyExpressions = reportCustomerSpan?.children
+      .filter(ts.isJsxExpression)
+      .map((child) =>
+        child.expression
+          ? compact(child.expression.getText(sourceFile))
+          : ""
+      );
+    expect(bodyExpressions).toContain("report.customerName");
+
+    const source = compact(sourceFile.getFullText());
+    expect(source).not.toContain(
+      compact("report.customerName === \"顧客未設定\""),
+    );
+    expect(source).not.toContain(
+      compact("report.customerName ||"),
+    );
+    expect(source).not.toContain(
+      compact("report.customerName ??"),
+    );
+  });
+
   it("page/query/read modelのtimestamp helper本文を一致させる", () => {
     const paths = [
       PAGE_PATH,
@@ -1127,6 +1249,19 @@ describe("page/controller AST and source contract", () => {
         "recentUnfilledReports",
       ],
     );
+    expectReadonlyStringTypeMembers(
+      `${COMPONENT_DIRECTORY}/DashboardOperationsSummary.tsx`,
+      "DashboardUnfilledReportRowView",
+      [
+        "id",
+        "tankId",
+        "customerName",
+        "customerTitle",
+        "statusLabel",
+        "timeLabel",
+        "sourceLabel",
+      ],
+    );
     expectExportedTypeMembers(
       `${COMPONENT_DIRECTORY}/DashboardLogsSection.tsx`,
       "DashboardLogsSectionProps",
@@ -1187,6 +1322,25 @@ function sourceChecksum(value: string): string {
     hash = Math.imul(hash, 16_777_619);
   }
   return (hash >>> 0).toString(16);
+}
+
+function expectLogicalOrExpression(
+  sourceFile: ts.SourceFile,
+  expression: ts.Expression,
+  expectedLeft: string,
+  expectedRight: string,
+): void {
+  expect(ts.isBinaryExpression(expression)).toBe(true);
+  if (!ts.isBinaryExpression(expression)) return;
+  expect(expression.operatorToken.kind).toBe(
+    ts.SyntaxKind.BarBarToken,
+  );
+  expect(compact(expression.left.getText(sourceFile))).toBe(
+    compact(expectedLeft),
+  );
+  expect(compact(expression.right.getText(sourceFile))).toBe(
+    compact(expectedRight),
+  );
 }
 
 function visit(
@@ -1308,5 +1462,54 @@ function expectExportedTypeMembers(
     expect(Boolean(member.questionToken), name).toBe(
       optionalNames.includes(name),
     );
+  });
+}
+
+function expectReadonlyStringTypeMembers(
+  relativePath: string,
+  typeName: string,
+  requiredNames: readonly string[],
+): void {
+  const sourceFile = readTypeScriptSource(relativePath);
+  const declaration = sourceFile.statements.find(
+    (statement): statement is ts.TypeAliasDeclaration =>
+      ts.isTypeAliasDeclaration(statement)
+      && statement.name.text === typeName,
+  );
+
+  expect(declaration, `${relativePath}: ${typeName}`).toBeDefined();
+  expect(
+    declaration?.modifiers?.some(
+      (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+    ),
+  ).toBe(true);
+  expect(
+    declaration && ts.isTypeReferenceNode(declaration.type),
+  ).toBe(true);
+  if (!declaration || !ts.isTypeReferenceNode(declaration.type)) {
+    return;
+  }
+
+  expect(declaration.type.typeName.getText(sourceFile)).toBe(
+    "Readonly",
+  );
+  expect(declaration.type.typeArguments?.length).toBe(1);
+  const typeArgument = declaration.type.typeArguments?.[0];
+  expect(typeArgument && ts.isTypeLiteralNode(typeArgument)).toBe(
+    true,
+  );
+  if (!typeArgument || !ts.isTypeLiteralNode(typeArgument)) return;
+
+  const members = typeArgument.members.filter(
+    ts.isPropertySignature,
+  );
+  const names = members.map((member) =>
+    member.name?.getText(sourceFile)
+  );
+  expect(names).toStrictEqual(requiredNames);
+  members.forEach((member) => {
+    const name = member.name?.getText(sourceFile) ?? "";
+    expect(Boolean(member.questionToken), name).toBe(false);
+    expect(member.type?.getText(sourceFile), name).toBe("string");
   });
 }

@@ -414,6 +414,7 @@ export default function StaffDashboard() {
         id: report.id,
         tankId: report.tankId || "-",
         customerName: report.customerName || "顧客未設定",
+        customerTitle: report.customerName || "",
         statusLabel: formatReportStatus(report.status),
         timeLabel: formatTime(report.createdAt),
         sourceLabel: formatReportSource(report.source),
