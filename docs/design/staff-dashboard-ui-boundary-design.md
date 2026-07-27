@@ -455,6 +455,7 @@ export type DashboardUnfilledReportRowView = Readonly<{
   id: string;
   tankId: string;
   customerName: string;
+  customerTitle: string;
   statusLabel: string;
   timeLabel: string;
   sourceLabel: string;
@@ -472,10 +473,48 @@ export type DashboardOperationsSummaryProps = {
 - `unfilledReportCount`はquery sourceの0〜10件badge
 - `recentUnfilledReports`はread modelの0〜5件表示
 - pageがtime/status/source/customer/tank fallback textを事前算出する
+- `customerName`は画面本文へ表示する完成文字列であり、`report.customerName || "顧客未設定"`とする
+- `customerTitle`は`title`属性へ設定する完成文字列であり、`report.customerName || ""`とする
 - keysは`customerLoans[].key`、`todayOperations[].action`、`recentUnfilledReports[].id`
 - `DashboardPanel`はこのfile内のprivate componentとする
 - childrenは公開propsに使わない
 - callback、loading、localeなし
+
+未充填報告のpage projectionは次をexact contractとする。
+
+```ts
+const reportRows = loading
+  ? []
+  : recentUnfilledReports.map((report) => ({
+      id: report.id,
+      tankId: report.tankId || "-",
+      customerName:
+        report.customerName
+        || "顧客未設定",
+      customerTitle:
+        report.customerName
+        || "",
+      statusLabel:
+        formatReportStatus(report.status),
+      timeLabel:
+        formatTime(report.createdAt),
+      sourceLabel:
+        formatReportSource(report.source),
+    }));
+```
+
+`DashboardOperationsSummary`はpageから渡された2つの完成文字列をそのまま使用する。
+
+```tsx
+<span
+  title={report.customerTitle}
+  style={existingStyle}
+>
+  {report.customerName}
+</span>
+```
+
+raw customer objectをcomponentへ渡さず、componentでcustomer identityやfallbackを解釈しない。`customerName`と`customerTitle`はpageで完成値にする。nullish以外の正規化、trim、`??`への変更を追加せず、現行の`||`を維持する。実際に`顧客未設定`という名前の顧客と未設定を混同するため、componentで`report.customerName === "顧客未設定"`のような比較を行わない。
 
 ### 8.5 `DashboardLogsSection`
 
@@ -936,6 +975,60 @@ PR-12ではaccessibility redesignも行わない。既存`aria-label`、button t
 - 全user-visible text/copy、class名、title、`aria-label`、disabled属性
 - header→loading/content→overlay→styleのDOM順と、section/modal内の現行DOM順
 
+未充填報告の顧客名は、次の境界値をcharacterizationとして固定する。
+
+顧客名あり:
+
+```ts
+report.customerName = "顧客A";
+```
+
+```text
+表示:
+  顧客A
+
+title:
+  顧客A
+```
+
+顧客名なし:
+
+```ts
+report.customerName = undefined;
+```
+
+```text
+表示:
+  顧客未設定
+
+title:
+  ""
+```
+
+Static render testでは最低限次を固定する。
+
+```ts
+expect(html).toContain(
+  'title=""',
+);
+
+expect(html).toContain(
+  "顧客未設定",
+);
+
+expect(html).not.toContain(
+  'title="顧客未設定"',
+);
+```
+
+顧客名ありfixtureでは、可能なら次も固定する。
+
+```ts
+expect(html).toContain(
+  'title="顧客A"',
+);
+```
+
 server static renderはcallback実行を検証しない。event wiringはAST/source contractで固定する。
 
 ### 15.3 Static / AST contract
@@ -950,6 +1043,10 @@ server static renderはcallback実行を検証しない。event wiringはAST/sou
 - 4 modal confirmが正しいwrite handlerへ接続される
 - 4 modal close guardが現行saving条件と一致
 - display projectionが現行helperへ接続される
+- `DashboardUnfilledReportRowView`に`customerTitle: string`がある
+- page projectionが`customerTitle`へ`report.customerName || ""`を使用する
+- componentが`title={report.customerTitle}`を使用し、本文表示へ`report.customerName`を使用する
+- component内に顧客名fallback比較を追加しない
 - 全現行JSX text/copy、title、`aria-label`、disabled expressionのsource inventoryが一致する
 - header、section、modal、styleのDOM順が一致する
 - responsive style block、class、720pxが一致
