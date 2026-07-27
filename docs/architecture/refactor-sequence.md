@@ -65,6 +65,17 @@
 | **PR-11** dashboard query / read model分離 | 取得・集計を `features/staff-dashboard/queries/` へ | 開始条件: PR-10マージ + **個別設計note**（新設ファイル名・query条件・limit・sort・集計出力・履歴取得の範囲を本docの改訂として確定してから発注）。集計値の一致確認 |
 | **PR-12** dashboard UI再編 | 表示構造の整理 | 開始条件: PR-11完了後、pageがthin wrapper化しているかを確認して個別設計。thin wrapperでない場合はClaude UI-only条件（AGENTS.md）を適用せずCodexが実装 |
 
+#### PR-12 個別設計gate（2026-07-27）
+
+- **前提・開始条件 / 担当**: PR-11はmerge済み。現行`src/app/staff/dashboard/page.tsx`は23 state、13 named handler、query/read model orchestration、write/history/cache、JSX/CSSを保持するためthin wrapperではない。Codexが担当し、PR-12実装は個別設計正本 [staff-dashboard-ui-boundary-design.md](../design/staff-dashboard-ui-boundary-design.md) を追加する本docs-only PRのmerge後に開始する
+- **採用architecture / 1PR判定**: 案B（page controller + controlled section components）。pageはpresentation-light controllerとなるがthin wrapperにはせず、controller hook / context / reducer / storeを新設しない。query/read/write/domain変更なし・controlled propsのみの機械抽出として1PRで実施可能
+- **想定変更8件（上限8件）**: 更新`src/app/staff/dashboard/page.tsx`。新設`src/features/staff-dashboard/components/StaffDashboardView.tsx`、`DashboardSectionLabel.tsx`、`DashboardStatusSummary.tsx`、`DashboardOperationsSummary.tsx`、`DashboardLogsSection.tsx`、`DashboardCorrectionModals.tsx`、`dashboard-components.test.ts`。styles / hook / types / view-model / utility / barrelは新設しない
+- **責務・state・props**: page=controllerがsession/tanks/query/read model、23 state、derived selection、permission/disabled reason、4 write handler、history fetch/cache、refresh、business/formatting結果を一意に所有する。componentsはreadonly data + controlled value + typed callbackだけを受け、state複製・business再計算・query/write/alert/`Date.now()`を行わない
+- **helper / CSS**: business・permission・timestamp・formatting helperはpage側で結果化して渡す。presentational helperだけをcomponentへ移す。既存inline styleは各表示ownerへ機械移動し、root/header/loading/`@keyframes spin`/720px responsive styleは`StaffDashboardView`が所有する。見た目・class・breakpointは変更しない
+- **Claude-safe surface**: 後続Claude UI-only PRで編集可能なのは上記6 component TSXだけ。page、component test、query、read model、workflow、repository/domain/package/Rules/index/Firebase設定は対象外。visual調整はPR-12と分離し任意の別PR
+- **不変条件**: PR-11の初期3read・200件cap・customer順・未充填10/5件・today/local-day・sort/timestamp/`NaN`・root history、PR-10の4 write handler/payload/reason/role/actor/alert/state clear/refresh/catch/finally、全UI state、文言/DOM順/empty/loading/title/disabled/modal/selection/history/color/spacing/720px responsiveを維持する
+- **検証**: TypeScript AST/source comparisonでhandler・query/read-model call・permission/timestamp helper・state owner・callback/modal wiring・text/CSS・forbidden importを固定し、追加packageなしのstatic render/component contract test、eslint/TypeScript/build/full unit/transition 3 suites、PR-head L0（mobile含む、business write 0件）を実施する
+
 #### PR-11 個別設計gate（2026-07-27）
 
 - **前提・開始条件**: PR-10はmerge済み。PR-11実装は、個別設計正本 [staff-dashboard-read-model-design.md](../design/staff-dashboard-read-model-design.md) を追加する本docs-only PRのmerge後に開始する
