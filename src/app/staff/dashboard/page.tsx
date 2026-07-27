@@ -1,31 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import {
-  ArrowDownWideNarrow,
-  ArrowUpNarrowWide,
-  AlertTriangle,
-  Building2,
-  CheckCircle2,
-  CheckSquare,
-  ChevronDown,
-  ChevronUp,
-  ClipboardList,
-  Clock,
-  Edit2,
-  Layers,
-  Loader2,
-  Square,
-  Undo2,
-  Users,
-  X,
-} from "lucide-react";
 import type { TransactionDoc } from "@/lib/firebase/repositories/types";
-import PrefixNumberPicker from "@/components/PrefixNumberPicker";
 import { requireStaffIdentity, useStaffLocale, useStaffSession } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import type { StaffCorrectionRole } from "@/lib/tank-operation";
 import type { CustomerSnapshot } from "@/lib/operation-context";
+import { DashboardCorrectionModals } from "@/features/staff-dashboard/components/DashboardCorrectionModals";
+import { DashboardLogsSection } from "@/features/staff-dashboard/components/DashboardLogsSection";
+import { DashboardOperationsSummary } from "@/features/staff-dashboard/components/DashboardOperationsSummary";
+import { DashboardStatusSummary } from "@/features/staff-dashboard/components/DashboardStatusSummary";
+import { StaffDashboardView } from "@/features/staff-dashboard/components/StaffDashboardView";
 import {
   fetchStaffDashboardLogHistory,
   fetchStaffDashboardSourceData,
@@ -396,921 +381,331 @@ export default function StaffDashboard() {
     bulkLocationOptions.length
   );
 
-  return (
-    <div style={{ minHeight: "100%", background: "#f8fafc", padding: "14px 14px 32px" }}>
-      <div style={{ maxWidth: 1120, margin: "0 auto" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "flex-end",
-            justifyContent: "space-between",
-            gap: 12,
-            marginBottom: 14,
-            padding: "0 4px",
-          }}
-        >
-          <div>
-            <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
-              ダッシュボード
-            </h1>
-            <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-              ステータス別内訳 / 業務状況 / 操作ログ
-            </p>
-          </div>
-          <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700, whiteSpace: "nowrap" }}>
-            {session?.name ? `${session.name} さん` : ""}
-          </div>
-        </div>
+  const statusItems = loading
+    ? []
+    : Object.entries(summary)
+        .sort((a, b) => b[1] - a[1])
+        .map(([status, count]) => ({
+          key: status,
+          label: getLegacyTankStatusLabel(status) ?? status,
+          count,
+          color: tankStatusColor(status),
+        }));
 
-        {loading ? (
-          <div
-            style={{
-              textAlign: "center",
-              padding: 60,
-              color: "#94a3b8",
-              fontSize: 14,
-              background: "#fff",
-              borderRadius: 16,
-              border: "1px solid #e8eaed",
-            }}
-          >
-            <Loader2 size={22} style={{ animation: "spin 1s linear infinite", verticalAlign: "middle", marginRight: 8 }} />
-            読み込み中...
-          </div>
-        ) : (
-          <>
-            <SectionLabel icon={<Layers size={14} />} title="ステータス別内訳" />
-            <div
-              style={{
-                background: "#fff",
-                border: "1px solid #e8eaed",
-                borderRadius: 14,
-                padding: "14px 16px",
-                marginBottom: 22,
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 10 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>総本数</span>
-                <span
-                  style={{
-                    fontSize: 22,
-                    fontWeight: 900,
-                    color: "#0f172a",
-                    fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                  }}
-                >
-                  {totalTanks}
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#94a3b8", marginLeft: 4 }}>本</span>
-                </span>
-              </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                {Object.entries(summary)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([status, count]) => (
-                    <div
-                      key={status}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 8,
-                        padding: "6px 12px",
-                        borderRadius: 8,
-                        background: "#f8fafc",
-                        border: "1px solid #eef2f7",
-                      }}
-                    >
-                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: tankStatusColor(status) }} />
-                      <span style={{ fontSize: 12, fontWeight: 700, color: "#334155" }}>{getLegacyTankStatusLabel(status) ?? status}</span>
-                      <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a", fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
-                        {count}
-                      </span>
-                    </div>
-                  ))}
-                {totalTanks === 0 && <span style={{ fontSize: 12, color: "#cbd5e1", padding: 4 }}>タンクが未登録です</span>}
-              </div>
-            </div>
+  const customerLoans = loading
+    ? []
+    : byLocation.map((row) => ({
+        key: row.key,
+        displayName: row.displayName,
+        lent: row.lent,
+        unreturned: row.unreturned,
+      }));
 
-            <SectionLabel icon={<ClipboardList size={14} />} title="業務状況" />
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-                gap: 10,
-                marginBottom: 22,
-              }}
-            >
-              <DashboardPanel
-                icon={<Users size={14} color="#3b82f6" />}
-                title="貸出先別"
-                badge={`${byLocation.length}件`}
-                emptyText="貸出中のタンクはありません"
-                isEmpty={byLocation.length === 0}
-              >
-                {byLocation.map((row) => (
-                  <div
-                    key={row.key}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr auto auto",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      background: "#f8fafc",
-                      border: "1px solid #eef2f7",
-                    }}
-                  >
-                    <span
-                      title={row.displayName}
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 700,
-                        color: "#0f172a",
-                        overflow: "hidden",
-                        textOverflow: "ellipsis",
-                        whiteSpace: "nowrap",
-                      }}
-                    >
-                      {row.displayName}
-                    </span>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: "#3b82f6", background: "#eff6ff", padding: "2px 8px", borderRadius: 6 }}>
-                      貸出 {row.lent}
-                    </span>
-                    {row.unreturned > 0 ? (
-                      <span style={{ fontSize: 11, fontWeight: 800, color: "#a78bfa", background: "#f5f3ff", padding: "2px 8px", borderRadius: 6 }}>
-                        未返却 {row.unreturned}
-                      </span>
-                    ) : (
-                      <span style={{ width: 60 }} />
-                    )}
-                  </div>
-                ))}
-              </DashboardPanel>
+  const todayOperations = loading
+    ? []
+    : todayStats.breakdown.map((row) => ({
+        action: row.action,
+        count: row.count,
+      }));
 
-              <DashboardPanel
-                icon={<Clock size={14} color="#0ea5e9" />}
-                title="今日の操作"
-                badge={`${todayStats.total}件`}
-                emptyText="本日の操作はまだありません"
-                isEmpty={todayStats.breakdown.length === 0}
-              >
-                {todayStats.breakdown.map((row) => (
-                  <div
-                    key={row.action}
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr auto",
-                      alignItems: "center",
-                      gap: 8,
-                      padding: "8px 10px",
-                      borderRadius: 8,
-                      background: "#f8fafc",
-                      border: "1px solid #eef2f7",
-                    }}
-                  >
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#334155" }}>{row.action}</span>
-                    <span
-                      style={{
-                        fontSize: 13,
-                        fontWeight: 800,
-                        color: "#0f172a",
-                        fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                        minWidth: 28,
-                        textAlign: "right",
-                      }}
-                    >
-                      {row.count}
-                    </span>
-                  </div>
-                ))}
-              </DashboardPanel>
+  const reportRows = loading
+    ? []
+    : recentUnfilledReports.map((report) => ({
+        id: report.id,
+        tankId: report.tankId || "-",
+        customerName: report.customerName || "顧客未設定",
+        statusLabel: formatReportStatus(report.status),
+        timeLabel: formatTime(report.createdAt),
+        sourceLabel: formatReportSource(report.source),
+      }));
 
-              <DashboardPanel
-                icon={<AlertTriangle size={14} color="#dc2626" />}
-                title="顧客未充填報告"
-                badge={`${unfilledReports.length}件`}
-                emptyText="顧客未充填報告はありません"
-                isEmpty={recentUnfilledReports.length === 0}
-              >
-                {recentUnfilledReports.map((report) => (
-                  <div
-                    key={report.id}
-                    style={{
-                      display: "flex",
-                      flexDirection: "column",
-                      gap: 5,
-                      padding: "9px 10px",
-                      borderRadius: 8,
-                      background: "#fff7ed",
-                      border: "1px solid #fed7aa",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "grid",
-                        gridTemplateColumns: "auto minmax(0, 1fr) auto",
-                        alignItems: "center",
-                        gap: 8,
-                      }}
-                    >
-                      <span
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 900,
-                          color: "#9a3412",
-                          fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {report.tankId || "-"}
-                      </span>
-                      <span
-                        title={report.customerName || ""}
-                        style={{
-                          fontSize: 13,
-                          fontWeight: 800,
-                          color: "#0f172a",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {report.customerName || "顧客未設定"}
-                      </span>
-                      <span
-                        style={{
-                          fontSize: 11,
-                          fontWeight: 800,
-                          color: "#b45309",
-                          background: "#ffedd5",
-                          padding: "2px 7px",
-                          borderRadius: 6,
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {formatReportStatus(report.status)}
-                      </span>
-                    </div>
-                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", fontSize: 11, color: "#9a3412", fontWeight: 700 }}>
-                      <span>{formatTime(report.createdAt)}</span>
-                      <span>{formatReportSource(report.source)}</span>
-                      <span>read-only</span>
-                    </div>
-                  </div>
-                ))}
-              </DashboardPanel>
-            </div>
+  const logRows = loading
+    ? []
+    : sortedLogs.map((log) => {
+        const rootId = log.rootLogId ?? log.id;
 
-            <SectionLabel icon={<Clock size={14} />} title="最近の操作ログ" />
-            <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "14px 16px" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                <span style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.04em", flex: 1 }}>
-                  直近 {logs.length} 件（active）
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setLogSortOrder((prev) => (prev === "desc" ? "asc" : "desc"))}
-                  title={logSortOrder === "desc" ? "新しい順 → 古い順に切替" : "古い順 → 新しい順に切替"}
-                  style={{
-                    border: "1px solid #e2e8f0",
-                    background: "#fff",
-                    color: "#475569",
-                    borderRadius: 8,
-                    padding: "7px 11px",
-                    fontSize: 11,
-                    fontWeight: 800,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {logSortOrder === "desc" ? <ArrowDownWideNarrow size={13} /> : <ArrowUpNarrowWide size={13} />}
-                  {logSortOrder === "desc" ? "新しい順" : "古い順"}
-                </button>
-                <button
-                  type="button"
-                  onClick={toggleEditMode}
-                  style={{
-                    border: "1px solid #dbeafe",
-                    background: isEditMode ? "#eff6ff" : "#fff",
-                    color: "#2563eb",
-                    borderRadius: 8,
-                    padding: "7px 11px",
-                    fontSize: 11,
-                    fontWeight: 800,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: 5,
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  {isEditMode ? <CheckSquare size={13} /> : <Edit2 size={13} />}
-                  {isEditMode ? "完了" : "編集"}
-                </button>
-              </div>
+        const modifyDisabledReason =
+          canModifyLogReason(log, correctionRole);
 
-              {isEditMode && (
-                <div
-                  style={{
-                    display: "flex",
-                    flexWrap: "wrap",
-                    gap: 8,
-                    alignItems: "center",
-                    marginBottom: 12,
-                    padding: "10px 12px",
-                    borderRadius: 10,
-                    background: "#f8fafc",
-                    border: "1px solid #e2e8f0",
-                  }}
-                >
-                  <span style={{ fontSize: 12, fontWeight: 800, color: "#334155", marginRight: 4 }}>
-                    選択 {selectedLogIds.length} 件
-                  </span>
-                  <button type="button" onClick={selectAllLogs} style={miniActionButtonStyle()}>
-                    全選択
-                  </button>
-                  <button type="button" onClick={clearSelectedLogs} style={miniActionButtonStyle()}>
-                    選択解除
-                  </button>
-                  <button
-                    type="button"
-                    onClick={openBulkLocationModal}
-                    disabled={selectedLogIds.length === 0 || bulkLocationOptions.length === 0}
-                    style={miniActionButtonStyle(selectedLogIds.length === 0 || bulkLocationOptions.length === 0)}
-                  >
-                    貸出先変更
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setBulkVoidReason("");
-                      setBulkVoidModalOpen(true);
-                    }}
-                    disabled={selectedLogIds.length === 0}
-                    style={dangerMiniButtonStyle(selectedLogIds.length === 0)}
-                  >
-                    一括取消
-                  </button>
-                  {bulkLocationUnavailableReason && (
-                    <span style={{ fontSize: 11, color: "#94a3b8" }}>
-                      {bulkLocationUnavailableReason}
-                    </span>
-                  )}
-                </div>
-              )}
+        const correctionDisabledReason =
+          canCorrectLogReason(log, correctionRole);
 
-              {sortedLogs.length === 0 ? (
-                <p style={{ fontSize: 13, color: "#cbd5e1", textAlign: "center", padding: 20 }}>ログがありません</p>
-              ) : (
-                <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                  {sortedLogs.map((log) => {
-                    const rootId = log.rootLogId ?? log.id;
-                    const isExpanded = expandedRootId === rootId;
-                    const modifyDisabledReason = canModifyLogReason(log, correctionRole);
-                    const canModify = modifyDisabledReason == null;
-                    const correctionDisabledReason = canCorrectLogReason(log, correctionRole);
-                    const canCorrect = correctionDisabledReason == null;
-                    const isTankLog = log.logKind === "tank";
-                    const history = historyByRoot[rootId] ?? [];
-                    const historyLoading = historyLoadingRoot === rootId;
-                    const actionLabel = formatActionLabel(log.action, staffLocale);
+        const history =
+          historyByRoot[rootId] ?? [];
 
-                    return (
-                      <div key={log.id} style={{ border: "1px solid #eef2f7", borderRadius: 10, background: "#f8fafc", overflow: "hidden" }}>
-                        <div className={`dashboard-log-row${isEditMode ? " dashboard-log-row--editing" : ""}`}>
-                          {isEditMode ? (
-                            <button
-                              type="button"
-                              onClick={() => toggleLogSelection(log.id)}
-                              disabled={!canModify}
-                              title={canModify ? "選択" : modifyDisabledReason ?? "期限外または対象外"}
-                              className="dashboard-log-checkbox"
-                              style={{
-                                border: "none",
-                                background: "transparent",
-                                color: canModify
-                                  ? (selectedLogIds.includes(log.id) ? "#2563eb" : "#94a3b8")
-                                  : "#cbd5e1",
-                                padding: 0,
-                                display: "flex",
-                                alignItems: "center",
-                                justifyContent: "center",
-                                cursor: canModify ? "pointer" : "not-allowed",
-                              }}
-                            >
-                              {selectedLogIds.includes(log.id) ? <CheckSquare size={16} /> : <Square size={16} />}
-                            </button>
-                          ) : null}
-                          <span
-                            className="dashboard-log-id"
-                            style={{
-                              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                              fontSize: 13,
-                              fontWeight: 800,
-                              color: "#0f172a",
-                              minWidth: 54,
-                            }}
-                          >
-                            {log.tankId}
-                          </span>
-                          <span
-                            className="dashboard-log-action"
-                            style={{
-                              fontSize: 11,
-                              fontWeight: 800,
-                              padding: "3px 8px",
-                              borderRadius: 6,
-                              background: actionBg(log.action),
-                              color: actionFg(log.action),
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {actionLabel}
-                          </span>
-                          <div className="dashboard-log-body" style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 1 }}>
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: "#334155",
-                                fontWeight: 600,
-                                overflow: "hidden",
-                                textOverflow: "ellipsis",
-                                whiteSpace: "nowrap",
-                              }}
-                            >
-                              {log.location || "-"}
-                            </span>
-                            <span style={{ fontSize: 11, color: "#94a3b8", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {log.staffName || "-"}
-                            </span>
-                          </div>
-                          <span
-                            className="dashboard-log-time"
-                            style={{
-                              fontSize: 11,
-                              color: "#94a3b8",
-                              fontFamily: "ui-monospace, SFMono-Regular, monospace",
-                              whiteSpace: "nowrap",
-                            }}
-                          >
-                            {formatTime(log.originalAt ?? log.timestamp)}
-                          </span>
-                          {isTankLog && isEditMode ? (
-                            <div className="dashboard-log-actions" style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
-                              <IconTextButton
-                                label="ID変更"
-                                icon={<Edit2 size={13} />}
-                                disabled={!canCorrect}
-                                disabledReason={correctionDisabledReason ?? undefined}
-                                onClick={() => openEdit(log)}
-                              />
-                              <IconTextButton
-                                label="取消"
-                                icon={<Undo2 size={13} />}
-                                disabled={!canModify}
-                                disabledReason={modifyDisabledReason ?? undefined}
-                                onClick={() => {
-                                  setVoidingLog(log);
-                                  setVoidReason("");
-                                }}
-                              />
-                              <IconTextButton
-                                label="履歴"
-                                icon={isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
-                                onClick={() => toggleHistory(log)}
-                              />
-                              {modifyDisabledReason && (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", alignSelf: "center" }}>
-                                  {modifyDisabledReason}
-                                </span>
-                              )}
-                              {!modifyDisabledReason && correctionDisabledReason && (
-                                <span style={{ fontSize: 10, fontWeight: 700, color: "#b45309", alignSelf: "center" }}>
-                                  {correctionDisabledReason}
-                                </span>
-                              )}
-                            </div>
-                          ) : !isTankLog ? (
-                            <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", padding: "2px 6px", borderRadius: 4, background: "#fff", border: "1px solid #e2e8f0" }}>
-                              {log.logKind || "-"}
-                            </span>
-                          ) : null}
-                        </div>
+        return {
+          id: log.id,
+          tankId: log.tankId,
+          actionLabel:
+            formatActionLabel(log.action, staffLocale),
+          actionBackground: actionBg(log.action),
+          actionForeground: actionFg(log.action),
+          locationLabel: log.location || "-",
+          staffLabel: log.staffName || "-",
+          timeLabel:
+            formatTime(log.originalAt ?? log.timestamp),
+          isTankLog: log.logKind === "tank",
+          logKindLabel: log.logKind || "-",
+          isSelected:
+            selectedLogIds.includes(log.id),
+          canModify:
+            modifyDisabledReason == null,
+          modifyDisabledReason,
+          canCorrect:
+            correctionDisabledReason == null,
+          correctionDisabledReason,
+          isExpanded:
+            expandedRootId === rootId,
+          historyLoading:
+            historyLoadingRoot === rootId,
+          historyEntries: history.map((rev) => ({
+            id: rev.id,
+            revisionLabel:
+              `v${rev.revision ?? "-"}`,
+            statusLabel:
+              statusLabel(rev.logStatus),
+            statusColor:
+              statusColor(rev.logStatus),
+            actionLabel:
+              formatActionLabel(
+                rev.action,
+                staffLocale,
+              ),
+            timeLabel:
+              formatTime(
+                rev.revisionCreatedAt,
+              ),
+            editMetadata:
+              rev.editedByStaffName
+                || rev.editReason
+                ? `${
+                    rev.editedByStaffName || "-"
+                  } / ${
+                    rev.editReason || "-"
+                  }`
+                : null,
+            voidMetadata:
+              rev.logStatus === "voided"
+                ? `${
+                    rev.voidedByStaffName || "-"
+                  } / ${
+                    rev.voidReason || "-"
+                  }`
+                : null,
+          })),
+        };
+      });
 
-                        {isEditMode && isExpanded && (
-                          <div style={{ borderTop: "1px solid #e2e8f0", background: "#fff", padding: 12 }}>
-                            {historyLoading ? (
-                              <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#94a3b8", fontSize: 12 }}>
-                                <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> 履歴を読み込み中...
-                              </div>
-                            ) : history.length === 0 ? (
-                              <p style={{ color: "#cbd5e1", fontSize: 12, margin: 0 }}>履歴がありません</p>
-                            ) : (
-                              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                                {history.map((rev) => {
-                                  return (
-                                    <div
-                                      key={rev.id}
-                                      style={{
-                                        display: "grid",
-                                        gridTemplateColumns: "52px 1fr",
-                                        gap: 10,
-                                        alignItems: "center",
-                                        padding: 10,
-                                        borderRadius: 8,
-                                        border: "1px solid #f1f5f9",
-                                        background: "#fafafa",
-                                      }}
-                                    >
-                                      <div style={{ fontSize: 12, fontWeight: 900, color: "#334155" }}>v{rev.revision ?? "-"}</div>
-                                      <div style={{ minWidth: 0 }}>
-                                        <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "center" }}>
-                                          <span style={{ fontSize: 12, fontWeight: 800, color: statusColor(rev.logStatus) }}>{statusLabel(rev.logStatus)}</span>
-                                          <span style={{ fontSize: 12, color: "#64748b" }}>{formatActionLabel(rev.action, staffLocale)}</span>
-                                          <span style={{ fontSize: 12, color: "#94a3b8" }}>{formatTime(rev.revisionCreatedAt)}</span>
-                                        </div>
-                                        {(rev.editedByStaffName || rev.editReason) && (
-                                          <div style={{ marginTop: 4, fontSize: 11, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                            {rev.editedByStaffName || "-"} / {rev.editReason || "-"}
-                                          </div>
-                                        )}
-                                        {rev.logStatus === "voided" && (
-                                          <div style={{ marginTop: 4, fontSize: 11, color: "#dc2626", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                            {rev.voidedByStaffName || "-"} / {rev.voidReason || "-"}
-                                          </div>
-                                        )}
-                                      </div>
-                                    </div>
-                                  );
-                                })}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-
-      {editingLog && editForm && (
-        <Modal onClose={() => !savingEdit && setEditingLog(null)}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>タンクID変更</h2>
-            <button type="button" onClick={() => setEditingLog(null)} style={iconButtonStyle} disabled={savingEdit}>
-              <X size={20} />
-            </button>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <FieldLabel label="タンクID" />
-            <PrefixNumberPicker
-              tankIds={tankIds}
-              value={editForm.tankId}
-              onChange={(tankId) => setEditForm((prev) => (prev ? { ...prev, tankId } : prev))}
-              accentColor="#2563eb"
-            />
-            <div style={{ padding: "9px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#64748b", lineHeight: 1.6 }}>
-              タンクIDだけを変更します。操作種別・貸出先・メモなどは変更しません。
-            </div>
-
-            <label style={labelStyle}>
-              編集理由
-              <textarea
-                value={editForm.reason}
-                onChange={(e) => setEditForm((prev) => (prev ? { ...prev, reason: e.target.value } : prev))}
-                rows={3}
-                style={{ ...inputStyle, resize: "vertical", minHeight: 78 }}
-              />
-            </label>
-
-            <button
-              type="button"
-              onClick={handleSaveEdit}
-              disabled={Boolean(editDisabledReason)}
-              style={primaryButtonStyle(Boolean(editDisabledReason))}
-            >
-              {savingEdit ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={18} />}
-              {savingEdit ? "保存中..." : "ID変更"}
-            </button>
-            <DisabledReasonText reason={editDisabledReason} />
-          </div>
-        </Modal>
-      )}
-
-      {voidingLog && (
-        <Modal onClose={() => !savingVoid && setVoidingLog(null)}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>ログ取消</h2>
-            <button type="button" onClick={() => setVoidingLog(null)} style={iconButtonStyle} disabled={savingVoid}>
-              <X size={20} />
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: 12, borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", display: "flex", justifyContent: "space-between", gap: 12 }}>
-              <span style={{ fontFamily: "ui-monospace, SFMono-Regular, monospace", fontWeight: 900, color: "#0f172a" }}>{voidingLog.tankId}</span>
-              <span style={{ fontSize: 13, fontWeight: 800, color: "#334155" }}>{formatActionLabel(voidingLog.action, staffLocale)}</span>
-            </div>
-            <label style={labelStyle}>
-              取消理由
-              <textarea
-                value={voidReason}
-                onChange={(e) => setVoidReason(e.target.value)}
-                rows={4}
-                style={{ ...inputStyle, resize: "vertical", minHeight: 96 }}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={handleVoid}
-              disabled={Boolean(voidDisabledReason)}
-              style={dangerButtonStyle(Boolean(voidDisabledReason))}
-            >
-              {savingVoid ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <Undo2 size={18} />}
-              {savingVoid ? "取消中..." : "取消"}
-            </button>
-            <DisabledReasonText reason={voidDisabledReason} />
-          </div>
-        </Modal>
-      )}
-
-      {bulkLocationModalOpen && (
-        <Modal onClose={() => !savingBulkLocation && setBulkLocationModalOpen(false)}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>貸出先変更</h2>
-            <button type="button" onClick={() => setBulkLocationModalOpen(false)} style={iconButtonStyle} disabled={savingBulkLocation}>
-              <X size={20} />
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: "10px 12px", borderRadius: 8, background: "#f8fafc", border: "1px solid #e2e8f0", fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
-              選択中 {selectedLogs.length} 件の貸出先をまとめて変更します。
-            </div>
-            <label style={labelStyle}>
-              貸出先
-              <select
-                value={bulkLocationValue}
-                onChange={(e) => setBulkLocationValue(e.target.value)}
-                style={inputStyle}
-              >
-                {bulkLocationOptions.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.location}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label style={labelStyle}>
-              変更理由
-              <textarea
-                value={bulkLocationReason}
-                onChange={(e) => setBulkLocationReason(e.target.value)}
-                rows={4}
-                style={{ ...inputStyle, resize: "vertical", minHeight: 96 }}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={handleBulkLocationChange}
-              disabled={savingBulkLocation || !bulkLocationValue || bulkLocationReason.trim().length < 5}
-              style={primaryButtonStyle(savingBulkLocation || !bulkLocationValue || bulkLocationReason.trim().length < 5)}
-            >
-              {savingBulkLocation ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <Building2 size={18} />}
-              {savingBulkLocation ? "更新中..." : "貸出先変更"}
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      {bulkVoidModalOpen && (
-        <Modal onClose={() => !savingBulkVoid && setBulkVoidModalOpen(false)}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, color: "#0f172a" }}>一括取消</h2>
-            <button type="button" onClick={() => setBulkVoidModalOpen(false)} style={iconButtonStyle} disabled={savingBulkVoid}>
-              <X size={20} />
-            </button>
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div style={{ padding: "10px 12px", borderRadius: 8, background: "#fef2f2", border: "1px solid #fecaca", fontSize: 12, color: "#991b1b", lineHeight: 1.6 }}>
-              選択中 {selectedLogs.length} 件のログを取り消します。
-            </div>
-            <label style={labelStyle}>
-              取消理由
-              <textarea
-                value={bulkVoidReason}
-                onChange={(e) => setBulkVoidReason(e.target.value)}
-                rows={4}
-                style={{ ...inputStyle, resize: "vertical", minHeight: 96 }}
-              />
-            </label>
-            <button
-              type="button"
-              onClick={handleBulkVoid}
-              disabled={savingBulkVoid || bulkVoidReason.trim().length < 5}
-              style={dangerButtonStyle(savingBulkVoid || bulkVoidReason.trim().length < 5)}
-            >
-              {savingBulkVoid ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <Undo2 size={18} />}
-              {savingBulkVoid ? "取消中..." : "一括取消"}
-            </button>
-          </div>
-        </Modal>
-      )}
-
-      <style>{`
-        @keyframes spin {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
+  const idCorrectionModal =
+    editingLog && editForm
+      ? {
+          tankIds,
+          selectedTankId: editForm.tankId,
+          reason: editForm.reason,
+          saving: savingEdit,
+          confirmDisabled:
+            Boolean(editDisabledReason),
+          disabledReason:
+            editDisabledReason,
+          onTankIdChange: (tankId: string | null) =>
+            setEditForm((prev) =>
+              prev
+                ? { ...prev, tankId }
+                : prev
+            ),
+          onReasonChange: (reason: string) =>
+            setEditForm((prev) =>
+              prev
+                ? { ...prev, reason }
+                : prev
+            ),
+          onConfirm: handleSaveEdit,
+          onClose: () => {
+            if (savingEdit) return;
+            setEditingLog(null);
+          },
         }
+      : null;
 
-        .dashboard-log-row {
-          display: grid;
-          grid-template-columns: auto auto 1fr auto;
-          gap: 8px;
-          align-items: center;
-          padding: 9px 10px;
+  const singleVoidModal = voidingLog
+    ? {
+        targetTankId: voidingLog.tankId,
+        actionLabel:
+          formatActionLabel(
+            voidingLog.action,
+            staffLocale,
+          ),
+        reason: voidReason,
+        saving: savingVoid,
+        confirmDisabled:
+          Boolean(voidDisabledReason),
+        disabledReason:
+          voidDisabledReason,
+        onReasonChange: setVoidReason,
+        onConfirm: handleVoid,
+        onClose: () => {
+          if (savingVoid) return;
+          setVoidingLog(null);
+        },
+      }
+    : null;
+
+  const bulkLocationModal =
+    bulkLocationModalOpen
+      ? {
+          selectedCount:
+            selectedLogs.length,
+          options:
+            bulkLocationOptions.map(
+              (option) => ({
+                value: option.value,
+                label: option.location,
+              }),
+            ),
+          selectedValue:
+            bulkLocationValue,
+          reason:
+            bulkLocationReason,
+          saving:
+            savingBulkLocation,
+          confirmDisabled:
+            savingBulkLocation
+            || !bulkLocationValue
+            || bulkLocationReason
+              .trim().length < 5,
+          onValueChange:
+            setBulkLocationValue,
+          onReasonChange:
+            setBulkLocationReason,
+          onConfirm:
+            handleBulkLocationChange,
+          onClose: () => {
+            if (savingBulkLocation) return;
+            setBulkLocationModalOpen(false);
+          },
         }
+      : null;
 
-        .dashboard-log-row--editing {
-          grid-template-columns: 20px auto auto 1fr auto auto;
+  const bulkVoidModal =
+    bulkVoidModalOpen
+      ? {
+          selectedCount:
+            selectedLogs.length,
+          reason:
+            bulkVoidReason,
+          saving:
+            savingBulkVoid,
+          confirmDisabled:
+            savingBulkVoid
+            || bulkVoidReason
+              .trim().length < 5,
+          onReasonChange:
+            setBulkVoidReason,
+          onConfirm:
+            handleBulkVoid,
+          onClose: () => {
+            if (savingBulkVoid) return;
+            setBulkVoidModalOpen(false);
+          },
         }
+      : null;
 
-        @media (max-width: 720px) {
-          .dashboard-log-row {
-            grid-template-columns: auto auto 1fr;
-          }
-          .dashboard-log-row--editing {
-            grid-template-columns: 20px auto auto 1fr;
-          }
-          .dashboard-log-time,
-          .dashboard-log-actions {
-            grid-column: 1 / -1;
-          }
-          .dashboard-log-row--editing .dashboard-log-time,
-          .dashboard-log-row--editing .dashboard-log-actions {
-            grid-column: 2 / -1;
-          }
-          .dashboard-log-actions {
-            justify-content: flex-start !important;
-          }
-        }
-      `}</style>
-    </div>
-  );
-}
-
-function SectionLabel({
-  icon,
-  title,
-  tone,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  tone?: "alert";
-}) {
-  const color = tone === "alert" ? "#dc2626" : "#475569";
   return (
-    <div style={{ display: "flex", alignItems: "center", gap: 8, margin: "4px 4px 10px" }}>
-      <span style={{ color, display: "flex" }}>{icon}</span>
-      <span style={{ fontSize: 12, fontWeight: 800, color, letterSpacing: "0.06em" }}>{title}</span>
-      <div style={{ flex: 1, height: 1, background: "#e2e8f0", marginLeft: 4 }} />
-    </div>
-  );
-}
-
-function DashboardPanel({
-  icon,
-  title,
-  badge,
-  emptyText,
-  isEmpty,
-  children,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  badge: string;
-  emptyText: string;
-  isEmpty: boolean;
-  children: React.ReactNode;
-}) {
-  return (
-    <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "14px 16px" }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-        {icon}
-        <span style={{ fontSize: 12, fontWeight: 800, color: "#334155", flex: 1 }}>{title}</span>
-        <span style={{ fontSize: 11, fontWeight: 700, color: "#94a3b8" }}>{badge}</span>
-      </div>
-      {isEmpty ? (
-        <div style={{ fontSize: 12, color: "#cbd5e1", padding: "18px 0", textAlign: "center" }}>{emptyText}</div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: 4, maxHeight: 280, overflowY: "auto" }}>{children}</div>
-      )}
-    </div>
-  );
-}
-
-function IconTextButton({
-  label,
-  icon,
-  disabled,
-  disabledReason,
-  onClick,
-}: {
-  label: string;
-  icon: React.ReactNode;
-  disabled?: boolean;
-  disabledReason?: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={disabled ? disabledReason ?? "期限外または対象外" : label}
-      style={{
-        border: "1px solid #e2e8f0",
-        background: disabled ? "#f8fafc" : "#fff",
-        color: disabled ? "#cbd5e1" : "#475569",
-        borderRadius: 8,
-        padding: "6px 8px",
-        fontSize: 11,
-        fontWeight: 800,
-        cursor: disabled ? "not-allowed" : "pointer",
-        display: "flex",
-        alignItems: "center",
-        gap: 4,
-        minHeight: 30,
-        whiteSpace: "nowrap",
-      }}
+    <StaffDashboardView
+      staffName={session?.name ?? null}
+      loading={loading}
+      overlays={
+        <DashboardCorrectionModals
+          idCorrection={idCorrectionModal}
+          singleVoid={singleVoidModal}
+          bulkLocation={bulkLocationModal}
+          bulkVoid={bulkVoidModal}
+        />
+      }
     >
-      {icon}
-      {label}
-    </button>
-  );
-}
+      <DashboardStatusSummary
+        totalTanks={totalTanks}
+        items={statusItems}
+      />
 
-function Modal({ children, onClose }: { children: React.ReactNode; onClose: () => void }) {
-  return (
-    <div
-      style={{
-        position: "fixed",
-        inset: 0,
-        zIndex: 100,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        padding: 20,
-      }}
-    >
-      <button
-        type="button"
-        aria-label="close"
-        onClick={onClose}
-        style={{
-          position: "absolute",
-          inset: 0,
-          border: "none",
-          background: "rgba(15, 23, 42, 0.42)",
-          backdropFilter: "blur(4px)",
-          cursor: "pointer",
+      <DashboardOperationsSummary
+        customerLoans={customerLoans}
+        todayTotal={todayStats.total}
+        todayOperations={todayOperations}
+        unfilledReportCount={
+          unfilledReports.length
+        }
+        recentUnfilledReports={
+          reportRows
+        }
+      />
+
+      <DashboardLogsSection
+        activeLogCount={logs.length}
+        rows={logRows}
+        sortOrder={logSortOrder}
+        isEditMode={isEditMode}
+        selectedCount={
+          selectedLogIds.length
+        }
+        bulkLocationDisabled={
+          selectedLogIds.length === 0
+          || bulkLocationOptions.length === 0
+        }
+        bulkVoidDisabled={
+          selectedLogIds.length === 0
+        }
+        bulkLocationUnavailableReason={
+          bulkLocationUnavailableReason
+        }
+        onToggleSort={() =>
+          setLogSortOrder((prev) =>
+            prev === "desc"
+              ? "asc"
+              : "desc"
+          )
+        }
+        onToggleEditMode={
+          toggleEditMode
+        }
+        onSelectAll={selectAllLogs}
+        onClearSelection={
+          clearSelectedLogs
+        }
+        onOpenBulkLocation={
+          openBulkLocationModal
+        }
+        onOpenBulkVoid={() => {
+          setBulkVoidReason("");
+          setBulkVoidModalOpen(true);
+        }}
+        onToggleSelection={
+          toggleLogSelection
+        }
+        onOpenEdit={(logId) => {
+          const log =
+            logs.find((entry) => entry.id === logId);
+
+          if (!log) return;
+          openEdit(log);
+        }}
+        onOpenVoid={(logId) => {
+          const log =
+            logs.find((entry) => entry.id === logId);
+
+          if (!log) return;
+          setVoidingLog(log);
+          setVoidReason("");
+        }}
+        onToggleHistory={async (logId) => {
+          const log =
+            logs.find((entry) => entry.id === logId);
+
+          if (!log) return;
+          await toggleHistory(log);
         }}
       />
-      <div
-        style={{
-          position: "relative",
-          width: "100%",
-          maxWidth: 440,
-          maxHeight: "88vh",
-          overflowY: "auto",
-          background: "#fff",
-          borderRadius: 16,
-          padding: 22,
-          boxShadow: "0 20px 45px rgba(15, 23, 42, 0.18)",
-        }}
-      >
-        {children}
-      </div>
-    </div>
-  );
-}
-
-function FieldLabel({ label }: { label: string }) {
-  return <div style={{ fontSize: 12, fontWeight: 800, color: "#64748b", marginBottom: -6 }}>{label}</div>;
-}
-
-function DisabledReasonText({ reason }: { reason: string | null }) {
-  if (!reason) return null;
-  return (
-    <p style={{ margin: "-4px 2px 0", fontSize: 12, lineHeight: 1.5, color: "#64748b", fontWeight: 700 }}>
-      {reason}
-    </p>
+    </StaffDashboardView>
   );
 }
 
@@ -1465,85 +860,4 @@ function actionFg(action?: string): string {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-const labelStyle: React.CSSProperties = {
-  display: "flex",
-  flexDirection: "column",
-  gap: 6,
-  fontSize: 12,
-  fontWeight: 800,
-  color: "#64748b",
-};
-
-const inputStyle: React.CSSProperties = {
-  width: "100%",
-  boxSizing: "border-box",
-  padding: "10px 12px",
-  borderRadius: 8,
-  border: "1px solid #dbe3ef",
-  fontSize: 16,
-  color: "#0f172a",
-  fontWeight: 600,
-  outline: "none",
-  fontFamily: "inherit",
-};
-
-const iconButtonStyle: React.CSSProperties = {
-  border: "none",
-  background: "transparent",
-  color: "#64748b",
-  cursor: "pointer",
-  padding: 4,
-  display: "flex",
-};
-
-function primaryButtonStyle(disabled: boolean): React.CSSProperties {
-  return {
-    width: "100%",
-    padding: 14,
-    borderRadius: 10,
-    border: "none",
-    background: disabled ? "#e2e8f0" : "#2563eb",
-    color: disabled ? "#94a3b8" : "#fff",
-    fontSize: 15,
-    fontWeight: 900,
-    cursor: disabled ? "not-allowed" : "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-  };
-}
-
-function dangerButtonStyle(disabled: boolean): React.CSSProperties {
-  return {
-    ...primaryButtonStyle(disabled),
-    background: disabled ? "#e2e8f0" : "#dc2626",
-  };
-}
-
-function miniActionButtonStyle(disabled = false): React.CSSProperties {
-  return {
-    border: "1px solid #dbeafe",
-    background: disabled ? "#f8fafc" : "#fff",
-    color: disabled ? "#cbd5e1" : "#2563eb",
-    borderRadius: 8,
-    padding: "7px 10px",
-    fontSize: 11,
-    fontWeight: 800,
-    cursor: disabled ? "not-allowed" : "pointer",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    whiteSpace: "nowrap",
-  };
-}
-
-function dangerMiniButtonStyle(disabled = false): React.CSSProperties {
-  return {
-    ...miniActionButtonStyle(disabled),
-    border: `1px solid ${disabled ? "#e2e8f0" : "#fecaca"}`,
-    color: disabled ? "#cbd5e1" : "#dc2626",
-  };
 }
