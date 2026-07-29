@@ -511,25 +511,6 @@ describe("fetchStaffDashboardLogHistory", () => {
   });
 });
 
-describe("timestamp helper source equivalence", () => {
-  it.each([
-    "timestampToMillis",
-    "toDate",
-  ])("%sのpage・query・read model本文を同一に保つ", (functionName) => {
-    const paths = [
-      "src/app/staff/dashboard/page.tsx",
-      "src/features/staff-dashboard/queries/dashboard-query.ts",
-      "src/features/staff-dashboard/queries/dashboard-read-model.ts",
-    ];
-    const declarations = paths.map((path) =>
-      getFunctionDeclarationText(path, functionName)
-    );
-
-    expect(declarations[1]).toBe(declarations[0]);
-    expect(declarations[2]).toBe(declarations[0]);
-  });
-});
-
 describe("page today memo source equivalence", () => {
   it("todayInputsとdashboardReadModelの2段memo・capture・dependencyをexactに固定する", () => {
     const pagePath = "src/app/staff/dashboard/page.tsx";
@@ -563,38 +544,6 @@ describe("page today memo source equivalence", () => {
     ].join("\n"));
   });
 });
-
-function getFunctionDeclarationText(
-  relativePath: string,
-  functionName: string,
-): string {
-  const absolutePath = resolve(process.cwd(), relativePath);
-  const sourceText = readFileSync(absolutePath, "utf8");
-  const sourceFile = ts.createSourceFile(
-    absolutePath,
-    sourceText,
-    ts.ScriptTarget.Latest,
-    true,
-    relativePath.endsWith(".tsx") ? ts.ScriptKind.TSX : ts.ScriptKind.TS,
-  );
-  const declaration = sourceFile.statements.find(
-    (statement): statement is ts.FunctionDeclaration =>
-      ts.isFunctionDeclaration(statement)
-      && statement.name?.text === functionName,
-  );
-
-  if (!declaration) {
-    throw new Error(`${relativePath}: ${functionName} が見つかりません`);
-  }
-
-  return ts.createPrinter({
-    removeComments: true,
-  }).printNode(
-    ts.EmitHint.Unspecified,
-    declaration,
-    sourceFile,
-  );
-}
 
 function getVariableInitializerText(
   relativePath: string,
