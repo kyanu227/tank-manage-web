@@ -11,6 +11,7 @@ import { DashboardLogsSection } from "@/features/staff-dashboard/components/Dash
 import { DashboardOperationsSummary } from "@/features/staff-dashboard/components/DashboardOperationsSummary";
 import { DashboardStatusSummary } from "@/features/staff-dashboard/components/DashboardStatusSummary";
 import { StaffDashboardView } from "@/features/staff-dashboard/components/StaffDashboardView";
+import { timestampToMillis, toDate } from "@/features/staff-dashboard/timestamp";
 import {
   fetchStaffDashboardLogHistory,
   fetchStaffDashboardSourceData,
@@ -794,28 +795,6 @@ function getBulkLocationUnavailableReason(
     return "自社利用の変更先を確認できません。選択を解除して再度選び直してください。";
   }
   return "貸出先変更は貸出ログだけ、または自社利用ログだけを選択した場合に使えます。返却・充填・混在選択では使えません。";
-}
-
-function timestampToMillis(value: unknown): number | null {
-  const date = toDate(value);
-  return date ? date.getTime() : null;
-}
-
-function toDate(value: unknown): Date | null {
-  if (!value) return null;
-  if (value instanceof Date) return value;
-  if (typeof value === "number") return new Date(value);
-  if (typeof (value as { toDate?: unknown }).toDate === "function") {
-    return (value as { toDate: () => Date }).toDate();
-  }
-  if (typeof (value as { toMillis?: unknown }).toMillis === "function") {
-    return new Date((value as { toMillis: () => number }).toMillis());
-  }
-  if (typeof value === "string") {
-    const date = new Date(value.replace(/-/g, "/"));
-    return Number.isNaN(date.getTime()) ? null : date;
-  }
-  return null;
 }
 
 function formatTime(value: unknown): string {
