@@ -26,7 +26,7 @@
 
 | ゾーン | レイアウト | ガード | ナビ定義場所 |
 |---|---|---|---|
-| 顧客ポータル | [`src/app/portal/layout.tsx`](src/app/portal/layout.tsx) | localStorage `customerSession` | 同ファイル内 |
+| 顧客ポータル | [`src/app/portal/layout.tsx`](src/app/portal/layout.tsx) | Firebase Auth + `customerUsers/{uid}`（`customerSession` は画面互換） | 同ファイル内 |
 | スタッフ | [`src/app/staff/layout.tsx`](src/app/staff/layout.tsx) | [`StaffAuthGuard`](src/components/StaffAuthGuard.tsx) | 同ファイル `SIDE_NAV` |
 | 管理者 | [`src/app/admin/layout.tsx`](src/app/admin/layout.tsx) | [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) | 同ファイル `ADMIN_NAV_GROUPS` |
 
@@ -55,7 +55,8 @@
 | 返却申請 | `/portal/return` | [`src/app/portal/return/page.tsx`](src/app/portal/return/page.tsx) |
 | 未充填報告 | `/portal/unfilled` | [`src/app/portal/unfilled/page.tsx`](src/app/portal/unfilled/page.tsx) |
 
-認証は Firebase Auth ではなく **localStorage の `customerSession`** ベース（ガード不要、レイアウトが直接判定）。
+認証の正本は **Firebase Auth uid + `customerUsers/{uid}`**。レイアウトが Auth 状態と
+`customerUsers` を確認し、`customerSession` は画面互換セッションとして保存する。
 
 ---
 
@@ -71,7 +72,7 @@
 | 自社管理 | `/staff/inhouse` | TankIdInput を使った単発操作 |
 | メンテナンス | `/staff/damage` | `damage / repair / inspection` の3タブ |
 | ダッシュボード | `/staff/dashboard` | 集計・ログ |
-| 資材発注 | `/staff/order` | 資材の発注 |
+| 発注/タンク登録 | `/staff/supply-order` | 備品・資材発注、タンク購入、タンク登録の3タブ |
 | マイページ | `/staff/mypage` | スタッフ自身の情報 |
 
 ### 4-2. 操作ゾーン（最重要）
@@ -91,7 +92,8 @@
 | 充填 | `/staff/fill` | [`src/app/staff/fill/page.tsx`](src/app/staff/fill/page.tsx) | → `OperationsTerminal initialMode="fill"` |
 
 `OperationsTerminal` の実体: [`src/features/staff-operations/OperationsTerminal.tsx`](src/features/staff-operations/OperationsTerminal.tsx)
-（`src/app/staff/{lend,return,fill}/page.tsx` は全て薄い殻で、3行しかない）
+（`src/app/staff/lend/page.tsx`、`src/app/staff/return/page.tsx`、
+`src/app/staff/fill/page.tsx` は全て薄い殻）
 
 #### OperationsTerminal が出す画面の分岐
 
@@ -106,7 +108,7 @@ OperationsTerminal
 │                                     ↓ 「手動返却」ボタン
 │                                  <ManualOperationPanel>      （手動返却モード）
 │                                     ↓ リクエストをタップ
-│                                  <ReturnApprovalScreen>       （返却承認画面）
+│                                  <ReturnTagProcessingScreen>  （返却タグ処理画面）
 └── mode=fill                     → <ManualOperationPanel>     （充填）
 ```
 
@@ -125,13 +127,14 @@ OperationsTerminal
 | 〃 | [`components/OrderListPanel.tsx`](src/features/staff-operations/components/OrderListPanel.tsx) | 受注一覧 |
 | 〃 | [`components/OrderFulfillmentScreen.tsx`](src/features/staff-operations/components/OrderFulfillmentScreen.tsx) | 受注詳細・スキャン |
 | 〃 | [`components/ReturnRequestList.tsx`](src/features/staff-operations/components/ReturnRequestList.tsx) | 返却リクエスト一覧 |
-| 〃 | [`components/ReturnApprovalScreen.tsx`](src/features/staff-operations/components/ReturnApprovalScreen.tsx) | 返却承認画面 |
+| 〃 | [`components/ReturnTagProcessingScreen.tsx`](src/features/staff-operations/components/ReturnTagProcessingScreen.tsx) | 返却タグ処理画面 |
 | 〃 | [`components/BulkReturnByLocationPanel.tsx`](src/features/staff-operations/components/BulkReturnByLocationPanel.tsx) | 拠点別一括返却 |
+| 〃 | [`components/ReturnSegmentGestureLauncher.tsx`](src/features/staff-operations/components/ReturnSegmentGestureLauncher.tsx) | 返却区分の選択・スワイプ起動 |
 | フック | [`hooks/useManualTankOperation.ts`](src/features/staff-operations/hooks/useManualTankOperation.ts) | 手動操作のキュー+送信 |
 | 〃 | [`hooks/useOrderFulfillment.ts`](src/features/staff-operations/hooks/useOrderFulfillment.ts) | 受注処理 |
-| 〃 | [`hooks/useReturnApprovals.ts`](src/features/staff-operations/hooks/useReturnApprovals.ts) | 返却承認 |
+| 〃 | [`hooks/useReturnTagProcessing.ts`](src/features/staff-operations/hooks/useReturnTagProcessing.ts) | 返却タグ処理 |
 | 〃 | [`hooks/useBulkReturnByLocation.ts`](src/features/staff-operations/hooks/useBulkReturnByLocation.ts) | 一括返却 |
-| 〃 | [`hooks/useDestinations.ts`](src/features/staff-operations/hooks/useDestinations.ts) | 貸出先マスタ |
+| 〃 | [`hooks/useDestinations.ts`](src/features/staff-operations/hooks/useDestinations.ts) | `customers` 由来の貸出先選択肢 |
 | 〃 | [`hooks/useOperationSwipe.ts`](src/features/staff-operations/hooks/useOperationSwipe.ts) | 横スワイプでモード切替 |
 
 ### 4-3. メンテナンスゾーン
@@ -153,9 +156,13 @@ OperationsTerminal
 
 | 画面 | URL | ファイル |
 |---|---|---|
+| スタッフ入口（貸出へ） | `/staff` | [`src/app/staff/page.tsx`](src/app/staff/page.tsx) |
 | 自社管理 | `/staff/inhouse` | [`src/app/staff/inhouse/page.tsx`](src/app/staff/inhouse/page.tsx) |
 | ダッシュボード | `/staff/dashboard` | [`src/app/staff/dashboard/page.tsx`](src/app/staff/dashboard/page.tsx) |
-| 資材発注 | `/staff/order` | [`src/app/staff/order/page.tsx`](src/app/staff/order/page.tsx) |
+| 旧発注入口（備品・資材発注へ） | `/staff/order` | [`src/app/staff/order/page.tsx`](src/app/staff/order/page.tsx) |
+| 備品・資材発注 | `/staff/supply-order` | [`src/app/staff/supply-order/page.tsx`](src/app/staff/supply-order/page.tsx) |
+| タンク購入 | `/staff/tank-purchase` | [`src/app/staff/tank-purchase/page.tsx`](src/app/staff/tank-purchase/page.tsx) |
+| タンク登録 | `/staff/tank-register` | [`src/app/staff/tank-register/page.tsx`](src/app/staff/tank-register/page.tsx) |
 | マイページ | `/staff/mypage` | [`src/app/staff/mypage/page.tsx`](src/app/staff/mypage/page.tsx) |
 
 ---
@@ -174,6 +181,7 @@ group 内の visible items が 0 件のときは group ごと非表示。
 | 画面 | URL | ファイル |
 |---|---|---|
 | ダッシュボード | `/admin` | [`src/app/admin/page.tsx`](src/app/admin/page.tsx) |
+| 例外操作レビュー | `/admin/operation-reviews` | [`src/app/admin/operation-reviews/page.tsx`](src/app/admin/operation-reviews/page.tsx) |
 | 売上統計 | `/admin/sales` | [`src/app/admin/sales/page.tsx`](src/app/admin/sales/page.tsx) |
 | スタッフ実績 | `/admin/staff-analytics` | [`src/app/admin/staff-analytics/page.tsx`](src/app/admin/staff-analytics/page.tsx) |
 
@@ -182,31 +190,31 @@ group 内の visible items が 0 件のときは group ごと非表示。
 | 画面 | URL | ファイル |
 |---|---|---|
 | 顧客管理 | `/admin/customers` | [`src/app/admin/customers/page.tsx`](src/app/admin/customers/page.tsx) |
+| ポータル利用者 | `/admin/customers/users` | [`src/app/admin/customers/users/page.tsx`](src/app/admin/customers/users/page.tsx) |
 | 請求書発行 | `/admin/billing` | [`src/app/admin/billing/page.tsx`](src/app/admin/billing/page.tsx) |
 
 ### 5-3. スタッフ・権限
 
 | 画面 | URL | ファイル | 表示条件 |
 |---|---|---|---|
+| 担当者 | `/admin/staff` | [`src/app/admin/staff/page.tsx`](src/app/admin/staff/page.tsx) | 権限設定に従う |
 | ページ権限 | `/admin/permissions` | [`src/app/admin/permissions/page.tsx`](src/app/admin/permissions/page.tsx) | `adminOnly`（管理者のみ） |
-
-> `/admin/staff`（スタッフ管理ページ）は未実装のため、ナビには出していない。
-> 実装したら同カテゴリに追加する。
 
 ### 5-4. マスタ・料金
 
 | 画面 | URL | ファイル |
 |---|---|---|
 | 金銭・ランク | `/admin/money` | [`src/app/admin/money/page.tsx`](src/app/admin/money/page.tsx) |
-| 設定変更 | `/admin/settings` | [`src/app/admin/settings/page.tsx`](src/app/admin/settings/page.tsx) |
+| 発注品目 | `/admin/order-master` | [`src/app/admin/order-master/page.tsx`](src/app/admin/order-master/page.tsx) |
 
-> `/admin/order-master`（発注品目マスタの専用ページ）は未実装のため、ナビには出していない。
-> 実装したら同カテゴリに追加する。
-
-### 5-5. 通知・外部連携
+### 5-5. 設定・通知
 
 | 画面 | URL | ファイル |
 |---|---|---|
+| 設定入口（ポータル設定へ） | `/admin/settings` | [`src/app/admin/settings/page.tsx`](src/app/admin/settings/page.tsx) |
+| 状態遷移モード | `/admin/settings/tank-operations` | [`src/app/admin/settings/tank-operations/page.tsx`](src/app/admin/settings/tank-operations/page.tsx) |
+| ポータル設定 | `/admin/settings/portal` | [`src/app/admin/settings/portal/page.tsx`](src/app/admin/settings/portal/page.tsx) |
+| 耐圧検査設定 | `/admin/settings/inspection` | [`src/app/admin/settings/inspection/page.tsx`](src/app/admin/settings/inspection/page.tsx) |
 | 通知設定 | `/admin/notifications` | [`src/app/admin/notifications/page.tsx`](src/app/admin/notifications/page.tsx) |
 
 ### 5-6. 開発・確認
@@ -214,6 +222,7 @@ group 内の visible items が 0 件のときは group ごと非表示。
 | 画面 | URL | ファイル |
 |---|---|---|
 | 状態遷移図 | `/admin/state-diagram` | [`src/app/admin/state-diagram/page.tsx`](src/app/admin/state-diagram/page.tsx) |
+| Security Rules | `/admin/security-rules` | [`src/app/admin/security-rules/page.tsx`](src/app/admin/security-rules/page.tsx) |
 
 権限制御: [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) が
 Firestore `settings/adminPermissions` を見て、ログインスタッフのロールに応じて表示可否を決める。
@@ -241,7 +250,7 @@ Firestore `settings/adminPermissions` を見て、ログインスタッフのロ
 
 | コンポーネント | 用途 | 使う画面 |
 |---|---|---|
-| [`AuthPanel`](src/components/AuthPanel.tsx) | Google/メール/パスコードのログイン共通UI | portal/login, StaffAuthGuard, AdminAuthGuard |
+| [`AuthPanel`](src/components/AuthPanel.tsx) | title/subtitle/icon/children を受け取る認証画面用パネル | 認証画面向け汎用部品 |
 | [`DrumRoll`](src/components/DrumRoll.tsx) | 縦スクロールの選択UI（アルファベット等） | TankIdInput, ManualOperationPanel, OrderFulfillmentScreen |
 | [`TankIdInput`](src/components/TankIdInput.tsx) | DrumRoll + 隠し数字入力 + OKボタンの塊 | inhouse, damage |
 | [`QuickSelect`](src/components/QuickSelect.tsx) | 貸出先などのタッチ選択ボタン群 | ManualOperationPanel（貸出先） |
@@ -259,14 +268,16 @@ Firestore `settings/adminPermissions` を見て、ログインスタッフのロ
 ```
 ┌────────────────────────────────────────────────────────────────────┐
 │ 顧客ポータル                                                         │
-│   /portal/login → パスコード or Google/メール                         │
-│     ├─ staff が作成済み顧客 → /portal                                │
-│     └─ 新規 → /portal/register → /portal/setup → /portal            │
-│   セッション: localStorage.customerSession                            │
+│   /portal/login → Firebase Auth（Email/Password または Google）       │
+│     ├─ customerUsers.setupCompleted=true → /portal                   │
+│     └─ setup未完了 → /portal/setup → /portal                         │
+│   正本: Firebase Auth uid + customerUsers/{uid}                       │
+│   画面互換セッション: localStorage.customerSession                    │
 ├────────────────────────────────────────────────────────────────────┤
 │ スタッフ                                                             │
-│   StaffAuthGuard → パスコード or Google/メール                       │
-│   セッション: localStorage.staffSession + Firestore staff を再検証    │
+│   StaffAuthGuard → Firebase Auth（Google または Email/Password）      │
+│   セッション: Firebase Auth + localStorage.staffSession              │
+│                + Firestore staff を再検証                            │
 ├────────────────────────────────────────────────────────────────────┤
 │ 管理者                                                               │
 │   AdminAuthGuard → Google/メール (Firebase Auth 必須)                │
@@ -274,7 +285,11 @@ Firestore `settings/adminPermissions` を見て、ログインスタッフのロ
 └────────────────────────────────────────────────────────────────────┘
 ```
 
-Firebase Auth の薄いラッパー（Context）は廃止済み。認証状態は各ガード（`StaffAuthGuard` / `AdminAuthGuard`）と localStorage で完結する。
+旧 `customers.passcode` によるポータルログインは廃止済み。スタッフのパスコード実装は
+`NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN=true` の場合だけ表示されるが、未認証利用者は
+Firestore Rules により `staff` を read できず、単独の未認証ログイン経路としては成立しない。
+Firebase Auth の薄いラッパー（Context）は廃止済みで、認証状態は各レイアウト/ガードが
+Firebase Auth と Firestore を直接確認し、localStorage は画面セッション互換に使う。
 
 ロール:
 - `admin` — 全機能
@@ -314,7 +329,7 @@ Firebase Auth の薄いラッパー（Context）は廃止済み。認証状態�
 | [`src/lib/billing-rules.ts`](src/lib/billing-rules.ts) | 請求計算 |
 | [`src/lib/incentive-rules.ts`](src/lib/incentive-rules.ts) | スタッフランク・インセンティブ計算 |
 | [`src/lib/firebase/config.ts`](src/lib/firebase/config.ts) | Firebase 初期化 |
-| [`src/lib/firebase/customer-destination.ts`](src/lib/firebase/customer-destination.ts) | customers ⇄ destinations 同期 |
+| [`src/lib/firebase/customer-user.ts`](src/lib/firebase/customer-user.ts) | Portal Auth / `customerUsers` ヘルパー |
 
 ### 8-2. 共通フック（`src/hooks/`）
 
@@ -328,19 +343,22 @@ Firebase Auth の薄いラッパー（Context）は廃止済み。認証状態�
 
 | コレクション | キー | 用途 |
 |---|---|---|
-| `users` | uid | Firebase Auth 連携 |
 | `staff` | docId | スタッフマスタ |
+| `staffByEmail` | emailKey | Firebase Auth email からスタッフを引く mirror |
 | `customers` | docId | 顧客マスタ |
+| `customerUsers` | uid | 顧客ポータルの Firebase Auth 利用者 |
 | `tanks` | docId | タンク状態（status, location, staff） |
 | `logs` | docId | 操作ログ（必ず tank 更新とペアで書かれる） |
 | `transactions` | docId | 受注/返却/未充填報告（type で判別） |
-| `destinations` | uid | 貸出先 |
 | `orderMaster` | docId | 発注品目定義 |
 | `orders` | docId | 資材発注 |
 | `priceMaster` | docId | 操作単価 |
 | `rankMaster` | docId | ランク条件 |
 | `settings/adminPermissions` | — | ページ権限 |
 | `settings/portal` | — | ポータル設定 |
+
+`destinations` コレクションは廃止済みで、同コレクションへのコード参照はなく、
+Firestore Rules も read / write を拒否する。
 
 ---
 
