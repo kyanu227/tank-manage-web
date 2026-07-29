@@ -100,7 +100,8 @@ export default function CustomerReturnPage() {
     if (now >= scheduled) {
       setAutoTriggered(true);
       // Submit after short delay to let UI settle
-      setTimeout(() => submitReturn(true, todayKey), 1200);
+      const timerId = setTimeout(() => submitReturn(true, todayKey), 1200);
+      return () => clearTimeout(timerId);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scheduleTime, loading, identity]);
