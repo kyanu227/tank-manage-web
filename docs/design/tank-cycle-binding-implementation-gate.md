@@ -8,6 +8,103 @@
 - 改訂: 初版を独立 Codex reviewer が `NEEDS_CORRECTION` と判定。
   指摘10件をすべて反映して全面改訂した（この版が正本）
 
+
+## 0B. 第2回反証レビューの未解決事項（2026-07-29）— **gate 未達**
+
+4判断を反映した版を独立 reviewer が再検証し、**`REQUEST_CHANGES`** と判定した。
+**次の7件が解決するまで PR-A の実装に入らない。**
+
+### B-1. 検証位置が §6.1 #13 と両立しない（最重要）
+
+§3.4 は「全 `prepared` 完成後 〜 `:584` の前」に検証すると書いたが、
+`prepared` の構築中に `planTankTransition` が走り（`tank-operation.ts:474,486`）、
+**失敗すると汎用 error が先に throw される**。
+
+→ 「status と cycle が両方変わった場合も stale error」（§3.5 / §6.1 #13）を保証できない。
+
+**修正**: 検証位置を **「全 tank snapshot の read 完了後、transition planning より前」**の
+二段階処理にする。これで writer call 0件も維持できる。
+
+### B-2. portal 作成時の一致検査に authoritative な実装境界が無い
+
+§7.1 は**検査内容**を決めたが、**どこが検査するか**が未定。現状:
+
+- portal page の `TankItem` は `customerId` も `latestLogId` も保持していない（`page.tsx:64,66`）
+- legacy fallback は `location == customerName` の結果を統合し、
+  fallback 側の `customerId` が欠落・別顧客でも除外しない（`customer-reads.ts:60,68`）
+- Rules は request owner との一致だけを見る（`firestore.rules:1165`）。tank との一致は見ない
+- B-1 も「field の型検証」のみ（§5）
+
+**`request.customerId` の再利用自体に semantic conflict は無い**が、次が成立する場合に限る:
+
+1. page DTO が観測時の `customerId` と `latestLogId` を保持する
+2. application service が owner と観測 `customerId` の一致・両値の非空を検査する
+3. **B-1 Rules が marker 存在時に、current tank の両値と request payload の一致を検査する**
+4. B-3 Rules が同じ検査を必須化する
+
+legacy fallback は**表示互換にだけ**使い、identity / cycle binding には使わない。
+対象は明示的に拒否または disabled にする。§4.3 の pipeline を `customerId` 検査経路まで含めて書き直す。
+
+### B-3. Rules 3段階でも legacy 増加は止まらない
+
+staff は `isStaff() || isOwnTransactionCreate()` で**任意の transaction を作成できる**
+（`firestore.rules:1854`）。§5.1 はこの bypass を認識しているが解決策が無い。
+
+**修正**: B-3 は staff による `return / pending_return` create にも有効な marker 契約を要求するか、
+その create 自体を禁止する。
+
+加えて **空文字・空白 marker を許す余地**がある（B-1 は型のみ、B-3 は `hasAll` のみ）。
+§6.5 の監査も「field を持たないもの」しか数えない。
+→ 監査対象を **missing / null / 非 string / 空 / 空白**へ広げ、Rules test にも追加する。
+
+**PR-B' と B-3 の順序も未確定。** B-3 が先で B' が後だと、その間は
+marker 付き request でも confirmation guard が使われず ABA が残る。
+
+### B-4. bulk 欠落候補の扱いが未決（§7 の「4件すべて確定」と矛盾）
+
+§7.1 は「対象外 or disabled は PR-A brief で決める」と先送りしている。
+現状の UI は group 全件をそのまま submit する
+（`useBulkReturnByLocation.ts:79,100`）ため、候補 query で単純除外すると
+**operator から静かに消え、silent bypass を防げない**。
+
+**本 gate で固定すべきこと**:
+
+- 表示上 disabled にして理由を示す、または**除外本数と修復導線を明示**する
+- submit payload に欠落候補が混入した場合も **fail-closed**
+- 欠落候補の eligibility / disabled behavior を専用 test で固定
+- それに伴う PR-A の変更ファイルを確定
+
+### B-5. §6.1 の18 test のうち2件は PR-A の対象外
+
+- **#17**（log top-level customer と rental boundary customer の一致）は
+  **bulk の実経路では top-level customer が存在しない**
+  （`bulk-return-workflow.ts:32` は customer を渡さない）。portal B' の happy-path test と思われる
+- **#18**（legacy pending policy）は PR-B' の test
+
+→ **PR-A 用の18件へ差し替えるか、PR 別に test 表を分割する。**
+L2 5件も実施時期と承認者が未定。
+
+### B-6. §7A remediation の案1・案2 は不適切
+
+| 案 | 問題 |
+|---|---|
+| 1. Token Creator 付与 | **impersonation を可能にするだけで、target SA に Firestore read 権限を与えない。** cutover SA の direct binding は剥奪済み（`transition-cutover-summary-2026-07-18.md:153`）。旧 custom role を戻すと create/update/delete も戻り read-only 条件に反する（`runbook:92`）。**Token Creator に加えて target SA への一時的な read-only role が必要** |
+| 2. service account key | 「read-only key」ではなく「key が表す SA の権限が read-only」。repo 直下の `firebase-service-account.json` は gitignore されていても安全な保管場所ではなく、**runbook:145 は repository 外へ移すよう要求している** |
+| 3. ADC 再ログイン | **概ね正しい。** `roles/datastore.viewer` は get/list を持ち create/update/delete を持たない。ただし既存 `GOOGLE_APPLICATION_CREDENTIALS` の unset と、quota project 使用時の `serviceusage.services.use` または `--disable-quota-project` の扱いを記載すべき |
+
+→ **案3 を第一候補**とし、案1は「Token Creator + target SA への一時 read-only role」に書き直す。
+案2は保管場所を repository 外に限定する。
+
+### B-7. 「判断済み」と「人間判断」の表現が併存している
+
+§3.2 / §4.2 / §4.3 付近に未決のままの表現が残っている。
+§7.1 の確定事項への参照に直す。
+
+---
+
+**この §0B が解消されるまで、§9 の gate は通過していない。**
+
+
 ## 1. 守るべき不変条件（normative）
 
 > **ある貸出 cycle に対して作られた返却操作は、その cycle が閉じられた後に実行されてはならない。**
