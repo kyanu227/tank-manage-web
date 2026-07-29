@@ -29,11 +29,9 @@
 
 | 資料 | 矛盾内容 | 現行の事実 |
 |---|---|---|
-| `AGENTS.md` | ディレクトリ図に `staff/orders` `staff/returns` `staff/maintenance` `staff/bulk-return` を記載 | いずれもroute実在せず。現行は lend / return / fill（OperationsTerminal薄wrapper）+ damage / repair / inspection / inhouse / dashboard / mypage / supply-order / tank-purchase / tank-register。`/staff` は `/staff/lend` へ、`/staff/order` は `/staff/supply-order` への互換redirect |
 | `AGENTS.md` | 「`tanks.customerId` の追加は未決事項として扱い、勝手に実装しない」 | 現在貸出projectionとして実装済み（tank-types.ts:9-12、tank-operation.ts経由で書き込み。監査R-28） |
-| `CLAUDE.md` | ディレクトリ構造（orders/returns/bulk-return記載、supply-order・tank-purchase・tank-register・inspection・repair・admin配下の新ページ群が欠落） | 上と同じroute構成。admin側も operation-reviews / security-rules / state-diagram / order-master / staff / customers/users / settings/portal / settings/tank-operations が存在 |
-| `CLAUDE.md` | 顧客ポータル認証に「パスコード」経路を記載。`destinations` を現役コレクションとして記載 | 旧customers.passcode経路はPortal Auth Phase 0で廃止済み（AGENTS.md）。destinationsは廃止済み・コード参照なし |
-| `SITEMAP.md` | 2026-04-27時点の画面構成 | 上記のstaff/admin route改編が未反映 |
+| `CLAUDE.md` / `docs/architecture/refactor-sequence.md` §7 | Codex発注時の tracked `progress.md` 毎回追記を前者は必須、後者は本sequenceの前提にしないとしており、運用ルールが矛盾 | `progress.md` の最終git更新は2026-05-04で、PR-01〜PR-12の記録はない。どちらを正とするかは人間判断が必要であり、両ルールは未変更 |
+| `AGENTS.md` / `CLAUDE.md` | 変更禁止fileとして `firestore.indexes.json` を列挙 | 当該ファイルはリポジトリにも git 履歴にも存在しない。`firebase.json` も Rules のみを管理しており、index は Firebase Console の手動運用 |
 | `docs/refactor/refactor-roadmap.md` | master/settings一律repository化、repository skeleton=未了write移行という前提 | 前提無効（監査R-33・R-34: Phase 2-B read移行完了、write未移行は意図的なphase分離） |
 | `docs/design/strict-vs-assisted-transition-mode.md` §「production Reset未準備」 | cutover完了済み | 同資料自身が完了を追記済み（監査R-43）。この節のみhistorical |
 
@@ -68,7 +66,7 @@
 | 資料 | 更新内容 |
 |---|---|
 | `AGENTS.md` | ディレクトリ図の現行化、tanks.customerId記述の現状化（projection実装済み・正本ではない旨） |
-| `CLAUDE.md` | ディレクトリ構造・認証フロー・コレクション表の現行化。Codex発注の`progress.md`毎回追記ルールを、refactor-sequence §7の追跡方針（job status + PR本文 + .codex-logs/）と整合させるか判断 |
+| `CLAUDE.md` | ディレクトリ構造・認証フロー・コレクション表の現行化（2026-07-29 実施済み）。`progress.md` 毎回追記ルールも同日に改訂済み |
 | `SITEMAP.md` | route一覧の現行化 |
 | historical凍結の各資料 | 冒頭に「superseded by docs/architecture/（日付）」注記を追記 |
 

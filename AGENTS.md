@@ -10,7 +10,7 @@
 | Next.js | 16.1.6 | フレームワーク（App Router, 静的エクスポート） |
 | React | 19.2.3 | UIライブラリ |
 | TypeScript | 5 | 型安全 |
-| Firebase Auth | 12.10.0 | 認証（Google, Email/Password, パスコード） |
+| Firebase Auth | 12.10.0 | 認証（Google, Email/Password） |
 | Firestore | 12.10.0 | データベース |
 | Firebase Hosting | — | デプロイ先（静的サイト） |
 | Tailwind CSS | 4 | スタイリング |
@@ -27,26 +27,34 @@ src/
 │   ├── admin/                  # 管理画面（AdminAuthGuard）
 │   │   ├── layout.tsx          # 管理レイアウト・ナビ
 │   │   ├── page.tsx            # ダッシュボード
-│   │   ├── settings/           # マスターデータ管理
+│   │   ├── settings/           # ポータル・耐圧検査・状態遷移モード設定
 │   │   ├── permissions/        # ページ権限制御
-│   │   ├── customers/          # 顧客管理・PIN管理
+│   │   ├── customers/          # 顧客管理・ポータル利用者管理
 │   │   ├── notifications/      # 通知設定（メール・LINE）
 │   │   ├── staff-analytics/    # スタッフ実績ランキング
+│   │   ├── staff/              # 担当者管理
 │   │   ├── money/              # 操作単価・ランク条件
 │   │   ├── billing/            # 請求書発行
-│   │   └── sales/              # 売上統計
+│   │   ├── sales/              # 売上統計
+│   │   ├── operation-reviews/  # 例外操作レビュー
+│   │   ├── order-master/       # 発注品目マスタ
+│   │   ├── state-diagram/      # 状態遷移図
+│   │   └── security-rules/     # Security Rules 確認
 │   ├── staff/                  # スタッフ操作画面（StaffAuthGuard）
 │   │   ├── layout.tsx          # スタッフレイアウト・ナビ
-│   │   ├── page.tsx            # メイン操作（貸出/返却/充填）
-│   │   ├── orders/             # 受注管理・返却タグ処理・一括返却（3タブ）
-│   │   ├── returns/            # 現場返却（※ordersに統合済み、残存）
+│   │   ├── page.tsx            # → /staff/lend リダイレクト
+│   │   ├── lend/               # 貸出（手動/受注）
+│   │   ├── return/             # 返却タグ処理・一括返却・手動返却
+│   │   ├── fill/               # 充填
 │   │   ├── damage/             # 破損報告
-│   │   ├── maintenance/        # メンテナンス（修理・耐圧）
+│   │   ├── repair/             # 修理完了
+│   │   ├── inspection/         # 耐圧検査
 │   │   ├── order/              # → /staff/supply-order 互換リダイレクト
 │   │   ├── supply-order/       # 備品・資材発注
+│   │   ├── tank-purchase/      # タンク購入
+│   │   ├── tank-register/      # タンク登録
 │   │   ├── mypage/             # マイページ
 │   │   ├── inhouse/            # 自社タンク管理
-│   │   ├── bulk-return/        # 一括返却（※ordersに統合済み、残存）
 │   │   └── dashboard/          # ステータス集計・ログ管理
 │   └── portal/                 # 顧客ポータル（Firebase Auth + customerUsers）
 │       ├── layout.tsx          # ポータルレイアウト・Auth状態管理
@@ -57,6 +65,13 @@ src/
 │       ├── order/              # タンク発注
 │       ├── return/             # 返却申請（自動返却対応）
 │       └── unfilled/           # 未充填報告
+├── features/
+│   ├── staff-operations/       # 貸出・返却・充填・受注
+│   ├── staff-dashboard/        # スタッフ集計・ログ表示
+│   ├── maintenance/            # メンテナンス workflow
+│   ├── inhouse/                # 自社タンク workflow
+│   ├── procurement/            # 備品発注・タンク購入/登録
+│   └── admin-customers/        # 顧客・ポータル利用者管理
 ├── components/
 │   ├── AdminAuthGuard.tsx      # 管理者認証・権限ガード
 │   ├── StaffAuthGuard.tsx      # スタッフ認証ガード
@@ -243,8 +258,11 @@ Firestore composite index は Firebase Console で手動管理しているもの
   ※ 旧 customers.passcode 経路は Portal Auth Phase 0 で廃止済み。
 
 スタッフ:
-  StaffAuthGuard → パスコード or Google/メール
-  セッション: localStorage (staffSession) + Firestore staff検証
+  StaffAuthGuard → Firebase Auth（Google または Email/Password）
+  セッション: Firebase Auth + localStorage (staffSession) + Firestore staff検証
+  ※ パスコード実装は NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN=true の場合だけ表示される。
+     ただし未認証利用者は Firestore Rules により staff を read できず、
+     単独の未認証ログイン経路としては成立しない。
 
 管理者:
   AdminAuthGuard → Google/メール → Firebase Auth
@@ -255,7 +273,7 @@ Firestore composite index は Firebase Console で手動管理しているもの
 
 - `admin` — 管理者（全機能アクセス可）
 - `準管理者` — 一部管理ページへのアクセス（adminPermissions で制御）
-- `worker` — スタッフ（パスコード認証、操作画面のみ）
+- `worker` — スタッフ（操作画面のみ）
 - `customer` — 顧客（ポータルのみ）
 
 ## Project direction
@@ -392,7 +410,7 @@ Firestore 直接アクセスが残っているという理由だけで、勝手�
 
 - `customers` を将来的な貸出先・請求単位の正本として扱う
 - `destinations` は廃止済み。旧互換としても使わない
-- `src/lib/firebase/customer-destination.ts` は削除済み
+- 旧 `customer-destination.ts` ヘルパーは削除済み
 - `admin/settings` の destinations タブは削除済み
 - Firestore 上の `destinations` データ削除はコード変更とは別作業として扱う
 - `logs.location` は履歴表示用の当時名として残す
