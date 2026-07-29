@@ -1,10 +1,10 @@
 # 貸出 cycle binding — 実装前 design gate
 
-- 作成日: 2026-07-29（第3改訂）
+- 作成日: 2026-07-29（第4改訂）
 - 対象commit: `3e438129b2394cbba173d6d47c20b351f493440f`
 - 位置づけ: **PR-A1 / PR-A2 の実装前 gate。** PR #166（F4）と PR #168（F6-B/C/D）の共通正本
 - 改訂履歴: 初版 → 独立 reviewer `NEEDS_CORRECTION`（10件）→ 全面改訂
-  → 4判断反映 → reviewer `REQUEST_CHANGES`（7件）→ **本版で全件を解決**
+  → 4判断反映 → reviewer `REQUEST_CHANGES`（7件）→ 第3改訂 → reviewer `REQUEST_CHANGES`（3件）→ **本版で全件を解決**
 
 ## 0. reviewer 指摘7件への対応表
 
