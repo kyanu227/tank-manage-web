@@ -63,6 +63,44 @@ reviewer 判定:
 
 → PR-c（decoder 統一）と PR-d（race 修正）を**セットで完成**とする。
 
+
+## 0A. 確定した判断（2026-07-29 ユーザー決定）
+
+**§7 の判断1（doc 不在時の準管理者 `/admin`）は「選択肢 A: deny」で確定した。**
+
+```
+document missing:   deny
+document malformed: deny
+unknown path:       deny
+```
+
+**準管理者の `/admin` を自動 allow しない。**
+
+理由（ユーザー）: fail-closed であり、document 消失や初期化失敗が
+**権限拡大につながらない**ため。
+
+### この決定の帰結
+
+| 経路 | 決定後の挙動 |
+|---|---|
+| `AdminAuthGuard`（現行 = 全拒否） | **変更なし**。現行が既に決定どおり |
+| `admin-permissions-service.getAdminPermissions()` の default | **変更が必要**。現在 `/admin` を準管理者に許可する default を返すため、`/admin/permissions` の表示が enforcement と食い違う |
+| malformed（`roles` が string 等） | **fail-closed へ修正**（現在は誤 allow し得る。§0 訂正1・§4 参照） |
+| unknown path | **fail-closed へ修正**（現在は registry 未登録 path が素通りする） |
+
+→ 実装時に**挙動が変わるのは `/admin/permissions` 画面の表示**と、
+   **malformed / unknown path の扱い**であり、
+   **正常な document が存在する場合の準管理者の実効権限は変わらない。**
+
+§7 の判断2（malformed の扱い）と unknown path は、
+reviewer 判定のとおり**人間判断不要の bug fix** として扱う。
+
+### 実装ステータス
+
+**production 実装は行わない。** 本 PR は Draft design PR のまま保持する。
+実装は cycle binding（PR #171 / PR-A 系列）の後。
+
+
 ## 1. 現状 — 同じ document を2経路が別々に decode している
 
 `settings/adminPermissions` を読む経路が2つあり、**doc 不在時の意味が正反対**。
