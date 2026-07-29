@@ -14,7 +14,7 @@
 | B-2 | portal 作成時の一致検査に実装境界が無い | **§4.2 で page DTO / application service / B-1 Rules / B-3 Rules の4層を固定。Rules が最終 authoritative** |
 | B-3 | staff が任意の transaction を作れるため Rules 3段階でも legacy 増加が止まらない | **§5.2 で B-3 を「全 `pending_return` creator 対象」に変更。staff 経路も inventory する** |
 | B-4 | bulk 欠落候補の扱いが未決。単純除外は silent bypass | **§7.4 で「表示は維持・選択不可・group 全体 disabled・部分実行禁止」に確定** |
-| B-5 | test #17 / #18 は PR-A 対象外 | **§6.1 を core 16件に絞り、#17 / #18 を PR-B' へ移動** |
+| B-5 | 旧 test #17 / #18 は PR-A 対象外 | **旧 #17 / #18 を PR-B' へ移動（§6.2）。第3改訂の R3 指摘で happy-path marker pass-through と planner 順序を追加し、core は19件** |
 | B-6 | §7A remediation の案1・案2 が不適切 | **§8 を「一時 audit SA」方式に書き直し。cutover SA の再利用と key 発行を禁止** |
 | B-7 | 「判断済み」と「人間判断」の表現が併存 | 本版で全面書き直し。未決は §10 の3件（brief 段階で確定）だけ |
 
@@ -147,7 +147,7 @@ transaction 外の照合（preflight fast-fail / Rules）は**併用してよい
 
 検証失敗時に次をすべて満たす。
 
-- **planner call 0件**（可能なら固定する）
+- **planner call 0件（必須）**。§3.3 の順序から必然的に導かれるため「可能なら」ではない
 - `tx.set` / `tx.update` **0件**
 - aggregationRevision write **0件**（`tank-operation.ts:584` の `tx.set` より前で失敗する）
 - log write 0件 / tank write 0件
@@ -267,7 +267,7 @@ Rules test に **missing / null / 非 string / 空 / 空白**を含める。
 
 ## 6. 検証要件
 
-### 6.1 PR-A1 の core unit test — **16件**
+### 6.1 PR-A1 の core unit test — **19件**
 
 | # | 内容 |
 |---|---|
@@ -287,8 +287,11 @@ Rules test に **missing / null / 非 string / 空 / 空白**を含める。
 | 14 | **carry_over の既存 catch 経路で正しい message**（`expectedCycle` 未指定で踏むこと） |
 | 15 | **marker 欠落で bulk workflow が domain writer を呼ばない** |
 | 16 | **複数 bulk のうち1件欠落で部分継続しない** |
+| 17 | **valid な bulk 候補の観測値2件が、exact な `expectedCycle` として domain writer に渡る**<br>（これが無いと「欠落は拒否するが valid 時に `expectedCycle` を付け忘れる」実装でも通過する） |
+| 18 | **複数件すべてについて #17 の契約を満たす** |
+| 19 | **valid item が先・stale item が後の bulk で、全 cycle 検査完了前に planner が一度も呼ばれない**<br>（#10 は writer call しか見ないため、この順序違反を検出できない） |
 
-**#10 / #11 / #14 / #15 / #16 は必須。**
+**#10 / #11 / #14 / #15 / #16 / #17 / #19 は必須。**
 
 ### 6.2 PR-B' へ移した test（旧 #17 / #18）
 
@@ -404,6 +407,7 @@ cycle情報が不足しているタンクが含まれるため、
 | 3 | inspection（`tank-rules.ts:227`、`inspection-workflow.ts:36`） |
 | 4 | cross-tank correction（`tank-operation.ts:901,1022`） |
 | 5 | advisory manual lend / fill recovery（現在 strict 運用のため最後） |
+| 5 | **advisory inhouse use / `inhouse_use_retro` recovery**。`inhouse-use-workflow.ts:15,21` は `source:"manual"` / `workflow:"tank_operation"` で実行するため<br>**advisory 対象になり得**、planner は `inhouse_use_retro` の前に `closeCurrentHolder()` で現在 cycle を閉じる（`tank-transition-policy.ts:170,539,586`） |
 
 **PR-A1 / A2 に混ぜない。** PR-A merge 後に docs-only で
 **`remaining tank-cycle safety gate`** を作成する。
@@ -452,9 +456,24 @@ key 方式は `runbook:145`（repository 外へ）に反するため採らない
 |---|---|
 | **#171 merge** | **不要**（docs-only。production 変更を開始しない） |
 | **PR-A1 / A2 Draft 作成** | **不要** |
-| **PR-A merge / production 適用** | **marker readiness 確認が必要** |
+| **PR-A1 単独 merge** | **不要。ただし production deploy しない場合に限る**（§8.5） |
+| **最初の production 適用** | **marker readiness 確認が必要**（§8.5） |
 | **PR-B'** | **legacy pending 監査が必要** |
 | **PR-B-3** | **legacy pending 0件確認が必須** |
+
+### 8.5 A1 / A2 の production 境界（R3 指摘3の確定）
+
+**A1 だけを production へ出してはいけない。**
+
+A1 のみ適用すると、現行 UI は一括返却ボタンとタグ選択を**有効表示したまま**
+workflow error になる（`useBulkReturnByLocation.ts:79`、`BulkReturnByLocationPanel.tsx:419`）。
+データ安全性は fail-closed で保たれるが、作業者体験としては不良。
+
+```
+A1 単独 merge          : 可。ただし production deploy しない場合に限る
+最初の production 適用 : A1 + A2 + marker readiness 確認 + 必要な L2 が揃った後
+代替                   : A1 と A2 を同一 production release に束ねる
+```
 
 ---
 
@@ -487,7 +506,7 @@ key 方式は `runbook:145`（repository 外へ）に反するため採らない
 - [x] §3.3 検証順序（planning 前）— **確定**
 - [x] §4.2 portal 4層境界 — **確定**
 - [x] §5.2 B-3 は全 `pending_return` creator 対象 — **確定**
-- [x] §6.1 PR-A1 core test 16件 — **確定**
+- [x] §6.1 PR-A1 core test 19件 — **確定**
 - [x] §8.4 監査は #171 merge 条件ではなく downstream gate — **確定**
 - [ ] PR-A1 の変更対象ファイル — **PR-A1 design brief で確定する**
 - [ ] PR-A2 の変更対象ファイル — **PR-A2 design brief で確定する**
