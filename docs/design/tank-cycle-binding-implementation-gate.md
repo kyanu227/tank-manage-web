@@ -358,57 +358,165 @@ marker（expectedLatestLogId）を持たないものの件数
 
 **§7.2 の判断材料はこちら。** §6.4 では分からない。
 
-## 7. 🔴 人間判断が必要な事項（4件）
+### 6.6 active returnable tank の marker readiness 監査（read-only、L0）
 
-### 7.1 `expectedCustomerId` の意味と3値の扱い
+対象 status: `lent` / `unreturned` / `in_house`
 
-- request の既存 `customerId` を使う（§4.2 (i)）か、観測値を新 field に保存する（(ii)）か
-- `tank.customerId === undefined` の legacy tank を bulk / portal それぞれどう扱うか
-  （**`null` への無言変換は禁止**）
+集計:
 
-### 7.2 cycle 情報を持たない既存 `pending_return` request の扱い
+- 総件数
+- `customerId` が `undefined` の件数
+- `customerId` が `null` の件数
+- `customerId` が空白の件数
+- `latestLogId` が `undefined` / `null` / 空白の件数
+- **両方が有効な件数**
+- status 別内訳
 
-| 選択肢 | 内容 |
+→ **PR-A で bulk return の何件が cycle guard を通せるか**が分かる。
+   欠落が多い場合、§7.1 の「対象外」か「disabled」かの UI 判断に直接影響する。
+
+### 6.7 baseline 比較（監査の前後で実施）
+
+read-only であることを確認するため、監査の前後で次を比較する。
+
+- tanks 総数
+- active logs 件数
+- `pending_return` 件数
+- aggregation revision
+- transactions 件数
+
+**並行する業務操作で変化した場合、その監査結果を確定値として扱わず停止する。**
+
+## 7. 確定した判断（2026-07-29 ユーザー決定）
+
+初版で「人間判断が必要」としていた4件は**すべて確定した**。以下は決定事項であり、
+実装者はこれに従う。**再検討や独自解釈をしない。**
+
+### 7.1 `expectedCustomerId` は既存の `request.customerId` を使う
+
+**新しい `expectedCustomerId` field は追加しない。**
+
+```
+expectedCustomerId  = request.customerId       （既存 field を正本とする）
+expectedLatestLogId = 新規 field として保存
+```
+
+理由: request の `customerId` と新しい `expectedCustomerId` を二重保持すると、
+**両者が不一致になり得るという新たな不変条件が生まれる**。
+既存 field を正本にし、作成時の tank との一致を検証するほうが単純。
+
+#### portal request 作成時の必須検査（fail-closed）
+
+request 作成時に、観測した tank について次を**すべて**満たすこと。
+
+```
+tank.customerId が非空 string
+tank.customerId == request.customerId      （完全一致）
+tank.latestLogId が非空 string
+```
+
+不成立時:
+
+- **request を作成しない**
+- `undefined` を `null` へ変換しない
+- `customerName` / `location` fallback で cycle-bound request を作らない
+- 現在値で自動補完しない
+- **明示的な legacy identity / missing cycle marker error** として停止させる
+
+#### bulk return
+
+```
+expectedCustomerId  = 候補取得時の tank.customerId
+expectedLatestLogId = 候補取得時の tank.latestLogId
+```
+
+**両方とも非空 string を必須**とする。
+
+欠落候補は **cycle guard を skip しない**。
+「一括返却対象外にする」か「明示的に disabled にする」かのどちらかとし、
+**どちらを採るかは PR-A brief で現在 UI との整合を確認して決める**。
+個別の identity 修復へ回す。
+
+`undefined` / `null` / 空白を**同値にしない**。
+
+#### `expectedCycle` の契約
+
+```ts
+type ExpectedTankCycle = Readonly<{
+  customerId: string;
+  latestLogId: string;
+}>;
+```
+
+- 命名は既存規約に合わせて調整してよいが、**両 field を required にする**
+- runtime で片方が欠落した object を渡された場合も **silent skip せず error** にする
+
+### 7.2 legacy `pending_return` は監査結果で分岐（policy は確定）
+
+```
+marker 欠落 0件:
+  欠落 request を一律拒否
+
+marker 欠落 1件以上:
+  cutover 前に全件を正規処理または取消し
+  0件を確認してから一律拒否
+```
+
+**原則は選択肢 (e)。**
+
+- **(f)** は「現物確認・顧客確認・元 cycle の特定が必要で通常処理できない request」だけに使う。
+  cycle-bound request を再作成し、旧 request を監査付きで閉じる
+- **(g) の override は採用しない**
+- **現在 tank の `latestLogId` を legacy request へ自動 backfill しない**
+
+### 7.3 本番 read-only 監査は許可済み（write は一切禁止）
+
+出力してはならないもの: 秘密値、顧客名、メール、メモ、電話番号。
+**件数と匿名化 ID のみ**を記録する。document ID は先頭・末尾をマスクする。
+
+監査内容は §6.5 / §6.6 / §6.4 を参照。
+
+### 7.4 残る ABA 経路はすべて別 gate へ送る（受容しない）
+
+| 優先度 | 経路 |
 |---|---|
-| (a) customerId のみで照合 | **reviewer が反対** |
-| (b) 一律拒否 | 正当な未処理申請を巻き込む |
-| (c) スタッフの明示確認を要求 | 一時運用にできる（legacy 0件で削除） |
-| (d) 期限を切る | 期限値の決定が必要 |
-| **(e)** | **cutover 前に legacy pending を全件処理・取消し、0件を確認してから missing marker を一律拒否** |
-| **(f)** | legacy を自動処理せず、現物確認＋顧客確認のうえ cycle-bound request を再作成し、旧 request を監査付きで閉じる |
-| **(g)** | 一時的な legacy 専用 override（staff 確認・理由・actor を監査記録）、0件後に削除 |
+| 1 | manual return / keep |
+| 2 | inhouse return |
+| 3 | inspection |
+| 4 | cross-tank correction |
+| 5 | advisory manual lend / fill recovery（現在 strict 運用のため最後） |
 
-**初版の推奨 (a) は撤回する。** reviewer の反対理由:
+**PR-A へ混ぜてはいけない。**
+PR-A merge 後に docs-only で **`remaining tank-cycle safety gate`** を作成する。
 
-1. **同一顧客への再貸出を通すため、§1 の不変条件とユーザー指定の「両方必須」に正面から反する**
-2. finite でも自動的に減る保証はなく、未処理 request は何年でも残り得る
-3. marker を Rules で必須化しない限り、legacy 集合は**増加停止すら保証されない**（§5.1）
+## 7A. 監査の実施状況（2026-07-29 時点）
 
-**現在 tank の latestLogId を legacy request へ自動 backfill するのは禁止**
-（元 request がどの cycle に対して作られたか証明できない）。
+**状態: BLOCKED（IAM）。実施できていない。**
 
-**推奨**: まず §6.5 で marker 欠落 pending の実数を確認し、
-**0件なら一律拒否 (b)**、存在するなら **(e)**、それが困難なら一時的な **(f) / (g)**。
-
-### 7.3 §6.4 の監査を実施してよいか
-
-本番 Firestore への read 接続を伴う。
-
-### 7.4 今回保護しない ABA 経路をどう扱うか
-
-`expectedCycle` が optional であるため、次には cycle ABA が残る:
-
-| 経路 | 内容 |
+| 項目 | 結果 |
 |---|---|
-| manual return / keep | snapshot status を保持したまま後で submit（`manual-operation-workflow.ts:43`） |
-| inhouse return | 古い `in_house` cycle と新しい `in_house` cycle を区別できない（`inhouse-return-workflow.ts:31`） |
-| advisory manual lend / fill | recovery により現在顧客 cycle を閉じ得る（§2.1） |
-| inspection | 全 status から直接実行可能で、lent tank の customer projection を消せる（`tank-rules.ts:227`、`inspection-workflow.ts:36`） |
-| `applyLogCorrection` の cross-tank correction | 別 tank の現在 snapshot で書き換える（`tank-operation.ts:901,1022`） |
+| local gcloud ADC | 存在する。type = `impersonated_service_account` |
+| impersonation target | `transi***@okmarine-tankrental.iam.gserviceaccount.com`（cutover 用 SA） |
+| 実行結果 | `403 PERMISSION_DENIED: unable to impersonate: Permission 'iam.serviceAccounts.getAccessToken' denied` |
+| 原因 | cutover 完了後に production credential が再閉鎖されている（`transition-plan-v1-runbook.md:11`）。<br>production IAM 付与は運用時の別承認事項（同`:65`） |
 
-**今回の PR に混ぜてはいけない。** ただし
-「今回防ぐ経路」と「残る ABA 経路」を PR 本文と本 gate に明記し、
-別 gate へ送るか受容するかを決めること。
+**これは設計どおりの安全側の状態であり、異常ではない。**
+
+### 必要な remediation（人間作業）
+
+次のいずれか。
+
+1. 現在の principal に、対象 SA への `roles/iam.serviceAccountTokenCreator` を付与する
+2. read 専用の service account key を発行し、
+   `GOOGLE_APPLICATION_CREDENTIALS` または `./firebase-service-account.json`（gitignore 済み）で渡す
+3. `gcloud auth application-default login` で impersonation なしの ADC に切り替え、
+   その principal に Firestore の read 権限（`roles/datastore.viewer` 等）を付与する
+
+runbook `:120-129` の手順（IAM 変更後は最低10分待ち、反復確認が一致するまで進まない）に従うこと。
+
+**監査が完了するまで、§7.2 の分岐（0件か1件以上か）は確定しない。**
+policy 自体は確定しているため、実装（PR-A）は監査を待たずに進められる。
+監査結果が必要になるのは **PR-B'（返却確定側）** の legacy 扱いを実装する時点。
 
 ## 8. 変更してはいけないもの / してはいけないこと
 
@@ -427,13 +535,24 @@ marker（expectedLatestLogId）を持たないものの件数
 
 ## 9. gate 通過条件
 
-- [ ] §7.1（expectedCustomerId の意味と3値の扱い）が決まっている
-- [ ] §7.2（legacy pending の扱い）が決まっている。**(a) は選択肢から外れている**
-- [ ] §6.5 の legacy pending 件数監査が実施されている
-- [ ] §6.4 の heuristic 監査を実施するか決まっている（§7.3）
-- [ ] §7.4 の残存 ABA 経路が「別 gate 送り」か「受容」に分類されている
+- [x] §7.1（`expectedCustomerId` の意味と3値の扱い）が決まっている — **確定**
+- [x] §7.2（legacy pending の扱い）が決まっている。(a) と (g) は選択肢から外れている — **確定**
+- [x] §7.3（監査実施可否）が決まっている — **許可済み**
+- [x] §7.4（残存 ABA 経路の分類）が決まっている — **全件を別 gate へ送る**
+- [ ] §6.5 の legacy pending 件数監査が実施されている — **BLOCKED（§7A）**
+- [ ] §6.6 の active returnable tank readiness 監査が実施されている — **BLOCKED（§7A）**
+- [ ] §6.4 の heuristic 監査が実施されている — **BLOCKED（§7A）**
 - [ ] PR-A の変更対象ファイルが確定している
       （`bulk-return-candidates.ts` は §4.1 のとおり必須でない可能性がある）
 - [ ] **Rules rollout 3段階**（B-1 optional → B-2 app → B-3 必須化）が運用手順に落ちている
 - [ ] §6.1 の18 test（特に #12 / #16）が計画に入っている
 - [ ] §6.3 の L2 シナリオ5件の実施タイミングと承認者が決まっている
+
+### 監査 BLOCKED が各 PR に与える影響
+
+| PR | 監査が必要か |
+|---|---|
+| **PR-A** | **不要。** §7.1 の契約は確定しており、bulk 候補の marker は毎回 read するため実装できる。<br>ただし §6.6 の結果は「対象外 / disabled」の UI 判断材料になるため、**brief 作成時に未確定である旨を明記する** |
+| PR-B-1 / B-2 | 不要 |
+| **PR-B'** | **必要。** §7.2 の分岐（0件 → 一律拒否 / 1件以上 → (e)）が決まらない |
+| PR-B-3（必須化） | **必要。** legacy 0件の確認が前提 |
