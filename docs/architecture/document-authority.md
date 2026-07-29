@@ -30,7 +30,7 @@
 | 資料 | 矛盾内容 | 現行の事実 |
 |---|---|---|
 | `AGENTS.md` | 「`tanks.customerId` の追加は未決事項として扱い、勝手に実装しない」 | 現在貸出projectionとして実装済み（tank-types.ts:9-12、tank-operation.ts経由で書き込み。監査R-28） |
-| `CLAUDE.md` / `docs/architecture/refactor-sequence.md` §7 | Codex発注時の tracked `progress.md` 毎回追記を前者は必須、後者は本sequenceの前提にしないとしており、運用ルールが矛盾 | `progress.md` の最終git更新は2026-05-04で、PR-01〜PR-12の記録はない。どちらを正とするかは人間判断が必要であり、両ルールは未変更 |
+| ~~`CLAUDE.md` / `docs/architecture/refactor-sequence.md` §7~~ | ~~`progress.md` 毎回追記の要否が矛盾~~ | **2026-07-29 解消済み**。ユーザー判断により、進捗・判断の正本を GitHub PR 本文 / merge 済み design note / refactor-sequence とし、`progress.md` は長期 phase・cutover の集約記録に用いる（PR ごとの毎回追記は必須にしない）。CLAUDE.md を改訂した |
 | `AGENTS.md` / `CLAUDE.md` | 変更禁止fileとして `firestore.indexes.json` を列挙 | 当該ファイルはリポジトリにも git 履歴にも存在しない。`firebase.json` も Rules のみを管理しており、index は Firebase Console の手動運用 |
 | `docs/refactor/refactor-roadmap.md` | master/settings一律repository化、repository skeleton=未了write移行という前提 | 前提無効（監査R-33・R-34: Phase 2-B read移行完了、write未移行は意図的なphase分離） |
 | `docs/design/strict-vs-assisted-transition-mode.md` §「production Reset未準備」 | cutover完了済み | 同資料自身が完了を追記済み（監査R-43）。この節のみhistorical |
