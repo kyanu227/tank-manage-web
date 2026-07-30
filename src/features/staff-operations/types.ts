@@ -51,6 +51,7 @@ export interface BulkTankDoc {
   status: string;
   customerId?: string | null;
   customerName?: string | null;
+  latestLogId?: string | null;
   location: string;
   staff: string;
   updatedAt: unknown;
