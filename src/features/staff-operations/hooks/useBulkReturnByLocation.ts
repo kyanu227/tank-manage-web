@@ -1,9 +1,19 @@
 "use client";
 
 import { useCallback, useMemo, useState } from "react";
-import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
+import type { Locale } from "@/lib/locale";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
+import {
+  StaleTankCycleError,
+  type StaleTankCycleIssue,
+} from "@/lib/tank-operation";
 import { RETURN_TAG } from "@/lib/tank-rules";
+import {
+  getBulkReturnGroupReadiness,
+  type BulkReturnCycleReadinessIssue,
+  type BulkReturnGroupReadiness,
+} from "../bulk-return-cycle-readiness";
 import {
   fetchBulkReturnCandidates,
   getBulkReturnGroupKeys,
@@ -19,6 +29,7 @@ export interface UseBulkReturnByLocationResult {
   bulkLoading: boolean;
   groupedTanks: Record<string, BulkTankWithTag[]>;
   groupMeta: Record<string, BulkReturnGroupMeta>;
+  groupReadiness: Record<string, BulkReturnGroupReadiness>;
   expanded: Record<string, boolean>;
   returning: Record<string, boolean>;
   groupKeys: string[];
@@ -34,6 +45,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   const [groupMeta, setGroupMeta] = useState<Record<string, BulkReturnGroupMeta>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [returning, setReturning] = useState<Record<string, boolean>>({});
+  const staffLocale = useStaffLocale();
 
   const fetchBulkTanks = useCallback(async () => {
     setBulkLoading(true);
@@ -86,6 +98,11 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       alert("持ち越しは貸出中のタンクのみ処理できます。未返却タンクの持ち越しを外してください。");
       return;
     }
+    const latestReadiness = getBulkReturnGroupReadiness(tanksToReturn);
+    if (!latestReadiness.ready) {
+      alert(formatMissingCycleAlert(latestReadiness.issues, staffLocale));
+      return;
+    }
     const keepCount = tanksToReturn.filter((tank) => tank.tag === RETURN_TAG.KEEP).length;
     const returnCount = tanksToReturn.length - keepCount;
     const confirmMessage = keepCount > 0
@@ -109,21 +126,33 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       alert(completeMessage);
       fetchBulkTanks();
     } catch (e: unknown) {
-      alert("エラー: " + errorMessage(e));
+      if (e instanceof StaleTankCycleError) {
+        alert(formatStaleCycleAlert(e.issues, staffLocale));
+      } else {
+        alert(`${BULK_RETURN_ERROR_TEXT.errorPrefix[staffLocale]}${errorMessage(e)}`);
+      }
     } finally {
       setReturning(prev => ({ ...prev, [groupKey]: false }));
     }
-  }, [fetchBulkTanks, groupMeta, groupedTanks]);
+  }, [fetchBulkTanks, groupMeta, groupedTanks, staffLocale]);
 
   const groupKeys = useMemo(
     () => getBulkReturnGroupKeys(groupedTanks, groupMeta),
     [groupMeta, groupedTanks]
   );
+  const groupReadiness = useMemo(() => {
+    const readinessByGroup: Record<string, BulkReturnGroupReadiness> = {};
+    Object.entries(groupedTanks).forEach(([groupKey, tanks]) => {
+      readinessByGroup[groupKey] = getBulkReturnGroupReadiness(tanks);
+    });
+    return readinessByGroup;
+  }, [groupedTanks]);
 
   return {
     bulkLoading,
     groupedTanks,
     groupMeta,
+    groupReadiness,
     expanded,
     returning,
     groupKeys,
@@ -136,4 +165,120 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+const BULK_RETURN_ERROR_TEXT = {
+  errorPrefix: {
+    ja: "エラー: ",
+    en: "Error: ",
+  },
+  missingCycleSummary: {
+    ja: "cycle情報が不足しているタンクが含まれるため、このグループは一括返却できません。",
+    en: "This group cannot be returned because some tanks are missing cycle information.",
+  },
+  staleCycleSummary: {
+    ja: "タンクのcycle情報が操作候補の作成後に変更されています。",
+    en: "Tank cycle information changed after the return candidates were prepared.",
+  },
+  affected: {
+    ja: "対象",
+    en: "Affected",
+  },
+  missing: {
+    ja: "不足",
+    en: "Missing",
+  },
+  details: {
+    ja: "内容",
+    en: "Details",
+  },
+  reload: {
+    ja: "再読込して再確認してください。",
+    en: "Reload and review the group before trying again.",
+  },
+} satisfies Record<string, Record<Locale, string>>;
+
+const CYCLE_FIELD_LABELS = {
+  customerId: {
+    ja: "顧客ID",
+    en: "customer ID",
+  },
+  latestLogId: {
+    ja: "最新操作ID",
+    en: "latest operation ID",
+  },
+} satisfies Record<StaleTankCycleIssue["field"], Record<Locale, string>>;
+
+const CYCLE_REASON_LABELS = {
+  missing_current: {
+    ja: "現在のcycle情報が不足",
+    en: "current cycle value is missing",
+  },
+  missing_expected: {
+    ja: "操作候補のcycle情報が不足",
+    en: "return candidate value is missing",
+  },
+  mismatch: {
+    ja: "現在値と操作候補が不一致",
+    en: "current and candidate values differ",
+  },
+} satisfies Record<StaleTankCycleIssue["reason"], Record<Locale, string>>;
+
+function formatMissingCycleAlert(
+  issues: readonly BulkReturnCycleReadinessIssue[],
+  locale: Locale,
+): string {
+  const affectedTankIds = [...new Set(issues.map((issue) => issue.tankId))];
+  const details = groupIssueLabelsByTank(
+    issues.map((issue) => ({
+      tankId: issue.tankId,
+      label: CYCLE_FIELD_LABELS[issue.field][locale],
+    })),
+    locale,
+  );
+  return [
+    BULK_RETURN_ERROR_TEXT.missingCycleSummary[locale],
+    "",
+    `${BULK_RETURN_ERROR_TEXT.affected[locale]}: ${affectedTankIds.join(locale === "ja" ? "、" : ", ")}`,
+    `${BULK_RETURN_ERROR_TEXT.missing[locale]}:`,
+    ...details,
+    "",
+    BULK_RETURN_ERROR_TEXT.reload[locale],
+  ].join("\n");
+}
+
+function formatStaleCycleAlert(
+  issues: readonly StaleTankCycleIssue[],
+  locale: Locale,
+): string {
+  const details = groupIssueLabelsByTank(
+    issues.map((issue) => ({
+      tankId: issue.tankId,
+      label: `${CYCLE_FIELD_LABELS[issue.field][locale]} (${CYCLE_REASON_LABELS[issue.reason][locale]})`,
+    })),
+    locale,
+  );
+  return [
+    BULK_RETURN_ERROR_TEXT.staleCycleSummary[locale],
+    "",
+    `${BULK_RETURN_ERROR_TEXT.details[locale]}:`,
+    ...details,
+    "",
+    BULK_RETURN_ERROR_TEXT.reload[locale],
+  ].join("\n");
+}
+
+function groupIssueLabelsByTank(
+  issues: readonly Readonly<{ tankId: string; label: string }>[],
+  locale: Locale,
+): string[] {
+  const labelsByTank = new Map<string, string[]>();
+  issues.forEach((issue) => {
+    const labels = labelsByTank.get(issue.tankId) ?? [];
+    labels.push(issue.label);
+    labelsByTank.set(issue.tankId, labels);
+  });
+  return [...labelsByTank].map(
+    ([tankId, labels]) => `${tankId}: ${labels.join(locale === "ja" ? "、" : ", ")}`,
+  );
 }
