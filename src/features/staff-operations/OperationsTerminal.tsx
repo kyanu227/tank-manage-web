@@ -7,6 +7,7 @@ import { useStaffLocale } from "@/hooks/useStaffSession";
 import type { Locale } from "@/lib/locale";
 import { DEFAULT_OP_STYLE, getOperationModeLabel, MODE_CONFIG } from "./constants";
 import { useBulkReturnByLocation } from "./hooks/useBulkReturnByLocation";
+import { formatBulkReturnCustomerTankCount } from "./bulk-return-display";
 import { useDestinations } from "./hooks/useDestinations";
 import { useManualTankOperation } from "./hooks/useManualTankOperation";
 import { useOperationSwipe } from "./hooks/useOperationSwipe";
@@ -36,14 +37,6 @@ const RETURN_UI_TEXT = {
     ja: "手動返却",
     en: "Manual return",
   },
-  customerUnit: {
-    ja: "顧客",
-    en: "customers",
-  },
-  tankUnit: {
-    ja: "本",
-    en: "tanks",
-  },
 } satisfies Record<string, Record<Locale, string>>;
 
 const RETURN_SEGMENT_LABELS = {
@@ -61,25 +54,21 @@ const RETURN_SEGMENT_LABELS = {
   },
 } satisfies Record<ReturnSegmentKey, Record<Locale, Pick<ReturnSegmentStat, "label" | "shortLabel">>>;
 
-const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, Omit<ReturnSegmentStat, "customerCount" | "tankCount" | "taggedCount">> = {
+type ReturnSegmentStyle = Pick<ReturnSegmentStat, "key" | "color" | "background">;
+
+const RETURN_SEGMENT_CONFIG: Record<ReturnSegmentKey, ReturnSegmentStyle> = {
   normal: {
     key: "normal",
-    label: "通常返却",
-    shortLabel: "通常",
     color: "#0891b2",
     background: "#ecfeff",
   },
   customer_requests: {
     key: "customer_requests",
-    label: "返却タグ処理待ち",
-    shortLabel: "タグ待ち",
     color: "#10b981",
     background: "#ecfdf5",
   },
   long_term: {
     key: "long_term",
-    label: "長期貸出",
-    shortLabel: "長期",
     color: "#be123c",
     background: "#fff1f2",
   },
@@ -96,13 +85,11 @@ function getReturnSegmentConfig(
 }
 
 function formatReturnSegmentCount(segment: ReturnSegmentStat, locale: Locale): string {
-  const customerCount = locale === "ja"
-    ? `${segment.customerCount}${RETURN_UI_TEXT.customerUnit[locale]}`
-    : `${segment.customerCount} ${RETURN_UI_TEXT.customerUnit[locale]}`;
-  const tankCount = locale === "ja"
-    ? `${segment.tankCount}${RETURN_UI_TEXT.tankUnit[locale]}`
-    : `${segment.tankCount} ${RETURN_UI_TEXT.tankUnit[locale]}`;
-  return `${customerCount} / ${tankCount}`;
+  return formatBulkReturnCustomerTankCount(
+    segment.customerCount,
+    segment.tankCount,
+    locale,
+  );
 }
 
 export default function OperationsTerminal({ initialMode }: OperationsTerminalProps) {
@@ -314,6 +301,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           <ReturnSegmentGestureLauncher
             activeSegment={activeReturnSegment}
             segments={returnSegmentStats}
+            locale={staffLocale}
             onSelectSegment={(segment) => {
               setShowManualReturn(false);
               setActiveReturnSegment(segment);

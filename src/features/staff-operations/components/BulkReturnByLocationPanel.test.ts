@@ -4,6 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { BulkReturnGroupReadiness } from "../bulk-return-cycle-readiness";
 import type { UseBulkReturnByLocationResult } from "../hooks/useBulkReturnByLocation";
 import type { BulkTankWithTag } from "../queries/bulk-return-candidates";
+import type { BulkReturnGroupMeta } from "../types";
 import BulkReturnByLocationPanel from "./BulkReturnByLocationPanel";
 
 const localeState = vi.hoisted(() => ({ current: "ja" }));
@@ -42,14 +43,21 @@ function makeBulk({
   readiness,
   expanded = true,
   isReturning = false,
+  bulkLoading = false,
+  bulkLoadFailed = false,
+  metaOverrides = {},
 }: {
   tanks: BulkTankWithTag[];
   readiness?: BulkReturnGroupReadiness;
   expanded?: boolean;
   isReturning?: boolean;
+  bulkLoading?: boolean;
+  bulkLoadFailed?: boolean;
+  metaOverrides?: Partial<BulkReturnGroupMeta>;
 }): UseBulkReturnByLocationResult {
   return {
-    bulkLoading: false,
+    bulkLoading,
+    bulkLoadFailed,
     groupedTanks: {
       [GROUP_KEY]: tanks,
     },
@@ -62,6 +70,7 @@ function makeBulk({
         poolLabel: "本日貸出",
         dateLabel: "7/30 貸出分",
         sortMillis: 1,
+        ...metaOverrides,
       },
     },
     groupReadiness: readiness
@@ -93,7 +102,10 @@ function renderPanel(bulk: UseBulkReturnByLocationResult): string {
 function getBulkReturnButtonOpeningTag(html: string): string {
   const buttons = [...html.matchAll(/(<button[^>]*>)([\s\S]*?)<\/button>/g)];
   const match = buttons.find(([, , content]) => (
-    content.includes("一括返却") || content.includes("返却/持ち越し")
+    content.includes("一括返却")
+      || content.includes("返却/持ち越し")
+      || content.includes("Bulk return")
+      || content.includes("Return / Carry over")
   ));
   if (!match) throw new Error("一括返却 button が見つかりません");
   return match[1];
@@ -232,6 +244,114 @@ describe("BulkReturnByLocationPanel cycle readiness static render", () => {
     expect(html).toContain("Cycle information missing");
     expect(html).toContain("Unavailable");
     expect(html).not.toContain("latestLogId");
+  });
+
+  it("英語 locale でquery由来の日本語metadataを表示せず件数とtagをlocalizeする", () => {
+    localeState.current = "en";
+    const html = renderPanel(makeBulk({
+      tanks: [
+        makeTank("EN-TAG-01", "Staff A", { tag: "uncharged" }),
+        makeTank("EN-TAG-02", "Staff B", { tag: "unused" }),
+        makeTank("EN-TAG-03", "Staff C", { tag: "keep" }),
+        makeTank("EN-TAG-04", "Staff D", { tag: "uncharged" }),
+      ],
+      readiness: { ready: true, issues: [] },
+      metaOverrides: {
+        location: "Customer A",
+        poolLabel: "本日貸出",
+        dateLabel: "7/30 貸出分",
+      },
+    }));
+
+    expect(html).toContain("1 customer / 4 tanks");
+    expect(html).toContain("4 tagged tanks");
+    expect(html).toContain("Rented today");
+    expect(html).toContain("Today");
+    expect(html).toContain("Return / Carry over");
+    expect(html).toContain("Uncharged");
+    expect(html).toContain("Unused");
+    expect(html).toContain("Carry over");
+    expect(html).toContain("+1 more");
+    expect(html).toContain("flex-direction:column");
+    expect(html).not.toContain("本日貸出");
+    expect(html).not.toContain("7/30 貸出分");
+    expect(html).not.toContain("返却/持ち越し");
+    expect(html).not.toContain("一括返却");
+  });
+
+  it("英語 locale の単数件数とbulk actionを単数形で表示する", () => {
+    localeState.current = "en";
+    const html = renderPanel(makeBulk({
+      tanks: [makeTank("EN-ONE-01", "Staff A")],
+      readiness: { ready: true, issues: [] },
+      metaOverrides: { location: "Customer A" },
+    }));
+
+    expect(html).toContain("1 customer / 1 tank");
+    expect(html).toContain("1 tank rented");
+    expect(html).toContain("Bulk return");
+    expect(html).not.toContain("1 customers");
+    expect(html).not.toContain("1 tanks");
+  });
+
+  it("英語 locale でinternal date fieldを露出せず長い顧客・タンク・担当者表示をwrapする", () => {
+    localeState.current = "en";
+    const longCustomer = "CustomerWithAnExtremelyLongUnbrokenDisplayName";
+    const longTankId = "TANK-WITH-AN-EXTREMELY-LONG-UNBROKEN-ID";
+    const longStaff = "StaffWithAnExtremelyLongUnbrokenDisplayName";
+    const html = renderPanel(makeBulk({
+      tanks: [makeTank(longTankId, longStaff)],
+      readiness: { ready: true, issues: [] },
+      metaOverrides: {
+        location: longCustomer,
+        pool: "unknown_lent",
+        poolLabel: "日付不明",
+        dateLabel: "貸出日不明",
+        sortMillis: Number.NaN,
+      },
+    }));
+
+    expect(html).toContain("Rented tanks with no recorded rental date");
+    expect(html).not.toContain("updatedAt");
+    expect(html).toMatch(new RegExp(`<span style="[^"]*overflow-wrap:anywhere[^"]*">${longCustomer}</span>`));
+    expect(html).toMatch(new RegExp(`<span style="[^"]*overflow-wrap:anywhere[^"]*">${longTankId}</span>`));
+    expect(html).toMatch(new RegExp(`<span style="[^"]*overflow-wrap:anywhere[^"]*">${longStaff}</span>`));
+  });
+
+  it("読み込みと読み込み失敗をempty stateと区別して英語表示する", () => {
+    localeState.current = "en";
+    const base = {
+      tanks: [makeTank("EN-LOAD-01", "Staff A")],
+      readiness: { ready: true, issues: [] } satisfies BulkReturnGroupReadiness,
+      metaOverrides: { location: "Customer A" },
+    };
+    const loadingHtml = renderPanel(makeBulk({ ...base, bulkLoading: true }));
+    const failedHtml = renderPanel(makeBulk({ ...base, bulkLoadFailed: true }));
+
+    expect(loadingHtml).toContain("role=\"status\"");
+    expect(loadingHtml).toContain("Loading rented tanks");
+    expect(loadingHtml).not.toContain("No rented tanks");
+    expect(failedHtml).toContain("role=\"alert\"");
+    expect(failedHtml).toContain("Could not load rented tanks.");
+    expect(failedHtml).toContain("Retry");
+    expect(failedHtml).not.toContain("No rented tanks");
+  });
+
+  it("accordionとsubmitにkeyboard・aria stateを付与し狭幅gridのoverflowを防ぐ", () => {
+    const html = renderPanel(makeBulk({
+      tanks: [makeTank("A11Y-01", "A11Y-STAFF")],
+      readiness: { ready: true, issues: [] },
+    }));
+    const accordionTag = html.match(/<button[^>]*aria-expanded="true"[^>]*>/)?.[0];
+    const bodyId = accordionTag?.match(/aria-controls="([^"]+)"/)?.[1];
+    const submitTag = getBulkReturnButtonOpeningTag(html);
+
+    expect(accordionTag).toContain("type=\"button\"");
+    expect(bodyId).toBeTruthy();
+    expect(html).toContain(`id="${bodyId}"`);
+    expect(submitTag).toContain("aria-busy=\"false\"");
+    expect(html).toContain("minmax(min(100%, 320px), 1fr)");
+    expect(html).toContain("flex-wrap:wrap");
   });
 
   it("readiness undefined は field を捏造せず button と selector を利用不能にする", () => {

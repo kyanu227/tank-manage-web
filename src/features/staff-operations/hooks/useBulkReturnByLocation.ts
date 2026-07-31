@@ -3,12 +3,17 @@
 import { useCallback, useMemo, useState } from "react";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import type { Locale } from "@/lib/locale";
+import {
+  formatStaffTankCount,
+  getStaffGenericErrorMessage,
+} from "@/lib/staff-display";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import {
   StaleTankCycleError,
   type StaleTankCycleIssue,
 } from "@/lib/tank-operation";
 import { RETURN_TAG } from "@/lib/tank-rules";
+import { getBulkReturnGroupDisplayLabel } from "../bulk-return-display";
 import {
   getBulkReturnGroupReadiness,
   type BulkReturnCycleReadinessIssue,
@@ -27,6 +32,7 @@ import type { BulkReturnGroupMeta, BulkTagType } from "../types";
 
 export interface UseBulkReturnByLocationResult {
   bulkLoading: boolean;
+  bulkLoadFailed: boolean;
   groupedTanks: Record<string, BulkTankWithTag[]>;
   groupMeta: Record<string, BulkReturnGroupMeta>;
   groupReadiness: Record<string, BulkReturnGroupReadiness>;
@@ -45,10 +51,12 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   const [groupMeta, setGroupMeta] = useState<Record<string, BulkReturnGroupMeta>>({});
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [returning, setReturning] = useState<Record<string, boolean>>({});
+  const [bulkLoadFailed, setBulkLoadFailed] = useState(false);
   const staffLocale = useStaffLocale();
 
   const fetchBulkTanks = useCallback(async () => {
     setBulkLoading(true);
+    setBulkLoadFailed(false);
     try {
       const result = await fetchBulkReturnCandidates();
       setGroupedTanks(result.groupedTanks);
@@ -58,6 +66,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       setExpanded(newExpanded);
     } catch (e) {
       console.error(e);
+      setBulkLoadFailed(true);
     } finally {
       setBulkLoading(false);
     }
@@ -71,7 +80,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     const targetTank = groupedTanks[groupKey]?.find((tank) => tank.id === tankId);
     if (!targetTank) return;
     if (newTag === RETURN_TAG.KEEP && coerceTankStatusCode(targetTank.status) !== "lent") {
-      alert("持ち越しは貸出中のタンクのみ選択できます。");
+      alert(BULK_RETURN_ERROR_TEXT.keepSelectionRentedOnly[staffLocale]);
       return;
     }
     setGroupedTanks(prev => {
@@ -85,17 +94,23 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       console.error("Failed to update tag", e);
       fetchBulkTanks();
     }
-  }, [fetchBulkTanks, groupedTanks]);
+  }, [fetchBulkTanks, groupedTanks, staffLocale]);
 
   const handleBulkReturnForGroup = useCallback(async (groupKey: string) => {
     const tanksToReturn = groupedTanks[groupKey];
     if (!tanksToReturn || tanksToReturn.length === 0) return;
     const meta = groupMeta[groupKey];
     const loc = meta?.location ?? tanksToReturn[0]?.customerName ?? tanksToReturn[0]?.location ?? "不明";
-    const groupLabel = meta ? `${loc}（${meta.poolLabel}）` : loc;
+    const fallbackLocation = loc;
+    const groupLabel = getBulkReturnGroupDisplayLabel(
+      fallbackLocation,
+      meta,
+      staffLocale,
+      tanksToReturn,
+    );
     const invalidKeepTanks = tanksToReturn.filter((tank) => tank.tag === RETURN_TAG.KEEP && coerceTankStatusCode(tank.status) !== "lent");
     if (invalidKeepTanks.length > 0) {
-      alert("持ち越しは貸出中のタンクのみ処理できます。未返却タンクの持ち越しを外してください。");
+      alert(BULK_RETURN_ERROR_TEXT.keepProcessingRentedOnly[staffLocale]);
       return;
     }
     const latestReadiness = getBulkReturnGroupReadiness(tanksToReturn);
@@ -105,9 +120,13 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     }
     const keepCount = tanksToReturn.filter((tank) => tank.tag === RETURN_TAG.KEEP).length;
     const returnCount = tanksToReturn.length - keepCount;
-    const confirmMessage = keepCount > 0
-      ? `${groupLabel} のタンクを処理しますか？\n返却: ${returnCount}本 / 持ち越し: ${keepCount}本`
-      : `${groupLabel} のタンク全 ${tanksToReturn.length} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`;
+    const confirmMessage = formatBulkReturnConfirmMessage({
+      groupLabel,
+      totalCount: tanksToReturn.length,
+      returnCount,
+      keepCount,
+      locale: staffLocale,
+    });
     if (!confirm(confirmMessage)) return;
 
     setReturning(prev => ({ ...prev, [groupKey]: true }));
@@ -116,20 +135,26 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
 
       await submitBulkReturnGroup({
         tanks: tanksToReturn,
-        fallbackLocation: loc,
+        fallbackLocation,
         actor,
       });
 
-      const completeMessage = keepCount > 0
-        ? `${groupLabel} の処理が完了しました。\n返却: ${returnCount}本 / 持ち越し: ${keepCount}本`
-        : `${groupLabel} の一括返却が完了しました。`;
+      const completeMessage = formatBulkReturnCompleteMessage({
+        groupLabel,
+        returnCount,
+        keepCount,
+        locale: staffLocale,
+      });
       alert(completeMessage);
       fetchBulkTanks();
     } catch (e: unknown) {
       if (e instanceof StaleTankCycleError) {
         alert(formatStaleCycleAlert(e.issues, staffLocale));
       } else {
-        alert(`${BULK_RETURN_ERROR_TEXT.errorPrefix[staffLocale]}${errorMessage(e)}`);
+        console.error("Bulk return failed", e);
+        alert(staffLocale === "ja"
+          ? `${BULK_RETURN_ERROR_TEXT.errorPrefix[staffLocale]}${errorMessage(e)}`
+          : getStaffGenericErrorMessage(staffLocale));
       }
     } finally {
       setReturning(prev => ({ ...prev, [groupKey]: false }));
@@ -150,6 +175,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
 
   return {
     bulkLoading,
+    bulkLoadFailed,
     groupedTanks,
     groupMeta,
     groupReadiness,
@@ -171,6 +197,46 @@ const BULK_RETURN_ERROR_TEXT = {
   errorPrefix: {
     ja: "エラー: ",
     en: "Error: ",
+  },
+  keepSelectionRentedOnly: {
+    ja: "持ち越しは貸出中のタンクのみ選択できます。",
+    en: "Carry over can only be selected for rented tanks.",
+  },
+  keepProcessingRentedOnly: {
+    ja: "持ち越しは貸出中のタンクのみ処理できます。未返却タンクの持ち越しを外してください。",
+    en: "Carry over can only be processed for rented tanks. Remove carry over from unreturned tanks.",
+  },
+  processQuestion: {
+    ja: "のタンクを処理しますか？",
+    en: "Process the tanks for",
+  },
+  returnLabel: {
+    ja: "返却",
+    en: "Return",
+  },
+  carryOverLabel: {
+    ja: "持ち越し",
+    en: "Carry over",
+  },
+  allTanks: {
+    ja: "のタンク全",
+    en: "Bulk return all",
+  },
+  bulkQuestion: {
+    ja: "本を一括返却しますか？",
+    en: "for",
+  },
+  tagProcessingHint: {
+    ja: "(タグ付けに応じて処理されます)",
+    en: "(Tanks will be processed according to their return tags.)",
+  },
+  processingComplete: {
+    ja: "の処理が完了しました。",
+    en: "Finished processing the tanks for",
+  },
+  bulkComplete: {
+    ja: "の一括返却が完了しました。",
+    en: "Bulk return is complete for",
   },
   missingCycleSummary: {
     ja: "cycle情報が不足しているタンクが含まれるため、このグループは一括返却できません。",
@@ -197,6 +263,61 @@ const BULK_RETURN_ERROR_TEXT = {
     en: "Reload and review the group before trying again.",
   },
 } satisfies Record<string, Record<Locale, string>>;
+
+type BulkReturnMessageCounts = Readonly<{
+  groupLabel: string;
+  returnCount: number;
+  keepCount: number;
+  locale: Locale;
+}>;
+
+function formatReturnAndCarryOverCounts(
+  returnCount: number,
+  keepCount: number,
+  locale: Locale,
+): string {
+  return [
+    `${BULK_RETURN_ERROR_TEXT.returnLabel[locale]}: ${formatStaffTankCount(returnCount, locale)}`,
+    `${BULK_RETURN_ERROR_TEXT.carryOverLabel[locale]}: ${formatStaffTankCount(keepCount, locale)}`,
+  ].join(" / ");
+}
+
+function formatBulkReturnConfirmMessage({
+  groupLabel,
+  totalCount,
+  returnCount,
+  keepCount,
+  locale,
+}: BulkReturnMessageCounts & Readonly<{ totalCount: number }>): string {
+  if (keepCount > 0) {
+    const question = locale === "ja"
+      ? `${groupLabel} ${BULK_RETURN_ERROR_TEXT.processQuestion[locale]}`
+      : `${BULK_RETURN_ERROR_TEXT.processQuestion[locale]} ${groupLabel}?`;
+    return `${question}\n${formatReturnAndCarryOverCounts(returnCount, keepCount, locale)}`;
+  }
+
+  const question = locale === "ja"
+    ? `${groupLabel} ${BULK_RETURN_ERROR_TEXT.allTanks[locale]} ${totalCount} ${BULK_RETURN_ERROR_TEXT.bulkQuestion[locale]}`
+    : `${BULK_RETURN_ERROR_TEXT.allTanks[locale]} ${formatStaffTankCount(totalCount, locale)} ${BULK_RETURN_ERROR_TEXT.bulkQuestion[locale]} ${groupLabel}?`;
+  return `${question}\n${BULK_RETURN_ERROR_TEXT.tagProcessingHint[locale]}`;
+}
+
+function formatBulkReturnCompleteMessage({
+  groupLabel,
+  returnCount,
+  keepCount,
+  locale,
+}: BulkReturnMessageCounts): string {
+  if (keepCount > 0) {
+    const summary = locale === "ja"
+      ? `${groupLabel} ${BULK_RETURN_ERROR_TEXT.processingComplete[locale]}`
+      : `${BULK_RETURN_ERROR_TEXT.processingComplete[locale]} ${groupLabel}.`;
+    return `${summary}\n${formatReturnAndCarryOverCounts(returnCount, keepCount, locale)}`;
+  }
+  return locale === "ja"
+    ? `${groupLabel} ${BULK_RETURN_ERROR_TEXT.bulkComplete[locale]}`
+    : `${BULK_RETURN_ERROR_TEXT.bulkComplete[locale]} ${groupLabel}.`;
+}
 
 const CYCLE_FIELD_LABELS = {
   customerId: {

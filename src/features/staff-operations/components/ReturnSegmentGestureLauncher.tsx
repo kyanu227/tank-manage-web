@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type PointerEvent } from "react";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
+import { formatBulkReturnCustomerTankCount } from "../bulk-return-display";
 
 export type ReturnSegmentKey = "customer_requests" | "long_term" | "normal";
 
@@ -18,6 +20,7 @@ export interface ReturnSegmentStat {
 interface ReturnSegmentGestureLauncherProps {
   activeSegment: ReturnSegmentKey | null;
   segments: ReturnSegmentStat[];
+  locale?: Locale;
   onSelectSegment: (segment: ReturnSegmentKey) => void;
   onSelectManualReturn?: () => void;
 }
@@ -35,13 +38,19 @@ const selectionSuppressionStyle: CSSProperties = {
 
 const MENU_ITEMS: Array<{
   key: ReturnSegmentKey;
-  label: string;
   offsetY: number;
 }> = [
-  { key: "normal", label: "通常", offsetY: -SLOT_HEIGHT_PX },
-  { key: "customer_requests", label: "タグ待ち", offsetY: 0 },
-  { key: "long_term", label: "長期", offsetY: SLOT_HEIGHT_PX },
+  { key: "normal", offsetY: -SLOT_HEIGHT_PX },
+  { key: "customer_requests", offsetY: 0 },
+  { key: "long_term", offsetY: SLOT_HEIGHT_PX },
 ];
+
+const LAUNCHER_TEXT = {
+  manual: {
+    ja: "手動",
+    en: "Manual",
+  },
+} satisfies Record<string, Record<Locale, string>>;
 
 function resolveSegmentFromDrag(dy: number): ReturnSegmentKey {
   if (dy < -SLOT_HEIGHT_PX * 0.55) return "normal";
@@ -52,6 +61,7 @@ function resolveSegmentFromDrag(dy: number): ReturnSegmentKey {
 export default function ReturnSegmentGestureLauncher({
   activeSegment,
   segments,
+  locale = DEFAULT_LOCALE,
   onSelectSegment,
   onSelectManualReturn,
 }: ReturnSegmentGestureLauncherProps) {
@@ -190,7 +200,7 @@ export default function ReturnSegmentGestureLauncher({
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
       onContextMenu={(event) => event.preventDefault()}
-      aria-label="返却セグメント切替ランチャー"
+      aria-hidden="true"
       style={{
         ...selectionSuppressionStyle,
         position: "fixed",
@@ -264,7 +274,7 @@ export default function ReturnSegmentGestureLauncher({
                   transition: motionTransition,
                 }}
               >
-                {item.label} {count}
+                {segment?.shortLabel} {count}
               </div>
             );
           })}
@@ -290,7 +300,7 @@ export default function ReturnSegmentGestureLauncher({
               transition: motionTransition,
             }}
           >
-            手動
+            {LAUNCHER_TEXT.manual[locale]}
           </div>
         </div>
       )}
@@ -325,7 +335,7 @@ export default function ReturnSegmentGestureLauncher({
           return (
             <div
               key={segment.key}
-              title={`${segment.label}: ${segment.customerCount}顧客 / ${segment.tankCount}本`}
+              title={`${segment.label}: ${formatBulkReturnCustomerTankCount(segment.customerCount, segment.tankCount, locale)}`}
               style={{
                 ...selectionSuppressionStyle,
                 width: isSelected ? 8 : hasItems ? 7 : 5,
