@@ -2,6 +2,12 @@ export type BulkReturnCycleReadinessInput = Readonly<{
   id: string;
   customerId?: unknown;
   latestLogId?: unknown;
+  rawCycleMarkers?: BulkReturnRawCycleMarkers;
+}>;
+
+export type BulkReturnRawCycleMarkers = Readonly<{
+  customerId: unknown;
+  latestLogId: unknown;
 }>;
 
 export type BulkReturnCycleReadinessIssue = Readonly<{
@@ -24,10 +30,11 @@ export function getBulkReturnGroupReadiness(
   const issues: BulkReturnCycleReadinessIssue[] = [];
 
   tanks.forEach((tank) => {
-    if (!isNonEmptyString(tank.customerId)) {
+    const cycleMarkers = getBulkReturnObservedCycleMarkers(tank);
+    if (!isNonEmptyString(cycleMarkers.customerId)) {
       issues.push({ tankId: tank.id, field: "customerId" });
     }
-    if (!isNonEmptyString(tank.latestLogId)) {
+    if (!isNonEmptyString(cycleMarkers.latestLogId)) {
       issues.push({ tankId: tank.id, field: "latestLogId" });
     }
   });
@@ -35,6 +42,16 @@ export function getBulkReturnGroupReadiness(
   return {
     ready: issues.length === 0,
     issues,
+  };
+}
+
+/** repository 由来なら Firestore raw 値を、既存の直接入力なら従来フィールドを読む。 */
+export function getBulkReturnObservedCycleMarkers(
+  tank: BulkReturnCycleReadinessInput,
+): BulkReturnRawCycleMarkers {
+  return tank.rawCycleMarkers ?? {
+    customerId: tank.customerId,
+    latestLogId: tank.latestLogId,
   };
 }
 

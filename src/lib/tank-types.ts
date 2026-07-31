@@ -18,6 +18,11 @@ export interface TankDoc {
   logNote?: string;
   updatedAt?: unknown;
   latestLogId?: string | null;
+  /** cycle 検査専用の Firestore raw 値。表示・identity 解決には使用しない。 */
+  rawCycleMarkers?: Readonly<{
+    customerId: unknown;
+    latestLogId: unknown;
+  }>;
   /** 次回耐圧検査期限（旧GAS互換で "YYYY/MM/DD" 文字列。Timestamp/Date も可） */
   nextMaintenanceDate?: unknown;
 }
