@@ -6,9 +6,17 @@ import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { getLegacyTankStatusLabel } from "@/lib/tank-action-status-labels";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
+import {
+  formatRepairConfirm,
+  formatRepairSubmit,
+  formatRepairSuccess,
+  formatSelectTankLabel,
+  getMaintenanceText,
+} from "@/features/maintenance/i18n";
 import { submitRepairCompletion } from "@/features/maintenance/services/repair-workflow";
-import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
+import { formatStaffTankCount, getStaffGenericErrorMessage } from "@/lib/staff-display";
 
 const ACCENT = "#0ea5e9"; // Sky
 const ACCENT_DARK = "#0284c7";
@@ -20,7 +28,8 @@ const ACCENT_BG = "#f0f9ff";
  */
 export default function RepairPage() {
   useMaintenanceSwipe("repair");
-  const { tanks: allTanks, loading, refetch } = useTanks();
+  const staffLocale = useStaffLocale();
+  const { tanks: allTanks, loading, loadFailed, refetch } = useTanks();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
@@ -65,7 +74,7 @@ export default function RepairPage() {
   const handleSubmit = async () => {
     const selected = tanks.filter((t) => t.selected);
     if (selected.length === 0) return;
-    if (!confirm(`修理完了：${selected.length}本を処理しますか？`)) return;
+    if (!confirm(formatRepairConfirm(selected.length, staffLocale))) return;
     setSubmitting(true);
     try {
       const actor = requireStaffIdentity();
@@ -76,11 +85,15 @@ export default function RepairPage() {
         })),
         actor,
       });
-      setResult({ success: true, message: `${selected.length}本の修理完了を処理しました` });
+      setResult({ success: true, message: formatRepairSuccess(selected.length, staffLocale) });
       setSelectedIds(new Set());
       refetch();
     } catch (e: unknown) {
-      setResult({ success: false, message: errorMessage(e) });
+      console.error("submitRepairCompletion failed", e);
+      setResult({
+        success: false,
+        message: staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale),
+      });
     } finally {
       setSubmitting(false);
     }
@@ -123,8 +136,12 @@ export default function RepairPage() {
                 <Wrench size={24} color="#fff" />
               </div>
               <div style={{ flex: 1 }}>
-                <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.01em" }}>修理完了</h1>
-                <p style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>破損/不良のタンクを空ステータスに戻します</p>
+                <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.01em" }}>
+                  {getMaintenanceText("repairTitle", staffLocale)}
+                </h1>
+                <p style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
+                  {getMaintenanceText("repairDescription", staffLocale)}
+                </p>
               </div>
             </div>
 
@@ -136,15 +153,23 @@ export default function RepairPage() {
                 flex: 1, padding: "10px 14px", borderRadius: 12,
                 background: "rgba(255,255,255,0.18)", backdropFilter: "blur(6px)",
               }}>
-                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>修理待ち</div>
-                <div style={{ fontSize: 22, fontWeight: 900, marginTop: 2 }}>{tanks.length}<span style={{ fontSize: 12, fontWeight: 700, opacity: 0.8, marginLeft: 3 }}>本</span></div>
+                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>
+                  {getMaintenanceText("awaitingRepair", staffLocale)}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 900, marginTop: 2 }}>
+                  {formatStaffTankCount(tanks.length, staffLocale)}
+                </div>
               </div>
               <div style={{
                 flex: 1, padding: "10px 14px", borderRadius: 12,
                 background: "rgba(255,255,255,0.18)", backdropFilter: "blur(6px)",
               }}>
-                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>選択中</div>
-                <div style={{ fontSize: 22, fontWeight: 900, marginTop: 2 }}>{selectedCount}<span style={{ fontSize: 12, fontWeight: 700, opacity: 0.8, marginLeft: 3 }}>本</span></div>
+                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>
+                  {getMaintenanceText("selected", staffLocale)}
+                </div>
+                <div style={{ fontSize: 18, fontWeight: 900, marginTop: 2 }}>
+                  {formatStaffTankCount(selectedCount, staffLocale)}
+                </div>
               </div>
             </div>
           </div>
@@ -157,7 +182,7 @@ export default function RepairPage() {
               background: "#fff", borderRadius: 12, border: "1px solid #e8eaed",
             }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>
-                タップして選択
+                {getMaintenanceText("tapToSelect", staffLocale)}
               </span>
               <button
                 onClick={selectAll}
@@ -168,20 +193,30 @@ export default function RepairPage() {
                   padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer",
                 }}
               >
-                {tanks.every((t) => t.selected) ? "全解除" : "全選択"}
+                {getMaintenanceText(tanks.every((t) => t.selected) ? "clearAll" : "selectAll", staffLocale)}
               </button>
             </div>
           )}
 
           {/* Tank grid */}
           {loading ? (
-            <div style={{
+            <div role="status" aria-live="polite" style={{
               background: "#fff", borderRadius: 16, padding: "48px 20px",
               textAlign: "center", color: "#94a3b8", fontSize: 14,
               border: "1px solid #e8eaed",
             }}>
               <Loader2 size={28} style={{ animation: "spin 1s linear infinite", marginBottom: 8, opacity: 0.6 }} />
-              <p>読み込み中…</p>
+              <p>{getMaintenanceText("loading", staffLocale)}</p>
+            </div>
+          ) : loadFailed ? (
+            <div role="alert" style={{
+              background: "#fff", borderRadius: 16, padding: "48px 20px",
+              textAlign: "center", color: "#991b1b", border: "1px solid #fecaca",
+            }}>
+              <p>{getMaintenanceText("loadFailure", staffLocale)}</p>
+              <button type="button" onClick={() => void refetch()}>
+                {getMaintenanceText("retry", staffLocale)}
+              </button>
             </div>
           ) : tanks.length === 0 ? (
             <div style={{
@@ -195,8 +230,12 @@ export default function RepairPage() {
               }}>
                 <Sparkles size={32} color={ACCENT} />
               </div>
-              <p style={{ color: "#0f172a", fontSize: 15, fontWeight: 700 }}>すべて対応済みです</p>
-              <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>修理待ちのタンクはありません</p>
+              <p style={{ color: "#0f172a", fontSize: 15, fontWeight: 700 }}>
+                {getMaintenanceText("allHandled", staffLocale)}
+              </p>
+              <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>
+                {getMaintenanceText("noRepairTanks", staffLocale)}
+              </p>
             </div>
           ) : (
             <div style={{
@@ -207,8 +246,12 @@ export default function RepairPage() {
                 const statusColor = isDamaged ? "#ef4444" : "#f59e0b";
                 const statusBg = isDamaged ? "#fef2f2" : "#fffbeb";
                 return (
-                  <div
+                  <button
+                    type="button"
+                    className="maintenance-select-card"
                     key={t.id}
+                    aria-label={`${formatSelectTankLabel(t.id, t.selected, staffLocale)}: ${getLegacyTankStatusLabel(t.status, staffLocale) ?? t.status}${t.note ? `, ${t.note}` : ""}`}
+                    aria-pressed={t.selected}
                     onClick={() => toggleSelect(t.id)}
                     style={{
                       position: "relative",
@@ -224,6 +267,8 @@ export default function RepairPage() {
                         : "0 1px 2px rgba(15,23,42,0.04)",
                       transform: t.selected ? "translateY(-1px)" : "none",
                       transition: "all 0.18s cubic-bezier(0.4,0,0.2,1)",
+                      textAlign: "left",
+                      font: "inherit",
                     }}
                   >
                     {/* check mark */}
@@ -246,7 +291,7 @@ export default function RepairPage() {
                       fontSize: 10, fontWeight: 800, letterSpacing: "0.02em",
                     }}>
                       <AlertTriangle size={10} strokeWidth={3} />
-                      {getLegacyTankStatusLabel(t.status) ?? t.status}
+                      {getLegacyTankStatusLabel(t.status, staffLocale) ?? t.status}
                     </div>
 
                     {/* tank id */}
@@ -268,14 +313,14 @@ export default function RepairPage() {
                         {t.note}
                       </div>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
           )}
 
           {result && (
-            <div style={{
+            <div role={result.success ? "status" : "alert"} aria-live="polite" style={{
               marginTop: 16,
               padding: "14px 18px", borderRadius: 14,
               background: result.success ? "#ecfdf5" : "#fef2f2",
@@ -319,13 +364,18 @@ export default function RepairPage() {
               {submitting
                 ? <Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} />
                 : <Send size={18} />}
-              {submitting ? "処理中…" : `修理完了（${selectedCount}本）`}
+              {submitting
+                ? getMaintenanceText("processing", staffLocale)
+                : formatRepairSubmit(selectedCount, staffLocale)}
             </button>
           </div>
         </div>
       )}
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .maintenance-select-card:focus-visible { outline: 3px solid ${ACCENT}; outline-offset: 2px; }
+      `}</style>
     </div>
   );
 }

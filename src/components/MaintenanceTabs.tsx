@@ -7,16 +7,14 @@ import type { Locale } from "@/lib/locale";
 
 type MaintenanceHref = (typeof MAINTENANCE_TABS)[number]["href"];
 
-const ENGLISH_LABELS = {
-  "/staff/damage": "Report damage",
-  "/staff/repair": "Complete repair",
-  "/staff/inspection": "Complete inspection",
-} satisfies Record<MaintenanceHref, string>;
+const LABELS = {
+  "/staff/damage": { ja: "破損報告", en: "Report damage" },
+  "/staff/repair": { ja: "修理完了", en: "Complete repair" },
+  "/staff/inspection": { ja: "耐圧検査完了", en: "Complete inspection" },
+} satisfies Record<MaintenanceHref, Record<Locale, string>>;
 
 export function getMaintenanceTabs(locale: Locale) {
-  return locale === "ja"
-    ? MAINTENANCE_TABS
-    : MAINTENANCE_TABS.map((tab) => ({ ...tab, label: ENGLISH_LABELS[tab.href] }));
+  return MAINTENANCE_TABS.map((tab) => ({ ...tab, label: LABELS[tab.href][locale] }));
 }
 
 /**

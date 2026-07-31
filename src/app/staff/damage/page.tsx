@@ -6,15 +6,24 @@ import { tryParseTankId } from "@/lib/tank-id";
 import TankIdInput from "@/components/TankIdInput";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
+import {
+  formatDamageConfirm,
+  formatDamageSubmit,
+  formatDamageSuccess,
+  getMaintenanceText,
+} from "@/features/maintenance/i18n";
 import { submitDamageReport } from "@/features/maintenance/services/damage-workflow";
-import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
+import { getStaffGenericErrorMessage } from "@/lib/staff-display";
+import { getStaffOperationText } from "@/features/staff-operations/i18n";
 
 const ACCENT = "#ef4444";
 
 export default function DamageReportPage() {
   useMaintenanceSwipe("damage");
-  const { prefixes } = useTanks();
+  const staffLocale = useStaffLocale();
+  const { prefixes, loading, loadFailed, refetch } = useTanks();
   const [activePrefix, setActivePrefix] = useState<string | null>(null);
   const [numberValue, setNumberValue] = useState("");
   const [queue, setQueue] = useState<{ uid: string; tankId: string }[]>([]);
@@ -38,7 +47,12 @@ export default function DamageReportPage() {
   const handleCommit = (rawTankId: string) => {
     const tankIdResult = tryParseTankId(rawTankId);
     if (!tankIdResult.ok) {
-      setResult({ success: false, message: tankIdResult.reason });
+      setResult({
+        success: false,
+        message: staffLocale === "ja"
+          ? tankIdResult.reason
+          : getStaffOperationText("invalidTankId", staffLocale),
+      });
       return;
     }
     const tankId = tankIdResult.canonicalTankId;
@@ -56,7 +70,7 @@ export default function DamageReportPage() {
 
   const handleSubmit = async () => {
     if (queue.length === 0) return;
-    if (!confirm(`${queue.length}本の破損報告を送信しますか？`)) return;
+    if (!confirm(formatDamageConfirm(queue.length, staffLocale))) return;
     setSubmitting(true);
     try {
       await submitDamageReport({
@@ -64,11 +78,15 @@ export default function DamageReportPage() {
         note,
         actor: requireStaffIdentity(),
       });
-      setResult({ success: true, message: `${queue.length}本の破損報告を完了しました` });
+      setResult({ success: true, message: formatDamageSuccess(queue.length, staffLocale) });
       setQueue([]);
       setNote("");
     } catch (e: unknown) {
-      setResult({ success: false, message: errorMessage(e) });
+      console.error("submitDamageReport failed", e);
+      setResult({
+        success: false,
+        message: staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale),
+      });
     } finally {
       setSubmitting(false);
     }
@@ -78,6 +96,7 @@ export default function DamageReportPage() {
     <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden" }}>
       <MaintenanceTabs />
       <TankIdInput
+        locale={staffLocale}
         prefixes={prefixes}
         activePrefix={activePrefix}
         onPrefixChange={setActivePrefix}
@@ -89,17 +108,35 @@ export default function DamageReportPage() {
         beforeConfirm={
           <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>送信リスト</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>
+                {getMaintenanceText("submissionList", staffLocale)}
+              </span>
               {queue.length > 0 && (
                 <span style={{ background: ACCENT, color: "#fff", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 800 }}>
                   {queue.length}
                 </span>
               )}
             </div>
-            {queue.length === 0 ? (
+            {loading ? (
+              <div role="status" aria-live="polite" style={{ textAlign: "center", padding: "24px 20px", color: "#94a3b8" }}>
+                <Loader2 size={18} aria-hidden="true" style={{ animation: "spin 1s linear infinite" }} />
+                <p>{getMaintenanceText("loading", staffLocale)}</p>
+              </div>
+            ) : loadFailed ? (
+              <div role="alert" style={{ textAlign: "center", padding: "24px 20px", color: "#991b1b" }}>
+                <p>{getMaintenanceText("loadFailure", staffLocale)}</p>
+                <button type="button" onClick={() => void refetch()}>
+                  {getMaintenanceText("retry", staffLocale)}
+                </button>
+              </div>
+            ) : queue.length === 0 ? (
               <div style={{ textAlign: "center", padding: "24px 20px", color: "#cbd5e1", marginTop: 8 }}>
-                <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>右のドラムからアルファベットを選び、</p>
-                <p style={{ margin: "4px 0", fontSize: 13, fontWeight: 600 }}>数字2桁を入力してください</p>
+                <p style={{ margin: 0, fontSize: 13, fontWeight: 600 }}>
+                  {getMaintenanceText("choosePrefix", staffLocale)}
+                </p>
+                <p style={{ margin: "4px 0", fontSize: 13, fontWeight: 600 }}>
+                  {getMaintenanceText("enterNumber", staffLocale)}
+                </p>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -113,8 +150,13 @@ export default function DamageReportPage() {
                     <span style={{ fontSize: 17, fontWeight: 900, fontFamily: "monospace", letterSpacing: "0.05em", color: "#0f172a" }}>
                       {item.tankId}
                     </span>
-                    <button onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 6, cursor: "pointer", marginRight: -6 }}>
-                      <X size={18} />
+                    <button
+                      type="button"
+                      aria-label={getStaffOperationText("removeTank", staffLocale, { tankId: item.tankId })}
+                      onClick={() => removeFromQueue(item.uid)}
+                      style={{ border: "none", background: "none", color: "#cbd5e1", padding: 6, cursor: "pointer", marginRight: -6 }}
+                    >
+                      <X size={18} aria-hidden="true" />
                     </button>
                   </div>
                 ))}
@@ -129,9 +171,10 @@ export default function DamageReportPage() {
             display: "flex", flexDirection: "column", gap: 8, zIndex: 20,
           }}>
             <textarea
+              aria-label={getMaintenanceText("damageNote", staffLocale)}
               value={note}
               onChange={(e) => setNote(e.target.value)}
-              placeholder="破損内容（例: バルブ不良、タンク凹み等）"
+              placeholder={getMaintenanceText("damageNotePlaceholder", staffLocale)}
               rows={2}
               style={{
                 width: "100%", boxSizing: "border-box",
@@ -153,10 +196,10 @@ export default function DamageReportPage() {
               }}
             >
               {submitting ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={16} />}
-              <span>{queue.length}件の破損報告</span>
+              <span>{formatDamageSubmit(queue.length, staffLocale)}</span>
             </button>
             {result && (
-              <div style={{
+              <div role={result.success ? "status" : "alert"} aria-live="polite" style={{
                 padding: "6px 10px", borderRadius: 8,
                 background: result.success ? "#ecfdf5" : "#fef2f2",
                 border: `1px solid ${result.success ? "#bbf7d0" : "#fecaca"}`,
