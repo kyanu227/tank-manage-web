@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useId, useMemo } from "react";
 import { ArrowDownToLine, CheckCircle2, ChevronDown, ChevronRight, Loader2 } from "lucide-react";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
 import { useStaffLocale } from "@/hooks/useStaffSession";
@@ -8,6 +8,7 @@ import type { Locale } from "@/lib/locale";
 import { getReturnTagLabel } from "@/lib/return-tag-labels";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { RETURN_TAG } from "@/lib/tank-rules";
+import type { BulkReturnCycleReadinessIssue } from "../bulk-return-cycle-readiness";
 import type { UseBulkReturnByLocationResult } from "../hooks/useBulkReturnByLocation";
 import type { BulkReturnDatePool } from "../types";
 import type { ReturnSegmentKey, ReturnSegmentStat } from "./ReturnSegmentGestureLauncher";
@@ -89,7 +90,50 @@ const BULK_RETURN_TEXT = {
     ja: "貸出中",
     en: "rented",
   },
+  cycleWarningSummary: {
+    ja: "cycle情報が不足しているタンクが含まれるため、このグループは一括返却できません。",
+    en: "This group cannot be returned because some tanks are missing cycle information.",
+  },
+  cycleUnknownWarning: {
+    ja: "cycle情報を確認できません。再読込してください。",
+    en: "Cycle information could not be verified. Reload this page.",
+  },
+  affected: {
+    ja: "対象",
+    en: "Affected",
+  },
+  missing: {
+    ja: "不足",
+    en: "Missing",
+  },
+  cycleInfoMissing: {
+    ja: "cycle情報不足",
+    en: "Cycle information missing",
+  },
+  cycleInfoUnavailable: {
+    ja: "cycle情報を確認できません",
+    en: "Cycle information unavailable",
+  },
+  unavailable: {
+    ja: "処理不可",
+    en: "Unavailable",
+  },
+  cycleUnavailableTitle: {
+    ja: "cycle情報を確認してから再読込してください",
+    en: "Reload after verifying the cycle information",
+  },
 } satisfies Record<string, Record<Locale, string>>;
+
+const CYCLE_FIELD_LABELS = {
+  customerId: {
+    ja: "顧客ID",
+    en: "customer ID",
+  },
+  latestLogId: {
+    ja: "最新操作ID",
+    en: "latest operation ID",
+  },
+} satisfies Record<BulkReturnCycleReadinessIssue["field"], Record<Locale, string>>;
 
 const DATE_POOL_SECTIONS: Array<{
   pool: BulkReturnDatePool;
@@ -230,10 +274,12 @@ export default function BulkReturnByLocationPanel({
   activeSegment = null,
 }: BulkReturnByLocationPanelProps) {
   const staffLocale = useStaffLocale();
+  const panelIdPrefix = useId().replace(/:/g, "");
   const {
     bulkLoading,
     groupedTanks,
     groupMeta,
+    groupReadiness,
     expanded,
     returning,
     groupKeys,
@@ -324,7 +370,7 @@ export default function BulkReturnByLocationPanel({
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-          {visibleSections.map((section) => {
+          {visibleSections.map((section, sectionIndex) => {
             const sectionTankCount = section.groupKeys.reduce((sum, groupKey) => sum + (groupedTanks[groupKey]?.length ?? 0), 0);
             const sectionLocationCount = new Set(section.groupKeys.map((groupKey) => groupMeta[groupKey]?.key).filter(Boolean)).size;
 
@@ -348,12 +394,17 @@ export default function BulkReturnByLocationPanel({
                 </div>
 
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                  {section.groupKeys.map((groupKey) => {
+                  {section.groupKeys.map((groupKey, groupIndex) => {
                     const meta = groupMeta[groupKey];
                     const loc = meta?.location ?? groupKey;
                     const tanks = groupedTanks[groupKey] ?? [];
                     const isExpanded = expanded[groupKey];
                     const isReturning = returning[groupKey];
+                    const readiness = groupReadiness[groupKey];
+                    const isCycleReady = readiness?.ready === true;
+                    const isSubmitDisabled = Boolean(isReturning) || !isCycleReady;
+                    const cycleWarningId = `${panelIdPrefix}-bulk-cycle-warning-${sectionIndex}-${groupIndex}`;
+                    const groupedCycleIssues = groupCycleIssuesByTank(readiness?.issues ?? []);
                     const hasKeepTag = tanks.some((tank) => tank.tag === RETURN_TAG.KEEP);
                     const taggedPreview = tanks.filter((tank) => tank.tag !== "normal").slice(0, 3);
                     const hiddenTaggedCount = Math.max(0, tanks.filter((tank) => tank.tag !== "normal").length - taggedPreview.length);
@@ -418,14 +469,16 @@ export default function BulkReturnByLocationPanel({
                           <div onClick={(e) => e.stopPropagation()}>
                             <button
                               onClick={() => handleBulkReturnForGroup(groupKey)}
-                              disabled={isReturning}
+                              disabled={isSubmitDisabled}
+                              aria-describedby={!isCycleReady ? cycleWarningId : undefined}
+                              title={!isCycleReady ? BULK_RETURN_TEXT.cycleUnavailableTitle[staffLocale] : undefined}
                               style={{
                                 padding: "8px 16px", borderRadius: 10, border: "none",
-                                background: isReturning ? "#e2e8f0" : "#0f172a",
-                                color: isReturning ? "#94a3b8" : "#fff",
-                                fontSize: 13, fontWeight: 700, cursor: isReturning ? "not-allowed" : "pointer",
+                                background: isSubmitDisabled ? "#e2e8f0" : "#0f172a",
+                                color: isSubmitDisabled ? "#94a3b8" : "#fff",
+                                fontSize: 13, fontWeight: 700, cursor: isSubmitDisabled ? "not-allowed" : "pointer",
                                 display: "flex", alignItems: "center", gap: 6, transition: "all 0.15s",
-                                boxShadow: isReturning ? "none" : "0 2px 4px rgba(0,0,0,0.1)",
+                                boxShadow: isSubmitDisabled ? "none" : "0 2px 4px rgba(0,0,0,0.1)",
                                 whiteSpace: "nowrap",
                               }}
                             >
@@ -435,41 +488,132 @@ export default function BulkReturnByLocationPanel({
                           </div>
                         </div>
 
+                        {!isCycleReady && (
+                          <div
+                            id={cycleWarningId}
+                            role="alert"
+                            style={{
+                              width: "100%",
+                              boxSizing: "border-box",
+                              minWidth: 0,
+                              padding: "12px 20px",
+                              borderTop: "1px solid #fecaca",
+                              borderBottom: isExpanded ? "1px solid #fecaca" : "none",
+                              background: "#fef2f2",
+                              color: "#991b1b",
+                              fontSize: 12,
+                              lineHeight: 1.55,
+                              whiteSpace: "normal",
+                              overflowWrap: "anywhere",
+                            }}
+                          >
+                            <div style={{ fontWeight: 800 }}>
+                              {readiness
+                                ? BULK_RETURN_TEXT.cycleWarningSummary[staffLocale]
+                                : BULK_RETURN_TEXT.cycleUnknownWarning[staffLocale]}
+                            </div>
+                            {readiness && (
+                              <div style={{ marginTop: 6 }}>
+                                <div>
+                                  <strong>{BULK_RETURN_TEXT.affected[staffLocale]}:</strong>{" "}
+                                  {groupedCycleIssues
+                                    .map(({ tankId }) => tankId)
+                                    .join(staffLocale === "ja" ? "、" : ", ")}
+                                </div>
+                                <div style={{ marginTop: 2 }}>
+                                  <strong>{BULK_RETURN_TEXT.missing[staffLocale]}:</strong>
+                                </div>
+                                <ul style={{ margin: "2px 0 0", paddingLeft: 20 }}>
+                                  {groupedCycleIssues.map(({ tankId, fields }) => (
+                                    <li key={tankId}>
+                                      {tankId}: {fields
+                                        .map((field) => CYCLE_FIELD_LABELS[field][staffLocale])
+                                        .join(staffLocale === "ja" ? "、" : ", ")}
+                                    </li>
+                                  ))}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
                         {/* アコーディオンボディ */}
                         {isExpanded && (
                           <div style={{ padding: "16px 20px", background: "#fff" }}>
                             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", gap: 12 }}>
-                              {tanks.map((tank) => (
-                                <div
-                                  key={tank.id}
-                                  style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", border: "1px solid #f1f5f9", borderRadius: 12, background: "#f8fafc" }}
-                                >
-                                  <div style={{ display: "flex", flexDirection: "column" }}>
-                                    <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "monospace", color: "#1e293b", letterSpacing: "0.05em" }}>
-                                      {tank.id}
-                                    </span>
-                                    <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>
-                                      {tank.staff}
-                                    </span>
+                              {tanks.map((tank) => {
+                                const tankCycleIssues = readiness?.issues.filter(
+                                  (issue) => issue.tankId === tank.id,
+                                ) ?? [];
+                                const isTankCycleUnavailable = readiness === undefined
+                                  || tankCycleIssues.length > 0;
+
+                                return (
+                                  <div
+                                    key={tank.id}
+                                    style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 14px", border: "1px solid #f1f5f9", borderRadius: 12, background: "#f8fafc" }}
+                                  >
+                                    <div style={{ display: "flex", flexDirection: "column" }}>
+                                      <span style={{ fontSize: 15, fontWeight: 800, fontFamily: "monospace", color: "#1e293b", letterSpacing: "0.05em" }}>
+                                        {tank.id}
+                                      </span>
+                                      <span style={{ fontSize: 11, color: "#94a3b8", fontWeight: 600, marginTop: 2 }}>
+                                        {tank.staff}
+                                      </span>
+                                    </div>
+                                    {/* タグセレクター / cycle不足表示 */}
+                                    <div style={{ width: 220, minWidth: 0, flexShrink: 0 }}>
+                                      {isTankCycleUnavailable ? (
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            flexDirection: "column",
+                                            gap: 2,
+                                            padding: "7px 10px",
+                                            border: "1px solid #fecaca",
+                                            borderRadius: 8,
+                                            background: "#fef2f2",
+                                            color: "#991b1b",
+                                            whiteSpace: "normal",
+                                            overflowWrap: "anywhere",
+                                          }}
+                                        >
+                                          <strong style={{ fontSize: 11 }}>
+                                            {readiness
+                                              ? BULK_RETURN_TEXT.cycleInfoMissing[staffLocale]
+                                              : BULK_RETURN_TEXT.cycleInfoUnavailable[staffLocale]}
+                                          </strong>
+                                          <span style={{ fontSize: 11, fontWeight: 800 }}>
+                                            {BULK_RETURN_TEXT.unavailable[staffLocale]}
+                                          </span>
+                                          {tankCycleIssues.length > 0 && (
+                                            <span style={{ fontSize: 10 }}>
+                                              {BULK_RETURN_TEXT.missing[staffLocale]}:{" "}
+                                              {tankCycleIssues
+                                                .map((issue) => CYCLE_FIELD_LABELS[issue.field][staffLocale])
+                                                .join(staffLocale === "ja" ? "、" : ", ")}
+                                            </span>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <ReturnTagSelector
+                                          value={tank.tag}
+                                          onChange={(value) => updateTag(groupKey, tank.id, value)}
+                                          options={[
+                                            { value: RETURN_TAG.UNCHARGED, label: "未充填" },
+                                            { value: RETURN_TAG.UNUSED, label: "未使用" },
+                                            ...(coerceTankStatusCode(tank.status) === "lent"
+                                              ? [{ value: RETURN_TAG.KEEP, label: "持ち越し" }]
+                                              : []),
+                                          ]}
+                                          locale={staffLocale}
+                                          compact
+                                        />
+                                      )}
+                                    </div>
                                   </div>
-                                  {/* タグセレクター */}
-                                  <div style={{ width: 220, flexShrink: 0 }}>
-                                    <ReturnTagSelector
-                                      value={tank.tag}
-                                      onChange={(value) => updateTag(groupKey, tank.id, value)}
-                                      options={[
-                                        { value: RETURN_TAG.UNCHARGED, label: "未充填" },
-                                        { value: RETURN_TAG.UNUSED, label: "未使用" },
-                                        ...(coerceTankStatusCode(tank.status) === "lent"
-                                          ? [{ value: RETURN_TAG.KEEP, label: "持ち越し" }]
-                                          : []),
-                                      ]}
-                                      locale={staffLocale}
-                                      compact
-                                    />
-                                  </div>
-                                </div>
-                              ))}
+                                );
+                              })}
                             </div>
                           </div>
                         )}
@@ -484,4 +628,22 @@ export default function BulkReturnByLocationPanel({
       )}
     </div>
   );
+}
+
+function groupCycleIssuesByTank(
+  issues: readonly BulkReturnCycleReadinessIssue[],
+): Array<{
+  tankId: string;
+  fields: BulkReturnCycleReadinessIssue["field"][];
+}> {
+  const fieldsByTank = new Map<
+    string,
+    BulkReturnCycleReadinessIssue["field"][]
+  >();
+  issues.forEach((issue) => {
+    const fields = fieldsByTank.get(issue.tankId) ?? [];
+    fields.push(issue.field);
+    fieldsByTank.set(issue.tankId, fields);
+  });
+  return [...fieldsByTank].map(([tankId, fields]) => ({ tankId, fields }));
 }
