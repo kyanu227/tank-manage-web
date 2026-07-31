@@ -11,6 +11,21 @@ import { DashboardLogsSection } from "@/features/staff-dashboard/components/Dash
 import { DashboardOperationsSummary } from "@/features/staff-dashboard/components/DashboardOperationsSummary";
 import { DashboardStatusSummary } from "@/features/staff-dashboard/components/DashboardStatusSummary";
 import { StaffDashboardView } from "@/features/staff-dashboard/components/StaffDashboardView";
+import {
+  formatDashboardActionLabel,
+  formatDashboardDateTime,
+  formatDashboardLocationOption,
+  formatDashboardLogLocation,
+  formatDashboardLogKind,
+  formatDashboardPartialFailure,
+  formatDashboardReportSource,
+  formatDashboardReportStatus,
+  formatDashboardTankId,
+  formatDashboardTankStatusLabel,
+  formatDashboardUpdateSuccess,
+  formatDashboardVoidSuccess,
+  getDashboardText,
+} from "@/features/staff-dashboard/i18n";
 import { timestampToMillis, toDate } from "@/features/staff-dashboard/timestamp";
 import {
   fetchStaffDashboardLogHistory,
@@ -36,8 +51,8 @@ import {
   type TankActionCode,
 } from "@/lib/tank-action-status-codes";
 import { getDashboardActionBadgeTone } from "@/lib/tank-action-status-display";
-import { getLegacyTankActionLabel, getLegacyTankStatusLabel } from "@/lib/tank-action-status-labels";
 import type { Locale } from "@/lib/locale";
+import { getStaffGenericErrorMessage } from "@/lib/staff-display";
 
 interface EditForm {
   tankId: string | null;
@@ -61,7 +76,7 @@ export default function StaffDashboard() {
     () => normalizeCorrectionRole(session?.role),
     [session?.role]
   );
-  const { tanks, loading: tanksLoading, refetch: refetchTanks } = useTanks();
+  const { tanks, loading: tanksLoading, loadFailed: tanksLoadFailed, refetch: refetchTanks } = useTanks();
   const tankIds = useMemo(() => tanks.map((t) => t.id), [tanks]);
 
   const [logs, setLogs] = useState<DashboardLogEntry[]>([]);
@@ -69,6 +84,7 @@ export default function StaffDashboard() {
   const [customerOptions, setCustomerOptions] = useState<CustomerSnapshot[]>([]);
   const [logSortOrder, setLogSortOrder] = useState<DashboardLogSortOrder>("desc");
   const [dashboardLoading, setDashboardLoading] = useState(true);
+  const [dashboardLoadFailed, setDashboardLoadFailed] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [selectedLogIds, setSelectedLogIds] = useState<string[]>([]);
 
@@ -95,13 +111,15 @@ export default function StaffDashboard() {
 
   const fetchData = useCallback(async () => {
     setDashboardLoading(true);
+    setDashboardLoadFailed(false);
     try {
       const source = await fetchStaffDashboardSourceData();
       setLogs(source.logs);
       setUnfilledReports(source.unfilledReports);
       setCustomerOptions(source.customerOptions);
     } catch (e) {
-      console.error(e);
+      console.error("fetchStaffDashboardSourceData failed", e);
+      setDashboardLoadFailed(true);
     } finally {
       setDashboardLoading(false);
     }
@@ -225,7 +243,10 @@ export default function StaffDashboard() {
       setExpandedRootId(null);
       await refreshAfterCorrection();
     } catch (e: unknown) {
-      alert("編集エラー: " + errorMessage(e));
+      console.error("correctDashboardLogTankId failed", e);
+      alert(staffLocale === "ja"
+        ? `${getDashboardText("correctionFailure", staffLocale)}: ${errorMessage(e)}`
+        : getStaffGenericErrorMessage(staffLocale));
     } finally {
       setSavingEdit(false);
     }
@@ -248,7 +269,10 @@ export default function StaffDashboard() {
       setExpandedRootId(null);
       await refreshAfterCorrection();
     } catch (e: unknown) {
-      alert("取消エラー: " + errorMessage(e));
+      console.error("voidDashboardLog failed", e);
+      alert(staffLocale === "ja"
+        ? `${getDashboardText("voidFailure", staffLocale)}: ${errorMessage(e)}`
+        : getStaffGenericErrorMessage(staffLocale));
     } finally {
       setSavingVoid(false);
     }
@@ -296,7 +320,7 @@ export default function StaffDashboard() {
     try {
       const selectedOption = bulkLocationOptions.find((option) => option.value === bulkLocationValue);
       if (!selectedOption) {
-        alert("貸出先が選択されていません");
+        alert(getDashboardText("missingDestination", staffLocale));
         return;
       }
       const failures = await correctDashboardLogLocations({
@@ -315,10 +339,14 @@ export default function StaffDashboard() {
       await refreshAfterCorrection();
 
       if (failures.length > 0) {
-        alert(`貸出先変更は一部失敗しました。\n${failures.join("\n")}`);
+        console.error("correctDashboardLogLocations partial failure", failures);
+        alert(formatDashboardPartialFailure("location", failures, staffLocale));
         return;
       }
-      alert(`${selectedLogs.length}件の貸出先を更新しました。`);
+      alert(formatDashboardUpdateSuccess(selectedLogs.length, staffLocale));
+    } catch (e: unknown) {
+      console.error("correctDashboardLogLocations failed", e);
+      alert(staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale));
     } finally {
       setSavingBulkLocation(false);
     }
@@ -344,10 +372,14 @@ export default function StaffDashboard() {
       await refreshAfterCorrection();
 
       if (failures.length > 0) {
-        alert(`一括取消は一部失敗しました。\n${failures.join("\n")}`);
+        console.error("voidDashboardLogs partial failure", failures);
+        alert(formatDashboardPartialFailure("void", failures, staffLocale));
         return;
       }
-      alert(`${selectedLogs.length}件を取り消しました。`);
+      alert(formatDashboardVoidSuccess(selectedLogs.length, staffLocale));
+    } catch (e: unknown) {
+      console.error("voidDashboardLogs failed", e);
+      alert(staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale));
     } finally {
       setSavingBulkVoid(false);
     }
@@ -367,19 +399,23 @@ export default function StaffDashboard() {
       const entries = await fetchStaffDashboardLogHistory(rootId);
       setHistoryByRoot((prev) => ({ ...prev, [rootId]: entries }));
     } catch (e: unknown) {
-      alert("履歴取得エラー: " + errorMessage(e));
+      console.error("fetchStaffDashboardLogHistory failed", e);
+      alert(staffLocale === "ja"
+        ? `${getDashboardText("historyFailure", staffLocale)}: ${errorMessage(e)}`
+        : getDashboardText("historyFailure", staffLocale));
     } finally {
       setHistoryLoadingRoot(null);
     }
   };
 
-  const editDisabledReason = getEditDisabledReason(editForm, editingLog, savingEdit);
-  const voidDisabledReason = getVoidDisabledReason(voidReason, savingVoid);
+  const editDisabledReason = getEditDisabledReason(editForm, editingLog, savingEdit, staffLocale);
+  const voidDisabledReason = getVoidDisabledReason(voidReason, savingVoid, staffLocale);
   const bulkLocationUnavailableReason = getBulkLocationUnavailableReason(
     selectedLogIds.length,
     bulkLocationMode,
     customerOptions.length,
-    bulkLocationOptions.length
+    bulkLocationOptions.length,
+    staffLocale,
   );
 
   const statusItems = loading
@@ -388,7 +424,7 @@ export default function StaffDashboard() {
         .sort((a, b) => b[1] - a[1])
         .map(([status, count]) => ({
           key: status,
-          label: getLegacyTankStatusLabel(status) ?? status,
+          label: formatDashboardTankStatusLabel(status, staffLocale),
           count,
           color: tankStatusColor(status),
         }));
@@ -405,6 +441,7 @@ export default function StaffDashboard() {
   const todayOperations = loading
     ? []
     : todayStats.breakdown.map((row) => ({
+        key: row.key,
         action: row.action,
         count: row.count,
       }));
@@ -414,11 +451,11 @@ export default function StaffDashboard() {
     : recentUnfilledReports.map((report) => ({
         id: report.id,
         tankId: report.tankId || "-",
-        customerName: report.customerName || "顧客未設定",
+        customerName: report.customerName || getDashboardText("customerNotSet", staffLocale),
         customerTitle: report.customerName || "",
-        statusLabel: formatReportStatus(report.status),
-        timeLabel: formatTime(report.createdAt),
-        sourceLabel: formatReportSource(report.source),
+        statusLabel: formatDashboardReportStatus(report.status, staffLocale),
+        timeLabel: formatTime(report.createdAt, staffLocale),
+        sourceLabel: formatDashboardReportSource(report.source, staffLocale),
       }));
 
   const logRows = loading
@@ -427,27 +464,27 @@ export default function StaffDashboard() {
         const rootId = log.rootLogId ?? log.id;
 
         const modifyDisabledReason =
-          canModifyLogReason(log, correctionRole);
+          canModifyLogReason(log, correctionRole, staffLocale);
 
         const correctionDisabledReason =
-          canCorrectLogReason(log, correctionRole);
+          canCorrectLogReason(log, correctionRole, staffLocale);
 
         const history =
           historyByRoot[rootId] ?? [];
 
         return {
           id: log.id,
-          tankId: log.tankId,
+          tankId: formatDashboardTankId(log.tankId, log.logKind, staffLocale),
           actionLabel:
-            formatActionLabel(log.action, staffLocale),
+            formatDashboardActionLabel(log.action, staffLocale),
           actionBackground: actionBg(log.action),
           actionForeground: actionFg(log.action),
-          locationLabel: log.location || "-",
+          locationLabel: formatDashboardLogLocation(log, staffLocale),
           staffLabel: log.staffName || "-",
           timeLabel:
-            formatTime(log.originalAt ?? log.timestamp),
+            formatTime(log.originalAt ?? log.timestamp, staffLocale),
           isTankLog: log.logKind === "tank",
-          logKindLabel: log.logKind || "-",
+          logKindLabel: formatDashboardLogKind(log.logKind, staffLocale),
           isSelected:
             selectedLogIds.includes(log.id),
           canModify:
@@ -465,17 +502,18 @@ export default function StaffDashboard() {
             revisionLabel:
               `v${rev.revision ?? "-"}`,
             statusLabel:
-              statusLabel(rev.logStatus),
+              statusLabel(rev.logStatus, staffLocale),
             statusColor:
               statusColor(rev.logStatus),
             actionLabel:
-              formatActionLabel(
+              formatDashboardActionLabel(
                 rev.action,
                 staffLocale,
               ),
             timeLabel:
               formatTime(
                 rev.revisionCreatedAt,
+                staffLocale,
               ),
             editMetadata:
               rev.editedByStaffName
@@ -533,7 +571,7 @@ export default function StaffDashboard() {
     ? {
         targetTankId: voidingLog.tankId,
         actionLabel:
-          formatActionLabel(
+          formatDashboardActionLabel(
             voidingLog.action,
             staffLocale,
           ),
@@ -561,7 +599,11 @@ export default function StaffDashboard() {
             bulkLocationOptions.map(
               (option) => ({
                 value: option.value,
-                label: option.location,
+                label: formatDashboardLocationOption(
+                  option.location,
+                  option.customer === null,
+                  staffLocale,
+                ),
               }),
             ),
           selectedValue:
@@ -616,18 +658,24 @@ export default function StaffDashboard() {
     <StaffDashboardView
       staffName={session?.name ?? null}
       loading={loading}
+      locale={staffLocale}
+      loadFailed={(dashboardLoadFailed && logs.length === 0) || (tanksLoadFailed && tanks.length === 0)}
+      showLoadWarning={(dashboardLoadFailed && logs.length > 0) || (tanksLoadFailed && tanks.length > 0)}
+      onRetry={() => { void Promise.all([fetchData(), refetchTanks()]); }}
       overlays={
         <DashboardCorrectionModals
           idCorrection={idCorrectionModal}
           singleVoid={singleVoidModal}
           bulkLocation={bulkLocationModal}
           bulkVoid={bulkVoidModal}
+          locale={staffLocale}
         />
       }
     >
       <DashboardStatusSummary
         totalTanks={totalTanks}
         items={statusItems}
+        locale={staffLocale}
       />
 
       <DashboardOperationsSummary
@@ -640,6 +688,7 @@ export default function StaffDashboard() {
         recentUnfilledReports={
           reportRows
         }
+        locale={staffLocale}
       />
 
       <DashboardLogsSection
@@ -706,6 +755,7 @@ export default function StaffDashboard() {
           if (!log) return;
           await toggleHistory(log);
         }}
+        locale={staffLocale}
       />
     </StaffDashboardView>
   );
@@ -721,10 +771,6 @@ function toTankActionCode(value: unknown): TankActionCode | null {
   return typeof value === "string" ? coerceTankActionCode(value) : null;
 }
 
-function formatActionLabel(action: string | null | undefined, locale: Locale): string {
-  return getLegacyTankActionLabel(action, locale) ?? action ?? "不明";
-}
-
 function tankStatusColor(status: string): string {
   const code = coerceTankStatusCode(status);
   const legacyStatus = code ? tankStatusCodeToLegacyStatus(code) : status;
@@ -735,49 +781,50 @@ function canModifyLog(log: DashboardLogEntry, role: StaffCorrectionRole): boolea
   return canModifyLogReason(log, role) == null;
 }
 
-function canCorrectLogReason(log: DashboardLogEntry, role: StaffCorrectionRole): string | null {
-  const baseReason = canModifyLogReason(log, role);
+function canCorrectLogReason(log: DashboardLogEntry, role: StaffCorrectionRole, locale: Locale = "ja"): string | null {
+  const baseReason = canModifyLogReason(log, role, locale);
   if (baseReason) return baseReason;
   if (!log.transitionPlan?.kind) {
-    return "transitionPlanを確認できないログは訂正できません";
+    return getDashboardText("transitionPlanMissing", locale);
   }
   if (log.transitionPlan?.kind === "recovery") {
-    return "自動補完ログは取消後に正しい操作を再実行してください";
+    return getDashboardText("recoveryCorrectionBlocked", locale);
   }
   if (log.transitionReviewStatus && log.transitionReviewStatus !== "not_required") {
-    return "集計レビュー対象のログは直接訂正できません";
+    return getDashboardText("reviewCorrectionBlocked", locale);
   }
   return null;
 }
 
-function canModifyLogReason(log: DashboardLogEntry, role: StaffCorrectionRole): string | null {
-  if (log.logKind !== "tank") return "タンク操作ログではありません";
-  if (log.logStatus && log.logStatus !== "active") return "有効なログではありません";
+function canModifyLogReason(log: DashboardLogEntry, role: StaffCorrectionRole, locale: Locale = "ja"): string | null {
+  if (log.logKind !== "tank") return getDashboardText("notTankLog", locale);
+  if (log.logStatus && log.logStatus !== "active") return getDashboardText("inactiveLog", locale);
   if (role === "管理者" || role === "準管理者") return null;
   const ms = timestampToMillis(log.revisionCreatedAt);
-  if (ms == null) return "作成日時が取得できず期限判定できません";
-  if (Date.now() - ms > LIMIT_MS) return "一般スタッフの編集可能期限を超過しています";
+  if (ms == null) return getDashboardText("missingCreatedAt", locale);
+  if (Date.now() - ms > LIMIT_MS) return getDashboardText("editExpired", locale);
   return null;
 }
 
 function getEditDisabledReason(
   editForm: EditForm | null,
   editingLog: DashboardLogEntry | null,
-  savingEdit: boolean
+  savingEdit: boolean,
+  locale: Locale = "ja",
 ): string | null {
-  if (savingEdit) return "保存中です";
-  if (!editingLog || !editForm) return "編集対象を確認できません";
-  if (!editForm.tankId) return "タンクIDを選択してください";
+  if (savingEdit) return getDashboardText("saveInProgress", locale);
+  if (!editingLog || !editForm) return getDashboardText("editTargetMissing", locale);
+  if (!editForm.tankId) return getDashboardText("selectTankId", locale);
   if (editForm.tankId === editingLog.tankId) {
-    return "変更前と同じタンクIDです。別のタンクIDを選択してください";
+    return getDashboardText("sameTankId", locale);
   }
-  if (editForm.reason.trim().length < 5) return "理由を5文字以上入力してください";
+  if (editForm.reason.trim().length < 5) return getDashboardText("reasonFiveChars", locale);
   return null;
 }
 
-function getVoidDisabledReason(voidReason: string, savingVoid: boolean): string | null {
-  if (savingVoid) return "保存中です";
-  if (voidReason.trim().length < 5) return "取消理由を5文字以上入力してください";
+function getVoidDisabledReason(voidReason: string, savingVoid: boolean, locale: Locale = "ja"): string | null {
+  if (savingVoid) return getDashboardText("saveInProgress", locale);
+  if (voidReason.trim().length < 5) return getDashboardText("voidReasonFiveChars", locale);
   return null;
 }
 
@@ -785,42 +832,30 @@ function getBulkLocationUnavailableReason(
   selectedLogCount: number,
   bulkLocationMode: BulkLocationMode,
   customerOptionCount: number,
-  bulkLocationOptionCount: number
+  bulkLocationOptionCount: number,
+  locale: Locale = "ja",
 ): string | null {
   if (selectedLogCount === 0 || bulkLocationOptionCount > 0) return null;
   if (bulkLocationMode === "lend" && customerOptionCount === 0) {
-    return "有効な貸出先候補がありません。顧客マスタに有効な貸出先があるか確認してください。";
+    return getDashboardText("noCustomerOptions", locale);
   }
   if (bulkLocationMode === "inhouse") {
-    return "自社利用の変更先を確認できません。選択を解除して再度選び直してください。";
+    return getDashboardText("inhouseDestinationMissing", locale);
   }
-  return "貸出先変更は貸出ログだけ、または自社利用ログだけを選択した場合に使えます。返却・充填・混在選択では使えません。";
+  return getDashboardText("incompatibleLocationSelection", locale);
 }
 
-function formatTime(value: unknown): string {
+function formatTime(value: unknown, locale: Locale = "ja"): string {
   const date = toDate(value);
   if (!date) return "-";
-  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  return formatDashboardDateTime(date, locale);
 }
 
-function formatReportSource(source?: string): string {
-  if (source === "customer_portal") return "顧客ポータル";
-  if (source === "customer_app") return "顧客アプリ";
-  if (!source) return "source未設定";
-  return source;
-}
-
-function formatReportStatus(status?: string): string {
-  if (status === "completed") return "記録済み";
-  if (!status) return "status未設定";
-  return status;
-}
-
-function statusLabel(status?: DashboardLogEntry["logStatus"]): string {
-  if (status === "active") return "有効";
-  if (status === "superseded") return "置換済";
-  if (status === "voided") return "取消済";
-  return "不明";
+function statusLabel(status?: DashboardLogEntry["logStatus"], locale: Locale = "ja"): string {
+  if (status === "active") return getDashboardText("active", locale);
+  if (status === "superseded") return getDashboardText("superseded", locale);
+  if (status === "voided") return getDashboardText("voided", locale);
+  return getDashboardText("unknown", locale);
 }
 
 function statusColor(status?: DashboardLogEntry["logStatus"]): string {
