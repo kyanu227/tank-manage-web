@@ -89,6 +89,17 @@ export type TankSnapshot = {
 type TankCustomerProjection = Pick<TankSnapshot, "customerId" | "customerName">;
 type CustomerProjectionResolveMode = "operation" | "revision";
 
+export type ExpectedTankCycle = Readonly<{
+  customerId: string;
+  latestLogId: string;
+}>;
+
+export type StaleTankCycleIssue = Readonly<{
+  tankId: string;
+  field: "customerId" | "latestLogId";
+  reason: "missing_current" | "missing_expected" | "mismatch";
+}>;
+
 export interface TankOperationInput {
   /** タンク ID */
   tankId: string;
@@ -122,6 +133,9 @@ export interface TankOperationInput {
 
   /** advisory recoveryの確認結果。通常は確認ダイアログから内部的に付与される。 */
   recoveryConfirmation?: TankRecoveryConfirmation;
+
+  /** 操作候補の作成時に観測した貸出cycle。指定時はtransaction内の現在値と照合する。 */
+  expectedCycle?: ExpectedTankCycle;
 }
 
 export type TankRecoveryConfirmation = {
@@ -223,6 +237,13 @@ type PlannedTankOperation = {
   tankRef: DocumentReference;
 };
 
+type ReadTankOperationState = PlannedTankOperation & {
+  tankData: DocumentData;
+  prevSnapshot: TankSnapshot;
+  currentCustomerId: unknown;
+  currentLatestLogId: unknown;
+};
+
 type PreparedTankOperation = PlannedTankOperation & {
   prevSnapshot: TankSnapshot;
   latestLogId: string | null;
@@ -256,6 +277,19 @@ export class TankRecoveryConfirmationRequiredError extends Error {
     this.name = "TankRecoveryConfirmationRequiredError";
     this.fingerprint = fingerprint;
     this.requirements = requirements;
+  }
+}
+
+export class StaleTankCycleError extends Error {
+  readonly name = "StaleTankCycleError";
+  readonly code = "stale_tank_cycle";
+  readonly issues: readonly StaleTankCycleIssue[];
+
+  constructor(issues: readonly StaleTankCycleIssue[]) {
+    super("タンクの貸出cycleが操作候補の作成後に変更されています。");
+    this.issues = Object.freeze(
+      issues.map((issue) => Object.freeze({ ...issue })),
+    );
   }
 }
 
@@ -444,14 +478,43 @@ async function commitPlannedOperations(
     tx.get(aggregationRevisionRef),
   ]);
 
-  const prepared = planned.map((op, index): PreparedTankOperation => {
+  const readStates = planned.map((op, index): ReadTankOperationState => {
     const tankSnap = tankSnaps[index];
     if (!tankSnap.exists()) {
       throw new Error(`[${op.input.tankId}] タンクが存在しません`);
     }
 
     const tankData = tankSnap.data();
-    const prevSnapshot = snapshotFromTankData(tankData);
+    return {
+      ...op,
+      tankData,
+      prevSnapshot: snapshotFromTankData(tankData),
+      currentCustomerId: tankData.customerId,
+      currentLatestLogId: tankData.latestLogId,
+    };
+  });
+
+  const staleIssues = readStates.flatMap((state) => (
+    state.input.expectedCycle === undefined
+      ? []
+      : collectStaleTankCycleIssues({
+          tankId: state.input.tankId,
+          currentCustomerId: state.currentCustomerId,
+          currentLatestLogId: state.currentLatestLogId,
+          expectedCycle: state.input.expectedCycle,
+        })
+  ));
+  if (staleIssues.length > 0) {
+    throw new StaleTankCycleError(staleIssues);
+  }
+
+  const prepared = readStates.map((state): PreparedTankOperation => {
+    const { tankData, prevSnapshot } = state;
+    const op: PlannedTankOperation = {
+      input: state.input,
+      logRef: state.logRef,
+      tankRef: state.tankRef,
+    };
     const requestedTransitionAction = requireTankActionCode(
       op.input.transitionAction,
       `[${op.input.tankId}] transitionAction`
@@ -1252,25 +1315,27 @@ function resolveCarryOverCustomerProjection(
     ? requireCustomerProjection(customer, "持ち越し操作")
     : undefined;
 
+  let previousProjection: TankCustomerProjection;
   try {
-    const previousProjection = requireExistingCustomerProjection(previous, "持ち越し前");
-    if (
-      previousProjection.customerId === undefined
-      && previousProjection.customerName === undefined
-    ) {
-      return customerProjection ?? {};
-    }
-    if (previousProjection.customerId === null && previousProjection.customerName === null) {
-      return previousProjection;
-    }
-    if (customerProjection && previousProjection.customerId !== customerProjection.customerId) {
-      throw new Error("持ち越し操作の顧客情報が現在貸出先と一致しません");
-    }
-    return previousProjection;
+    previousProjection = requireExistingCustomerProjection(previous, "持ち越し前");
   } catch (error) {
     if (!customerProjection) throw error;
     return completeMalformedCarryOverProjection(previous, customerProjection);
   }
+
+  if (
+    previousProjection.customerId === undefined
+    && previousProjection.customerName === undefined
+  ) {
+    return customerProjection ?? {};
+  }
+  if (previousProjection.customerId === null && previousProjection.customerName === null) {
+    return previousProjection;
+  }
+  if (customerProjection && previousProjection.customerId !== customerProjection.customerId) {
+    throw new Error("持ち越し操作の顧客情報が現在貸出先と一致しません");
+  }
+  return previousProjection;
 }
 
 function completeMalformedCarryOverProjection(
@@ -1656,6 +1721,50 @@ function stringOrUndefined(value: unknown): string | undefined {
 
 function stringOrNull(value: unknown): string | null {
   return typeof value === "string" && value.trim() !== "" ? value : null;
+}
+
+function collectStaleTankCycleIssues(input: {
+  tankId: string;
+  currentCustomerId: unknown;
+  currentLatestLogId: unknown;
+  expectedCycle: unknown;
+}): StaleTankCycleIssue[] {
+  const expectedCycle = (
+    typeof input.expectedCycle === "object"
+    && input.expectedCycle !== null
+  )
+    ? input.expectedCycle as Record<string, unknown>
+    : {};
+  const fields = [
+    {
+      field: "customerId" as const,
+      current: input.currentCustomerId,
+      expected: expectedCycle.customerId,
+    },
+    {
+      field: "latestLogId" as const,
+      current: input.currentLatestLogId,
+      expected: expectedCycle.latestLogId,
+    },
+  ];
+
+  return fields.flatMap(({ field, current, expected }) => {
+    const reason = staleTankCycleReason(current, expected);
+    return reason ? [{ tankId: input.tankId, field, reason }] : [];
+  });
+}
+
+function staleTankCycleReason(
+  current: unknown,
+  expected: unknown,
+): StaleTankCycleIssue["reason"] | null {
+  if (typeof current !== "string" || current.trim() === "") {
+    return "missing_current";
+  }
+  if (typeof expected !== "string" || expected.trim() === "") {
+    return "missing_expected";
+  }
+  return current === expected ? null : "mismatch";
 }
 
 function normalizeStringArray(value: unknown): string[] {
