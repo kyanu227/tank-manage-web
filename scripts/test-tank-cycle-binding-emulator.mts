@@ -557,6 +557,41 @@ async function resetAndSeedFixtures(mode: SeedMode): Promise<void> {
   if (adminAppSdk.getApps().length !== 0) fail("E_ADMIN_APP_REMAINING");
 }
 
+async function overwriteTankCustomerIdFixture(
+  tankId: string,
+  customerId: string,
+): Promise<void> {
+  const adminAppSdk = await import("firebase-admin/app");
+  const adminFirestoreSdk = await import("firebase-admin/firestore");
+  if (adminAppSdk.getApps().length !== 0) fail("E_ADMIN_APP_PREEXISTING");
+
+  let adminApp: import("firebase-admin/app").App | undefined;
+  let primaryFailure: unknown;
+  try {
+    adminApp = adminAppSdk.initializeApp(
+      { projectId: PROJECT_ID },
+      "tank-cycle-binding-customer-fixture",
+    );
+    if (adminApp.options.projectId !== PROJECT_ID) {
+      fail("E_ADMIN_PROJECT");
+    }
+    const adminDb = adminFirestoreSdk.getFirestore(adminApp);
+    await adminDb.doc(`tanks/${tankId}`).update({ customerId });
+  } catch (error) {
+    primaryFailure = error;
+  } finally {
+    if (adminApp) {
+      try {
+        await adminAppSdk.deleteApp(adminApp);
+      } catch {
+        if (primaryFailure === undefined) primaryFailure = new HarnessFailure("E_ADMIN_DELETE");
+      }
+    }
+  }
+  if (primaryFailure !== undefined) throw primaryFailure;
+  if (adminAppSdk.getApps().length !== 0) fail("E_ADMIN_APP_REMAINING");
+}
+
 async function assertNoAdminApps(): Promise<void> {
   const adminAppSdk = await import("firebase-admin/app");
   if (adminAppSdk.getApps().length !== 0) fail("E_ADMIN_APP_BOUNDARY");
@@ -996,6 +1031,50 @@ async function runChainThree(
   );
 }
 
+async function runChainFour(
+  modules: ApplicationModules,
+  firestoreSdk: FirestoreSdk,
+  db: import("firebase/firestore").Firestore,
+  deepStrictEqual: typeof import("node:assert/strict").deepStrictEqual,
+): Promise<void> {
+  // S7: latestLogId は一致したまま、customerId 単独 mismatch で全件停止する。
+  await performLend(modules, "A-99", CUSTOMER_X);
+  const freshCandidate = await fetchCandidate(modules, "A-99");
+  const oldCandidate = copyBulkCandidate(freshCandidate);
+  await overwriteTankCustomerIdFixture("A-99", CUSTOMER_Y.customerId);
+
+  const beforeStale = await takePersistentSnapshot(firestoreSdk, db);
+  const current = await readTank(firestoreSdk, db, "A-99");
+  expectCondition(
+    current.latestLogId === oldCandidate.latestLogId,
+    "E_S7_LOG_CHANGED",
+  );
+  expectCondition(
+    current.customerId !== oldCandidate.customerId,
+    "E_S7_CUSTOMER_NOT_STALE",
+  );
+  const issues = await captureStaleIssues(modules, () => (
+    modules.workflow.submitBulkReturnGroup({
+      tanks: [oldCandidate],
+      fallbackLocation: CUSTOMER_X.customerName,
+      actor: ACTOR,
+    })
+  ));
+  assertDeepEqual(
+    deepStrictEqual,
+    issues,
+    [{ tankId: "A-99", field: "customerId", reason: "mismatch" }],
+    "E_S7_ISSUES",
+  );
+  const afterStale = await takePersistentSnapshot(firestoreSdk, db);
+  assertNoPersistentDelta(
+    deepStrictEqual,
+    beforeStale,
+    afterStale,
+    "E_S7_PERSISTENT_DELTA",
+  );
+}
+
 async function cleanupFirebase(
   firebaseAppSdk: FirebaseAppSdk | undefined,
   authSdk: FirebaseAuthSdk | undefined,
@@ -1111,6 +1190,13 @@ async function executeHarness(): Promise<void> {
     await signInAndProbe(authSdk, firestoreSdk, auth, db);
     await runChainThree(modules, firestoreSdk, db, deepStrictEqual);
     process.stdout.write("PASS chain 3: S6 all-or-nothing\n");
+
+    await authSdk.signOut(auth);
+    await resetAndSeedFixtures("normal");
+    await assertNoAdminApps();
+    await signInAndProbe(authSdk, firestoreSdk, auth, db);
+    await runChainFour(modules, firestoreSdk, db, deepStrictEqual);
+    process.stdout.write("PASS chain 4: S7 customer-only stale\n");
   } catch (error) {
     primaryFailure = error;
   }
