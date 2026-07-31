@@ -59,6 +59,7 @@ export const TANK_RECOVERY_CONFIRMATION_TEXT = {
   none: { ja: "なし", en: "None" },
   unknownName: { ja: "名称不明", en: "Unknown name" },
   unknownCustomerId: { ja: "customerId不明", en: "customerId unknown" },
+  unknownLocation: { ja: "不明", en: "Unknown location" },
   physicalTankConfirmed: {
     ja: "目の前の現物と、表示されたタンクID/番号が一致する",
     en: "The physical tank matches the displayed tank ID/number",
@@ -125,7 +126,7 @@ function buildRequirementDetails(
     `  ${getTankRecoveryText("state", locale)}: ${getTankStatusLabel(step.fromStatus, locale)} (${step.fromStatus}) → ${getTankStatusLabel(step.toStatus, locale)} (${step.toStatus})`,
     `  ${getTankRecoveryText("actor", locale)}: ${getTankRecoveryText(step.actorType === "system" ? "systemActor" : "staffActor", locale)} (${step.actorType})`,
     `  ${getTankRecoveryText("customer", locale)}: ${formatCustomer(step.customerId, step.customerName, getTankRecoveryText("notApplicable", locale), locale)}`,
-    `  ${getTankRecoveryText("location", locale)}: ${formatLocation(step.location, locale)}`,
+    `  ${getTankRecoveryText("location", locale)}: ${formatLocation(step.location, step.businessEffect === "rental_open", locale)}`,
   ]);
   const evidence = requirement.plan.requiredEvidence.map(
     (key) => getTankRecoveryText("evidenceItem", locale, {
@@ -138,7 +139,12 @@ function buildRequirementDetails(
     `${getTankRecoveryText("tankId", locale)}: ${requirement.tankId}`,
     `${getTankRecoveryText("displayAction", locale)}: ${getTankActionLabel(requirement.requestedAction, locale)} (${requirement.requestedAction})`,
     `${getTankRecoveryText("currentStatus", locale)}: ${getTankStatusLabel(requirement.currentStatus, locale)} (${requirement.currentStatus})`,
-    `${getTankRecoveryText("currentLocation", locale)}: ${formatLocation(requirement.currentLocation, locale)}`,
+    `${getTankRecoveryText("currentLocation", locale)}: ${formatLocation(
+      requirement.currentLocation,
+      requirement.currentStatus === "lent"
+        || requirement.currentStatus === "unreturned",
+      locale,
+    )}`,
     `${getTankRecoveryText("currentHolder", locale)}: ${formatCustomer(requirement.currentCustomerId, requirement.currentCustomerName, getTankRecoveryText("none", locale), locale)}`,
     `${getTankRecoveryText("previousCustomer", locale)}: ${formatCustomer(previousCustomerStep?.customerId, previousCustomerStep?.customerName, getTankRecoveryText("notApplicable", locale), locale)}`,
     `${getTankRecoveryText("newCustomer", locale)}: ${formatCustomer(newCustomerStep?.customerId, newCustomerStep?.customerName, getTankRecoveryText("notApplicable", locale), locale)}`,
@@ -168,7 +174,13 @@ function formatCustomer(
 
 function formatLocation(
   location: string | null | undefined,
+  isCustomerLocation: boolean,
   locale: Locale,
 ): string {
-  return getStaffLocationLabel(location?.trim(), locale);
+  const normalized = location?.trim();
+  if (locale === "ja") return getStaffLocationLabel(normalized, locale);
+  if (isCustomerLocation) return normalized || getStaffLocationLabel(normalized, locale);
+  const systemLabel = getStaffLocationLabel(normalized, locale);
+  if (!normalized || systemLabel !== normalized) return systemLabel;
+  return getTankRecoveryText("unknownLocation", locale);
 }

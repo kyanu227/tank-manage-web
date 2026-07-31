@@ -75,4 +75,50 @@ describe("tank recovery confirmation message", () => {
     expect(message).toContain("[physicalTankConfirmed]");
     expect(message).not.toMatch(/[\u3040-\u30ff\u3400-\u9fff々〆〤ヶ]/u);
   });
+
+  it("preserves customer-name collisions while translating confirmed system locations", () => {
+    const message = buildTankRecoveryConfirmationMessage({
+      ...REQUIREMENT,
+      currentLocation: "倉庫",
+      currentCustomerId: "customer-warehouse",
+      currentCustomerName: "倉庫",
+      plan: {
+        ...REQUIREMENT.plan,
+        steps: REQUIREMENT.plan.steps.map((step) => (
+          step.businessEffect === "rental_open"
+            ? { ...step, customerName: "自社", location: "自社" }
+            : step
+        )),
+      },
+    }, 0, 1, "en");
+
+    expect(message).toContain("Current location: 倉庫");
+    expect(message).toContain("Location: Warehouse");
+    expect(message).toContain("Location: 自社");
+  });
+
+  it("does not expose an unknown system location in English", () => {
+    const message = buildTankRecoveryConfirmationMessage({
+      ...REQUIREMENT,
+      plan: {
+        ...REQUIREMENT.plan,
+        steps: REQUIREMENT.plan.steps.map((step, index) => (
+          index === 1 ? { ...step, location: "未知場所" } : step
+        )),
+      },
+    }, 0, 1, "en");
+
+    expect(message).toContain("Location: Unknown location");
+    expect(message).not.toContain("未知場所");
+  });
+
+  it("uses the current status before stale customer metadata", () => {
+    const message = buildTankRecoveryConfirmationMessage({
+      ...REQUIREMENT,
+      currentStatus: "empty",
+      currentLocation: "倉庫",
+    }, 0, 1, "en");
+
+    expect(message).toContain("Current location: Warehouse");
+  });
 });
