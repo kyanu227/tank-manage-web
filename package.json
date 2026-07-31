@@ -23,6 +23,7 @@
     "test:rules:cutover-baseline-load": "firebase emulators:exec --project demo-cutover-baseline-rules --config firebase.cutover-baseline.json --only firestore \"node -e \\\"console.log('PASS: pinned pre-cutover baseline rules loaded')\\\"\"",
     "test:rules:cutover-freeze": "firebase emulators:exec --project demo-cutover-freeze-rules --config firebase.cutover-freeze.json --only firestore \"node scripts/test-cutover-freeze-rules.mjs\"",
     "test:rules:transition": "firebase emulators:exec --config firebase.rules-test.json --only firestore \"node scripts/test-transition-rules.mjs\"",
+    "test:emulator:tank-cycle-binding": "firebase emulators:exec --project demo-structural-smoke --config firebase.structural-smoke.json --only auth,firestore \"env CI=1 NEXT_PUBLIC_FIREBASE_API_KEY=demo-structural-smoke-api-key NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN=demo-structural-smoke.firebaseapp.com NEXT_PUBLIC_FIREBASE_PROJECT_ID=demo-structural-smoke NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET=demo-structural-smoke.appspot.com NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID=000000000000 NEXT_PUBLIC_FIREBASE_APP_ID=1:000000000000:web:0000000000000000000000 NEXT_PUBLIC_FIREBASE_MEASUREMENT_ID=G-STRUCTURAL-SMOKE tsx scripts/test-tank-cycle-binding-emulator.mts\"",
     "test:transition-policy": "tsx scripts/test-transition-policy.ts",
     "test:transition-projections": "tsx scripts/test-transition-projections.ts",
     "test": "vitest run"
