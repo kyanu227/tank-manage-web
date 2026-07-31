@@ -2,6 +2,9 @@
 
 import { ArrowRightCircle, CheckCircle2, ClipboardCheck, Link2, Loader2, Store, Truck } from "lucide-react";
 import { totalOrderQuantity, type PendingOrder } from "@/lib/order-types";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
+import { formatStaffShortDateTime, formatStaffTankCount, getStaffTankUnit } from "@/lib/staff-display";
+import { getStaffOperationText } from "../i18n";
 
 interface OrderListPanelProps {
   ordersLoading: boolean;
@@ -9,6 +12,9 @@ interface OrderListPanelProps {
   approveOrder: (order: PendingOrder) => Promise<void>;
   approvingOrderId: string | null;
   openFulfillment: (order: PendingOrder) => void;
+  locale?: Locale;
+  ordersLoadFailed?: boolean;
+  retryOrders?: () => void | Promise<void>;
 }
 
 export default function OrderListPanel({
@@ -17,32 +23,55 @@ export default function OrderListPanel({
   approveOrder,
   approvingOrderId,
   openFulfillment,
+  locale = DEFAULT_LOCALE,
+  ordersLoadFailed = false,
+  retryOrders,
 }: OrderListPanelProps) {
   return (
     <div style={{ flex: 1, overflowY: "auto", padding: 20 }}>
       {ordersLoading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 60 }}>
+        <div role="status" aria-label={getStaffOperationText("loadingOrders", locale)} style={{ display: "flex", justifyContent: "center", padding: 60 }}>
           <Loader2 size={24} color="#94a3b8" style={{ animation: "spin 1s linear infinite" }} />
+        </div>
+      ) : ordersLoadFailed ? (
+        <div role="alert" style={{ background: "#fff", border: "1.5px solid #fecaca", borderRadius: 20, padding: "32px 20px", textAlign: "center" }}>
+          <p style={{ fontSize: 14, fontWeight: 800, color: "#b91c1c", margin: "0 0 12px" }}>
+            {getStaffOperationText("ordersLoadFailure", locale)}
+          </p>
+          {retryOrders && (
+            <button type="button" onClick={() => void retryOrders()} style={{ border: "none", borderRadius: 10, padding: "9px 16px", background: "#2563eb", color: "#fff", fontSize: 13, fontWeight: 800, cursor: "pointer" }}>
+              {getStaffOperationText("retry", locale)}
+            </button>
+          )}
         </div>
       ) : pendingOrders.length === 0 ? (
         <div style={{ background: "#fff", border: "1.5px solid #e2e8f0", borderRadius: 20, padding: "40px 20px", textAlign: "center" }}>
           <div style={{ width: 64, height: 64, borderRadius: "50%", background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
             <CheckCircle2 size={32} color="#94a3b8" />
           </div>
-          <p style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>未対応の受注はありません</p>
-          <p style={{ fontSize: 13, color: "#64748b" }}>顧客がアプリから発注するとここに表示されます</p>
+          <p style={{ fontSize: 16, fontWeight: 700, color: "#0f172a", marginBottom: 6 }}>{getStaffOperationText("noOrders", locale)}</p>
+          <p style={{ fontSize: 13, color: "#64748b" }}>{getStaffOperationText("noOrdersHelp", locale)}</p>
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
           {pendingOrders.map((order) => {
-            const dateStr = order.createdAt ? new Date(order.createdAt.toMillis()).toLocaleString("ja-JP", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }) : "";
+            const dateStr = order.createdAt
+              ? locale === "ja"
+                ? new Date(order.createdAt.toMillis()).toLocaleString("ja-JP", {
+                    month: "short",
+                    day: "numeric",
+                    hour: "2-digit",
+                    minute: "2-digit",
+                  })
+                : formatStaffShortDateTime(order.createdAt.toMillis(), locale)
+              : "";
             const total = totalOrderQuantity(order.items);
             const isDelivery = order.deliveryType === "delivery";
             const memoList = [order.note, order.deliveryNote]
               .filter((memo): memo is string => Boolean(memo))
               .filter((memo, index, list) => list.indexOf(memo) === index);
-            const status = getOrderStatusView(order);
-            const action = getOrderActionView(order);
+            const status = getOrderStatusView(order, locale);
+            const action = getOrderActionView(order, locale);
             const isApproving = approvingOrderId === order.id;
             return (
               <div key={order.id}
@@ -61,7 +90,7 @@ export default function OrderListPanel({
                   <div style={{ minWidth: 0, flex: 1 }}>
                     <div style={{ display: "flex", alignItems: "center", flexWrap: "wrap", gap: 8, marginBottom: 8 }}>
                       <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
-                        {order.customerName || "顧客未紐付け"}
+                        {order.customerName || getStaffOperationText("customerUnlinked", locale)}
                       </span>
                       <span style={{
                         fontSize: 11,
@@ -84,18 +113,22 @@ export default function OrderListPanel({
                         padding: "4px 8px", borderRadius: 6,
                       }}>
                         {isDelivery ? <Truck size={13} /> : <Store size={13} />}
-                        {isDelivery ? "配達" : "引き取り"}
+                        {getStaffOperationText(isDelivery ? "delivery" : "pickup", locale)}
                       </span>
                       {isDelivery && (
                         <span style={{ fontSize: 12, fontWeight: 700, color: "#475569", background: "#f8fafc", padding: "4px 8px", borderRadius: 6 }}>
-                          配達先: {order.deliveryTargetName || "未入力"}
+                          {getStaffOperationText("deliveryTarget", locale, {
+                            target: order.deliveryTargetName || getStaffOperationText("notEntered", locale),
+                          })}
                         </span>
                       )}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "baseline", gap: 4, flexShrink: 0 }}>
                     <span style={{ fontSize: 28, fontWeight: 900, color: "#3b82f6" }}>{total}</span>
-                    <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>本</span>
+                    <span style={{ fontSize: 13, fontWeight: 700, color: "#94a3b8" }}>
+                      {getStaffTankUnit(total, locale)}
+                    </span>
                   </div>
                 </div>
 
@@ -115,10 +148,12 @@ export default function OrderListPanel({
                       }}
                     >
                       <span style={{ fontSize: 13, fontWeight: 800, color: "#334155", overflowWrap: "anywhere" }}>
-                        {item.tankType || "種別未入力"}
+                        {item.tankType || getStaffOperationText("tankTypeMissing", locale)}
                       </span>
                       <span style={{ fontSize: 13, fontWeight: 900, color: "#0f172a", whiteSpace: "nowrap" }}>
-                        × {item.quantity}本
+                        {getStaffOperationText("quantityTanks", locale, {
+                          countLabel: formatStaffTankCount(item.quantity, locale),
+                        })}
                       </span>
                     </div>
                   ))}
@@ -134,7 +169,7 @@ export default function OrderListPanel({
                         fontWeight: 600,
                         overflowWrap: "anywhere",
                       }}>
-                        メモ: {memo}
+                        {getStaffOperationText("memo", locale, { memo })}
                       </p>
                     ))}
                   </div>
@@ -144,6 +179,7 @@ export default function OrderListPanel({
                   {action.kind === "approve" && (
                     <button
                       type="button"
+                      aria-busy={isApproving}
                       onClick={() => approveOrder(order)}
                       disabled={isApproving}
                       style={{
@@ -163,7 +199,7 @@ export default function OrderListPanel({
                       }}
                     >
                       {isApproving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <ClipboardCheck size={16} />}
-                      {isApproving ? "承認中…" : "受注を承認"}
+                      {getStaffOperationText(isApproving ? "approving" : "approveOrder", locale)}
                     </button>
                   )}
                   {action.kind === "fulfill" && (
@@ -187,7 +223,7 @@ export default function OrderListPanel({
                       }}
                     >
                       <ArrowRightCircle size={16} />
-                      タンク入力へ
+                      {getStaffOperationText("openTankInput", locale)}
                     </button>
                   )}
                   {action.kind === "disabled" && (
@@ -219,32 +255,32 @@ export default function OrderListPanel({
   );
 }
 
-function getOrderStatusView(order: PendingOrder): {
+export function getOrderStatusView(order: PendingOrder, locale: Locale): {
   label: string;
   color: string;
   background: string;
 } {
   if (!order.customerId || order.status === "pending_link") {
-    return { label: "顧客紐付け待ち", color: "#92400e", background: "#fef3c7" };
+    return { label: getStaffOperationText("statusPendingLink", locale), color: "#92400e", background: "#fef3c7" };
   }
   if (order.status === "approved") {
-    return { label: "承認済み", color: "#047857", background: "#d1fae5" };
+    return { label: getStaffOperationText("statusApproved", locale), color: "#047857", background: "#d1fae5" };
   }
   if (order.status === "completed") {
-    return { label: "完了済み", color: "#475569", background: "#e2e8f0" };
+    return { label: getStaffOperationText("statusCompleted", locale), color: "#475569", background: "#e2e8f0" };
   }
   if (order.status === "pending_approval") {
-    return { label: "承認待ち", color: "#1d4ed8", background: "#dbeafe" };
+    return { label: getStaffOperationText("statusPendingApproval", locale), color: "#1d4ed8", background: "#dbeafe" };
   }
-  return { label: "未承認", color: "#1d4ed8", background: "#dbeafe" };
+  return { label: getStaffOperationText("statusPending", locale), color: "#1d4ed8", background: "#dbeafe" };
 }
 
-function getOrderActionView(order: PendingOrder):
+export function getOrderActionView(order: PendingOrder, locale: Locale):
   | { kind: "approve" }
   | { kind: "fulfill" }
   | { kind: "disabled"; label: string } {
   if (!order.customerId || order.status === "pending_link") {
-    return { kind: "disabled", label: "顧客紐付け待ち" };
+    return { kind: "disabled", label: getStaffOperationText("statusPendingLink", locale) };
   }
   if (order.status === "approved") {
     return { kind: "fulfill" };
@@ -252,5 +288,5 @@ function getOrderActionView(order: PendingOrder):
   if (order.status === "pending" || order.status === "pending_approval") {
     return { kind: "approve" };
   }
-  return { kind: "disabled", label: "完了済み" };
+  return { kind: "disabled", label: getStaffOperationText("statusCompleted", locale) };
 }

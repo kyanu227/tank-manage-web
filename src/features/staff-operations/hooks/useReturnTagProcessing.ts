@@ -2,16 +2,22 @@
 
 import { useCallback, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
+import { formatStaffCount } from "@/lib/staff-display";
 import { confirmPendingReturnRequests } from "@/lib/firebase/return-tag-processing-service";
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import type { PendingReturn, ReturnConfirmationSelectionMap, ReturnGroup } from "../types";
+import { getStaffOperationText } from "../i18n";
+import { getReturnTagSelectionIssue } from "../return-tag-selection";
 
 interface UseReturnTagProcessingParams {
   fetchBulkTanks: () => Promise<void>;
+  locale?: Locale;
 }
 
 export interface UseReturnTagProcessingResult {
   pendingReturnTagsLoading: boolean;
+  pendingReturnTagsLoadFailed: boolean;
   returnGroups: ReturnGroup[];
   selectedReturnGroup: ReturnGroup | null;
   setSelectedReturnGroup: (group: ReturnGroup | null) => void;
@@ -25,8 +31,10 @@ export interface UseReturnTagProcessingResult {
 
 export function useReturnTagProcessing({
   fetchBulkTanks,
+  locale = DEFAULT_LOCALE,
 }: UseReturnTagProcessingParams): UseReturnTagProcessingResult {
   const [pendingReturnTagsLoading, setPendingReturnTagsLoading] = useState(true);
+  const [pendingReturnTagsLoadFailed, setPendingReturnTagsLoadFailed] = useState(false);
   const [returnGroups, setReturnGroups] = useState<ReturnGroup[]>([]);
   const [selectedReturnGroup, setSelectedReturnGroup] = useState<ReturnGroup | null>(null);
   const [returnTagSelections, setReturnTagSelections] = useState<ReturnConfirmationSelectionMap>({});
@@ -34,6 +42,7 @@ export function useReturnTagProcessing({
 
   const fetchPendingReturnTags = useCallback(async () => {
     setPendingReturnTagsLoading(true);
+    setPendingReturnTagsLoadFailed(false);
     try {
       const docs = await transactionsRepository.getPendingReturnTags();
       const items = docs as unknown as PendingReturn[];
@@ -48,6 +57,7 @@ export function useReturnTagProcessing({
       setReturnGroups(groups);
     } catch (e) {
       console.error(e);
+      setPendingReturnTagsLoadFailed(true);
     } finally {
       setPendingReturnTagsLoading(false);
     }
@@ -64,9 +74,13 @@ export function useReturnTagProcessing({
 
   const confirmSelectedReturnRequests = useCallback(async () => {
     if (!selectedReturnGroup) return;
-    const selectedCount = selectedReturnGroup.items.filter((i) => returnTagSelections[i.id]?.selected).length;
-    if (selectedCount === 0) {
-      alert("処理するタンクを選択してください");
+    const selectionIssue = getReturnTagSelectionIssue(selectedReturnGroup, returnTagSelections);
+    if (selectionIssue === "none_selected") {
+      alert(getStaffOperationText("selectTanks", locale));
+      return;
+    }
+    if (selectionIssue === "invalid_condition") {
+      alert(getStaffOperationText("chooseValidReturnTag", locale));
       return;
     }
     setReturnConfirmationSubmitting(true);
@@ -78,19 +92,25 @@ export function useReturnTagProcessing({
         actor,
       });
 
-      alert(`${processedCount}件の返却タグを処理しました`);
+      alert(getStaffOperationText("processedReturnTags", locale, {
+        countLabel: formatStaffCount(processedCount, locale, {
+          ja: "件", enSingular: "return tag", enPlural: "return tags",
+        }),
+      }));
       setSelectedReturnGroup(null);
       fetchPendingReturnTags();
       fetchBulkTanks();
     } catch (e: unknown) {
-      alert("エラー: " + errorMessage(e));
+      if (locale === "en") console.error("Return tag processing failed", e);
+      alert(locale === "ja" ? `エラー: ${errorMessage(e)}` : getStaffOperationText("returnTagFailure", locale));
     } finally {
       setReturnConfirmationSubmitting(false);
     }
-  }, [fetchBulkTanks, fetchPendingReturnTags, returnTagSelections, selectedReturnGroup]);
+  }, [fetchBulkTanks, fetchPendingReturnTags, locale, returnTagSelections, selectedReturnGroup]);
 
   return {
     pendingReturnTagsLoading,
+    pendingReturnTagsLoadFailed,
     returnGroups,
     selectedReturnGroup,
     setSelectedReturnGroup,

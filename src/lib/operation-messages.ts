@@ -1,6 +1,7 @@
 import type { TankActionCode } from "./tank-action-status-codes";
 import { getTankActionLabel } from "./tank-action-status-labels";
 import { DEFAULT_LOCALE, type Locale } from "./locale";
+import { formatStaffCount } from "./staff-display";
 
 export type OperationMessageKey =
   | "manualOperation.confirm"
@@ -20,32 +21,32 @@ export type MessageParams = Record<string, string | number>;
 
 export const OPERATION_MESSAGES = {
   "manualOperation.confirm": {
-    ja: "{actionLabel}：{tankCount}本を処理しますか？",
-    en: "Process {tankCount} tanks for {actionLabel}?",
+    ja: "{actionLabel}：{tankCountLabel}を処理しますか？",
+    en: "Process {tankCountLabel} for {actionLabel}?",
   },
   "manualOperation.returnConfirmWithCarryOver": {
-    ja: "{returnActionLabel}: {returnCount}本 / {carryOverLabel}: {keepCount}本を処理しますか？",
-    en: "Process {returnCount} returns / {keepCount} carry-overs?",
+    ja: "{returnActionLabel}: {returnCountLabel} / {carryOverLabel}: {keepCountLabel}を処理しますか？",
+    en: "Process {returnCountLabel} / {keepCountLabel}?",
   },
   "manualOperation.success": {
-    ja: "{tankCount}本の処理が完了しました",
-    en: "{tankCount} tanks processed.",
+    ja: "{tankCountLabel}の処理が完了しました",
+    en: "{tankCountLabel} processed.",
   },
   "manualOperation.failure": {
     ja: "{actionLabel}に失敗しました。",
     en: "Failed to run {actionLabel}.",
   },
   "manualReturn.confirm": {
-    ja: "返却：{returnCount}本を処理しますか？",
-    en: "Process {returnCount} returns?",
+    ja: "返却：{returnCountLabel}を処理しますか？",
+    en: "Process {returnCountLabel}?",
   },
   "manualReturn.confirmWithCarryOver": {
-    ja: "返却: {returnCount}本 / 持ち越し: {keepCount}本を処理しますか？",
-    en: "Process {returnCount} returns / {keepCount} carry-overs?",
+    ja: "返却: {returnCountLabel} / 持ち越し: {keepCountLabel}を処理しますか？",
+    en: "Process {returnCountLabel} / {keepCountLabel}?",
   },
   "manualReturn.success": {
-    ja: "{tankCount}本の処理が完了しました",
-    en: "{tankCount} return items processed.",
+    ja: "{tankCountLabel}の処理が完了しました",
+    en: "{tankCountLabel} processed.",
   },
   "staffLocale.saveSuccess": {
     ja: "表示言語を保存しました。",
@@ -107,17 +108,24 @@ export function getManualOperationConfirmMessage(
   const keepCount = params.keepCount ?? 0;
 
   if (actionCode === "return" && keepCount > 0) {
+    const returnCount = params.returnCount ?? Math.max(params.tankCount - keepCount, 0);
     return getOperationMessage("manualOperation.returnConfirmWithCarryOver", locale, {
       returnActionLabel: getTankActionLabel("return", locale),
-      returnCount: params.returnCount ?? Math.max(params.tankCount - keepCount, 0),
+      returnCountLabel: formatStaffCount(returnCount, locale, {
+        ja: "本", enSingular: "return", enPlural: "returns",
+      }),
       carryOverLabel: locale === "ja" ? "持ち越し" : "Carry-over",
-      keepCount,
+      keepCountLabel: formatStaffCount(keepCount, locale, {
+        ja: "本", enSingular: "carry-over", enPlural: "carry-overs",
+      }),
     });
   }
 
   return getOperationMessage("manualOperation.confirm", locale, {
     actionLabel: getTankActionLabel(actionCode, locale),
-    tankCount: params.tankCount,
+    tankCountLabel: formatStaffCount(params.tankCount, locale, {
+      ja: "本", enSingular: "tank", enPlural: "tanks",
+    }),
   });
 }
 
@@ -127,7 +135,9 @@ export function getManualOperationSuccessMessage(
   params: ManualOperationMessageParams = { tankCount: 0 },
 ): string {
   return getOperationMessage("manualOperation.success", locale, {
-    tankCount: params.tankCount,
+    tankCountLabel: formatStaffCount(params.tankCount, locale, {
+      ja: "本", enSingular: "tank", enPlural: "tanks",
+    }),
   });
 }
 
@@ -148,13 +158,19 @@ export function getManualReturnConfirmMessage(
 
   if (keepCount > 0) {
     return getOperationMessage("manualReturn.confirmWithCarryOver", locale, {
-      returnCount: params.returnCount,
-      keepCount,
+      returnCountLabel: formatStaffCount(params.returnCount, locale, {
+        ja: "本", enSingular: "return", enPlural: "returns",
+      }),
+      keepCountLabel: formatStaffCount(keepCount, locale, {
+        ja: "本", enSingular: "carry-over", enPlural: "carry-overs",
+      }),
     });
   }
 
   return getOperationMessage("manualReturn.confirm", locale, {
-    returnCount: params.returnCount,
+    returnCountLabel: formatStaffCount(params.returnCount, locale, {
+      ja: "本", enSingular: "return", enPlural: "returns",
+    }),
   });
 }
 
@@ -163,7 +179,9 @@ export function getManualReturnSuccessMessage(
   params: ManualReturnMessageParams,
 ): string {
   return getOperationMessage("manualReturn.success", locale, {
-    tankCount: params.tankCount,
+    tankCountLabel: formatStaffCount(params.tankCount, locale, {
+      ja: "本", enSingular: "return item", enPlural: "return items",
+    }),
   });
 }
 
