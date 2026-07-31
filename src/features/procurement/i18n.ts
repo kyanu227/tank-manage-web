@@ -70,21 +70,18 @@ export function formatProcurementJpy(value: number, locale: Locale): string {
 }
 
 export function formatSupplyOrderConfirm(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `${count}品目を発注しますか？`
-    : `Place an order for ${formatProcurementItemCount(count, locale)}?`;
+  if (locale === "ja") return `${count}品目を発注しますか？`;
+  return `Place an order for ${formatProcurementItemCount(count, locale)}?`;
 }
 
 export function formatSupplyOrderSuccess(count: number, total: number, locale: Locale): string {
-  return locale === "ja"
-    ? `${count}品目の発注を完了（合計 ${formatProcurementJpy(total, locale)}）`
-    : `Placed an order for ${formatProcurementItemCount(count, locale)} (${formatProcurementJpy(total, locale)} total).`;
+  if (locale === "ja") return `${count}品目の発注を完了（合計 ${formatProcurementJpy(total, locale)}）`;
+  return `Placed an order for ${formatProcurementItemCount(count, locale)} (${formatProcurementJpy(total, locale)} total).`;
 }
 
 export function formatPlaceOrder(total: number, locale: Locale): string {
-  return locale === "ja"
-    ? `発注を確定（${formatProcurementJpy(total, locale)}）`
-    : `Place order (${formatProcurementJpy(total, locale)})`;
+  if (locale === "ja") return `発注を確定（${formatProcurementJpy(total, locale)}）`;
+  return `Place order (${formatProcurementJpy(total, locale)})`;
 }
 
 export function formatQuantityButtonLabel(
@@ -119,11 +116,8 @@ export function formatTankEntryConfirm(
   totalCost: number,
   locale: Locale,
 ): string {
-  if (locale === "ja") {
-    return mode === "purchase"
-      ? `${count}本を購入登録しますか？\n合計 ${formatProcurementJpy(totalCost, locale)} を計上します。`
-      : `${count}本を登録しますか？`;
-  }
+  if (locale === "ja" && mode === "purchase") return `${count}本を購入登録しますか？\n合計 ${formatProcurementJpy(totalCost, locale)} を計上します。`;
+  if (locale === "ja") return `${count}本を登録しますか？`;
   return mode === "purchase"
     ? `Purchase and register ${formatStaffTankCount(count, locale)}?\nRecord a total cost of ${formatProcurementJpy(totalCost, locale)}.`
     : `Register ${formatStaffTankCount(count, locale)}?`;
@@ -135,11 +129,8 @@ export function formatTankEntrySuccess(
   totalCost: number,
   locale: Locale,
 ): string {
-  if (locale === "ja") {
-    return mode === "purchase"
-      ? `${count}本を購入登録しました（${formatProcurementJpy(totalCost, locale)}）`
-      : `${count}本を登録しました`;
-  }
+  if (locale === "ja" && mode === "purchase") return `${count}本を購入登録しました（${formatProcurementJpy(totalCost, locale)}）`;
+  if (locale === "ja") return `${count}本を登録しました`;
   return mode === "purchase"
     ? `Purchased and registered ${formatStaffTankCount(count, locale)} (${formatProcurementJpy(totalCost, locale)}).`
     : `Registered ${formatStaffTankCount(count, locale)}.`;

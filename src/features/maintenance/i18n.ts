@@ -32,6 +32,8 @@ export const MAINTENANCE_TEXT = {
   noInspectionTanks: { ja: "対象タンクはありません", en: "No tanks require inspection" },
   noInspectionHelp: { ja: "期限が迫ったタンクが出たらここに表示されます", en: "Tanks appear here as their inspection due dates approach." },
   deadline: { ja: "期限", en: "Due" },
+  inspectionExpiredMarker: { ja: "●期限切", en: "Expired" },
+  inspectionDueThisMonth: { ja: "あと今月中", en: "Due this month" },
 } satisfies Record<string, LocalizedText>;
 
 export type MaintenanceTextKey = keyof typeof MAINTENANCE_TEXT;
@@ -44,39 +46,33 @@ export function getMaintenanceText(
 }
 
 export function formatDamageConfirm(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `${count}本の破損報告を送信しますか？`
-    : `Submit damage reports for ${formatStaffTankCount(count, locale)}?`;
+  if (locale === "ja") return `${count}本の破損報告を送信しますか？`;
+  return `Submit damage reports for ${formatStaffTankCount(count, locale)}?`;
 }
 
 export function formatDamageSuccess(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `${count}本の破損報告を完了しました`
-    : `Submitted damage reports for ${formatStaffTankCount(count, locale)}.`;
+  if (locale === "ja") return `${count}本の破損報告を完了しました`;
+  return `Submitted damage reports for ${formatStaffTankCount(count, locale)}.`;
 }
 
 export function formatDamageSubmit(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `${count}件の破損報告`
-    : `Report damage for ${formatStaffTankCount(count, locale)}`;
+  if (locale === "ja") return `${count}件の破損報告`;
+  return `Report damage for ${formatStaffTankCount(count, locale)}`;
 }
 
 export function formatRepairConfirm(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `修理完了：${count}本を処理しますか？`
-    : `Complete repairs for ${formatStaffTankCount(count, locale)}?`;
+  if (locale === "ja") return `修理完了：${count}本を処理しますか？`;
+  return `Complete repairs for ${formatStaffTankCount(count, locale)}?`;
 }
 
 export function formatRepairSuccess(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `${count}本の修理完了を処理しました`
-    : `Completed repairs for ${formatStaffTankCount(count, locale)}.`;
+  if (locale === "ja") return `${count}本の修理完了を処理しました`;
+  return `Completed repairs for ${formatStaffTankCount(count, locale)}.`;
 }
 
 export function formatRepairSubmit(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `修理完了（${count}本）`
-    : `Complete repair (${formatStaffTankCount(count, locale)})`;
+  if (locale === "ja") return `修理完了（${count}本）`;
+  return `Complete repair (${formatStaffTankCount(count, locale)})`;
 }
 
 export function formatInspectionConfirm(
@@ -84,9 +80,7 @@ export function formatInspectionConfirm(
   validityYears: number,
   locale: Locale,
 ): string {
-  if (locale === "ja") {
-    return `耐圧検査完了：${count}本を処理しますか？\n次回期限は ${validityYears}年後 に更新されます。`;
-  }
+  if (locale === "ja") return `耐圧検査完了：${count}本を処理しますか？\n次回期限は ${validityYears}年後 に更新されます。`;
   const years = formatStaffCount(validityYears, locale, {
     ja: "年",
     enSingular: "year",
@@ -106,32 +100,26 @@ export function formatInspectionDescription(alertMonths: number, locale: Locale)
 }
 
 export function formatInspectionSuccess(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `${count}本の耐圧検査完了を処理しました`
-    : `Completed inspections for ${formatStaffTankCount(count, locale)}.`;
+  if (locale === "ja") return `${count}本の耐圧検査完了を処理しました`;
+  return `Completed inspections for ${formatStaffTankCount(count, locale)}.`;
 }
 
 export function formatInspectionSubmit(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `耐圧検査完了（${count}本）`
-    : `Complete inspection (${formatStaffTankCount(count, locale)})`;
+  if (locale === "ja") return `耐圧検査完了（${count}本）`;
+  return `Complete inspection (${formatStaffTankCount(count, locale)})`;
 }
 
 export function formatInspectionRemaining(daysLeft: number, locale: Locale): string {
-  if (locale === "ja") {
-    if (daysLeft < 0) return "●期限切";
-    if (daysLeft < 30) return "あと今月中";
-    return `あと${Math.floor(daysLeft / 30)}ヶ月`;
-  }
-  if (daysLeft < 0) return "Expired";
-  if (daysLeft < 30) return "Due this month";
+  if (daysLeft < 0) return getMaintenanceText("inspectionExpiredMarker", locale);
+  if (daysLeft < 30) return getMaintenanceText("inspectionDueThisMonth", locale);
+  if (locale === "ja") return `あと${Math.floor(daysLeft / 30)}ヶ月`;
   const months = Math.floor(daysLeft / 30);
   return `Due in ${months} ${months === 1 ? "month" : "months"}`;
 }
 
 export function formatInspectionDate(date: Date, locale: Locale): string {
   if (locale === "ja") {
-    return `期限: ${date.toLocaleDateString("ja-JP", {
+    return `${getMaintenanceText("deadline", locale)}: ${date.toLocaleDateString("ja-JP", {
       year: "numeric",
       month: "2-digit",
       day: "2-digit",

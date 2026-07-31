@@ -3,6 +3,7 @@ import {
   INHOUSE_TEXT,
   formatInHouseAlreadyActive,
   formatInHouseBulkConfirm,
+  formatInHouseError,
   formatInHouseReportSuccess,
   formatInHouseUnregistered,
   formatReturnTagAriaLabel,
@@ -32,5 +33,12 @@ describe("in-house i18n", () => {
     expect(formatInHouseBulkConfirm(2, "ja")).toBe(
       "自社利用中のタンク全 2 本を一括返却しますか？\n(タグ付けに応じて処理されます)",
     );
+  });
+
+  it("preserves Japanese error details and hides them from English UI", () => {
+    const error = new Error("内部エラー");
+    expect(formatInHouseError(error, "ja")).toBe("エラー: 内部エラー");
+    expect(formatInHouseError(error, "en")).toBe("The operation failed. Please try again later.");
+    expect(formatInHouseError(error, "en")).not.toMatch(JAPANESE_TEXT);
   });
 });

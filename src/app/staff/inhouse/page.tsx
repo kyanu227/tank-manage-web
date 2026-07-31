@@ -16,6 +16,7 @@ import { submitInHouseUseReport } from "@/features/inhouse/services/inhouse-use-
 import {
   formatInHouseAlreadyActive,
   formatInHouseBulkConfirm,
+  formatInHouseError,
   formatInHouseReportSuccess,
   formatInHouseUnregistered,
   formatReturnTagAriaLabel,
@@ -144,7 +145,7 @@ export default function InHousePage() {
       console.error("submitInHouseUseReport failed", e);
       setReportResult({
         success: false,
-        message: staffLocale === "ja" ? `エラー: ${errorMessage(e)}` : getStaffGenericErrorMessage(staffLocale),
+        message: formatInHouseError(e, staffLocale),
       });
     } finally {
       setReporting(false);
@@ -169,7 +170,7 @@ export default function InHousePage() {
       refetch();
     } catch (e: unknown) {
       console.error("submitInHouseBulkReturn failed", e);
-      alert(staffLocale === "ja" ? `エラー: ${errorMessage(e)}` : getStaffGenericErrorMessage(staffLocale));
+      alert(formatInHouseError(e, staffLocale));
     } finally {
       setReturning(false);
     }

@@ -1,5 +1,5 @@
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
-import { formatStaffTankCount, type LocalizedText } from "@/lib/staff-display";
+import { formatStaffTankCount, getStaffGenericErrorMessage, type LocalizedText } from "@/lib/staff-display";
 
 export const INHOUSE_TEXT = {
   sending: { ja: "送信中…", en: "Sending…" },
@@ -37,11 +37,15 @@ export function formatInHouseReportSuccess(tankId: string, locale: Locale): stri
 }
 
 export function formatInHouseBulkConfirm(count: number, locale: Locale): string {
-  return locale === "ja"
-    ? `自社利用中のタンク全 ${count} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`
-    : `Return all ${formatStaffTankCount(count, locale)} currently in use in-house?\nEach tank will be processed according to its return tag.`;
+  if (locale === "ja") return `自社利用中のタンク全 ${count} 本を一括返却しますか？\n(タグ付けに応じて処理されます)`;
+  return `Return all ${formatStaffTankCount(count, locale)} currently in use in-house?\nEach tank will be processed according to its return tag.`;
 }
 
 export function formatReturnTagAriaLabel(tankId: string, locale: Locale): string {
   return locale === "ja" ? `${tankId}の返却タグ` : `Return tag for ${tankId}`;
+}
+
+export function formatInHouseError(error: unknown, locale: Locale): string {
+  if (locale === "ja") return `エラー: ${error instanceof Error ? error.message : String(error)}`;
+  return getStaffGenericErrorMessage(locale);
 }
