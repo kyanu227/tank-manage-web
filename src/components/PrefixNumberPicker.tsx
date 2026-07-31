@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 
 /**
  * タンクID選択（Prefix + Number の2段選択）
@@ -31,6 +32,7 @@ export type PrefixNumberPickerProps = {
   onSelect?: (tankId: string) => void;
   accentColor?: string;
   emptyMessage?: string;
+  locale?: Locale;
 };
 
 const TANK_ID_RE = /^([A-Z]+)-(\d{2})$/;
@@ -41,8 +43,10 @@ export default function PrefixNumberPicker({
   onChange,
   onSelect,
   accentColor = "#3b82f6",
-  emptyMessage = "選択できるタンクがありません",
+  emptyMessage,
+  locale = DEFAULT_LOCALE,
 }: PrefixNumberPickerProps) {
+  const resolvedEmptyMessage = emptyMessage ?? (locale === "ja" ? "選択できるタンクがありません" : "No tanks are available for selection");
   const byPrefix = useMemo(() => {
     const map = new Map<string, Set<string>>();
     for (const id of tankIds) {
@@ -73,6 +77,7 @@ export default function PrefixNumberPicker({
   );
 
   // value や tankIds の変化に追従
+  /* eslint-disable react-hooks/set-state-in-effect -- controlled value changes must reset the pending prefix */
   useEffect(() => {
     if (selectedPrefix) {
       setPendingPrefix(selectedPrefix);
@@ -82,6 +87,7 @@ export default function PrefixNumberPicker({
       setPendingPrefix(null);
     }
   }, [selectedPrefix, prefixes, pendingPrefix]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
     if (!value) return;
@@ -151,12 +157,12 @@ export default function PrefixNumberPicker({
     <div style={{ display: "flex", gap: 12, width: "100%", alignItems: "flex-end" }}>
       {prefixes.length === 0 ? (
         <div style={{ color: "#9ca3af", fontSize: 14, padding: "12px 0" }}>
-          {emptyMessage}
+          {resolvedEmptyMessage}
         </div>
       ) : (
         <>
           <label style={labelStyle}>
-            <span style={captionStyle}>アルファベット</span>
+            <span style={captionStyle}>{locale === "ja" ? "アルファベット" : "Prefix"}</span>
             <select
               value={activePrefix ?? ""}
               onChange={(e) => handlePrefixChange(e.target.value)}
@@ -165,7 +171,7 @@ export default function PrefixNumberPicker({
                 borderColor: activePrefix ? accentColor : "#e5e7eb",
               }}
             >
-              <option value="">アルファベットを選択</option>
+              <option value="">{locale === "ja" ? "アルファベットを選択" : "Select a prefix"}</option>
               {prefixes.map((p) => (
                 <option key={p} value={p}>
                   {p}
@@ -175,7 +181,7 @@ export default function PrefixNumberPicker({
           </label>
 
           <label style={labelStyle}>
-            <span style={captionStyle}>番号</span>
+            <span style={captionStyle}>{locale === "ja" ? "番号" : "Number"}</span>
             <select
               value={selectedPrefix === activePrefix ? selectedNumber ?? "" : ""}
               onChange={(e) => handleNumberChange(e.target.value)}
@@ -189,7 +195,9 @@ export default function PrefixNumberPicker({
               }}
             >
               <option value="">
-                {!activePrefix ? "アルファベットを選択" : "番号を選択"}
+                {!activePrefix
+                  ? locale === "ja" ? "アルファベットを選択" : "Select a prefix"
+                  : locale === "ja" ? "番号を選択" : "Select a number"}
               </option>
               {numbers.map((n) => (
                 <option key={n} value={n}>

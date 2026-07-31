@@ -1,7 +1,8 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback } from "react";
+import React, { useState, useRef, useEffect, useCallback, useId } from "react";
 import { ChevronDown } from "lucide-react";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 
 export type QuickSelectOption = string | {
   value: string;
@@ -15,6 +16,8 @@ interface QuickSelectProps {
   onConfirm?: (val: string) => void;
   color: string;
   placeholder?: string;
+  locale?: Locale;
+  ariaLabel?: string;
 }
 
 export default function QuickSelect({
@@ -23,8 +26,11 @@ export default function QuickSelect({
   onChange,
   onConfirm,
   color,
-  placeholder = "選択してください",
+  placeholder,
+  locale = DEFAULT_LOCALE,
+  ariaLabel,
 }: QuickSelectProps) {
+  const resolvedPlaceholder = placeholder ?? (locale === "ja" ? "選択してください" : "Select an option");
   const normalizedOptions = options.map((option) => (
     typeof option === "string" ? { value: option, label: option } : option
   ));
@@ -34,6 +40,7 @@ export default function QuickSelect({
   const [highlightedValue, setHighlightedValue] = useState<string | null>(null);
   const [openUpwards, setOpenUpwards] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const listboxId = useId();
   const longPressTimer = useRef<NodeJS.Timeout | null>(null);
 
   const checkPosition = useCallback(() => {
@@ -45,7 +52,7 @@ export default function QuickSelect({
     }
   }, []);
 
-  const handleTouchStart = (e: React.TouchEvent) => {
+  const handleTouchStart = () => {
     checkPosition();
     // Start long press timer
     longPressTimer.current = setTimeout(() => {
@@ -115,6 +122,19 @@ export default function QuickSelect({
     }
   };
 
+  const handleKeyDown = (event: React.KeyboardEvent) => {
+    if (event.key === "Escape") {
+      setIsOpen(false);
+      setHighlightedValue(null);
+      return;
+    }
+    if (event.key === "ArrowDown" && !isOpen) {
+      event.preventDefault();
+      setIsOpen(true);
+      setHighlightedValue(value || normalizedOptions[0]?.value || null);
+    }
+  };
+
   useEffect(() => {
     if (isOpen) checkPosition();
   }, [isOpen, checkPosition]);
@@ -136,10 +156,16 @@ export default function QuickSelect({
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
+      onKeyDown={handleKeyDown}
       onContextMenu={(e) => e.preventDefault()} // Disable system menu
     >
       {/* Trigger Button */}
       <button
+        type="button"
+        aria-label={ariaLabel ?? resolvedPlaceholder}
+        aria-haspopup="listbox"
+        aria-expanded={isOpen}
+        aria-controls={listboxId}
         onClick={toggleMenu}
         style={{
           width: "100%", padding: "6px 12px", borderRadius: 10,
@@ -153,7 +179,7 @@ export default function QuickSelect({
         }}
       >
         <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
-          {selectedLabel || placeholder}
+          {selectedLabel || resolvedPlaceholder}
         </span>
         <ChevronDown size={18} style={{ opacity: 0.6, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }} />
       </button>
@@ -169,13 +195,16 @@ export default function QuickSelect({
           zIndex: 1000, overflow: "hidden",
           animation: isSwipeMode ? "none" : "slideDown 0.2s ease-out"
         }}>
-          <div style={{ maxHeight: "300px", overflowY: "auto", padding: "8px" }}>
+          <div id={listboxId} role="listbox" aria-label={ariaLabel ?? resolvedPlaceholder} style={{ maxHeight: "300px", overflowY: "auto", padding: "8px" }}>
             {normalizedOptions.map((opt) => {
               const isSelected = value === opt.value;
               const isHighlighted = highlightedValue === opt.value;
               
               return (
-                <div
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={isSelected}
                   key={opt.value}
                   data-quick-select-item={opt.value}
                   onClick={() => {
@@ -184,7 +213,7 @@ export default function QuickSelect({
                     setIsOpen(false);
                   }}
                   style={{
-                    padding: "10px 14px", borderRadius: 8,
+                    width: "100%", border: "none", padding: "10px 14px", borderRadius: 8,
                     fontSize: 14, fontWeight: (isHighlighted || isSelected) ? 800 : 600,
                     color: (isHighlighted || isSelected) ? color : "#475569",
                     background: isHighlighted ? `${color}15` : isSelected ? `${color}0A` : "transparent",
@@ -196,7 +225,7 @@ export default function QuickSelect({
                   {(isHighlighted || isSelected) && (
                     <div style={{ width: 6, height: 6, borderRadius: "50%", background: color }} />
                   )}
-                </div>
+                </button>
               );
             })}
           </div>

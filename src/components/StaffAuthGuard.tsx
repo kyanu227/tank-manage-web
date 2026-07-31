@@ -16,6 +16,8 @@ import StaffJoinRequestPanel from "@/components/StaffJoinRequestPanel";
 import { DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
 import { normalizeLocale, type Locale } from "@/lib/locale";
+import { getStaffLocale } from "@/hooks/useStaffSession";
+import type { LocalizedText } from "@/lib/staff-display";
 import {
   createOrUpdateOwnStaffJoinRequest,
   getStaffJoinRequestByUidReadOnly,
@@ -39,6 +41,60 @@ interface StaffUser {
   locale: Locale;
 }
 
+const AUTH_TEXT = {
+  joinLookupFailure: {
+    ja: "申請状況を確認できませんでした。時間をおいて再度お試しください。",
+    en: "The request status could not be checked. Please try again later.",
+  },
+  staffNotRegistered: {
+    ja: "このメールアドレスはスタッフとして登録されていません。",
+    en: "This email address is not registered as a staff account.",
+  },
+  accessDenied: {
+    ja: "このページにアクセスする権限がありません",
+    en: "You do not have permission to access this page.",
+  },
+  authError: { ja: "認証エラーが発生しました", en: "An authentication error occurred." },
+  passcodeDisabled: {
+    ja: "パスコードログインは現在無効です。メールまたはGoogleでログインしてください。",
+    en: "Passcode sign-in is disabled. Sign in with email or Google.",
+  },
+  passcodeMismatch: { ja: "パスコードが一致しません", en: "The passcode is incorrect." },
+  googleEmailMissing: {
+    ja: "Googleアカウントにメールアドレスがありません。",
+    en: "The Google account does not have an email address.",
+  },
+  googleFailure: { ja: "Googleログインに失敗しました。", en: "Google sign-in failed." },
+  credentialFailure: {
+    ja: "メールアドレスまたはパスワードが間違っています。",
+    en: "The email address or password is incorrect.",
+  },
+  joinEmailRequired: {
+    ja: "申請には Firebase Auth のメールアドレスが必要です。",
+    en: "A Firebase Auth email address is required to submit a request.",
+  },
+  joinSaveFailure: {
+    ja: "申請を保存できませんでした。時間をおいて再度お試しください。",
+    en: "The request could not be saved. Please try again later.",
+  },
+  checkingAuth: { ja: "認証を確認中…", en: "Checking authentication…" },
+  heading: { ja: "スタッフ用", en: "Staff portal" },
+  signInPrompt: { ja: "ログインしてください", en: "Sign in to continue" },
+  googleSignIn: { ja: "Google でログイン", en: "Sign in with Google" },
+  or: { ja: "または", en: "or" },
+  passcode: { ja: "パスコード", en: "Passcode" },
+  email: { ja: "メール", en: "Email" },
+  checking: { ja: "確認中…", en: "Checking…" },
+  signIn: { ja: "ログイン", en: "Sign in" },
+  emailAddress: { ja: "メールアドレス", en: "Email address" },
+  password: { ja: "パスワード", en: "Password" },
+  emailSignIn: { ja: "メールでログイン", en: "Sign in with email" },
+} satisfies Record<string, LocalizedText>;
+
+function getAuthText(key: keyof typeof AUTH_TEXT, locale: Locale): string {
+  return AUTH_TEXT[key][locale];
+}
+
 export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuardProps) {
   const devAuthBypassEnabled = isDevAuthBypassEnabled();
   // パスコードログインは request.auth に乗らないため通常は無効。
@@ -46,6 +102,8 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   const passcodeLoginEnabled = process.env.NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN === "true";
   const staffJoinRequestsEnabled = process.env.NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS === "true";
   const authScreenRef = useRef<HTMLDivElement>(null);
+  const initialLocaleRef = useRef<Locale>(getStaffLocale());
+  const [displayLocale, setDisplayLocale] = useState<Locale>(initialLocaleRef.current);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -106,7 +164,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       setJoinRequestLookupFailed(false);
     } catch (e) {
       console.error("Staff join request lookup failed:", e);
-      setJoinRequestError("申請状況を確認できませんでした。時間をおいて再度お試しください。");
+      setJoinRequestError(getAuthText("joinLookupFailure", initialLocaleRef.current));
       setJoinRequestLookupFailed(true);
     } finally {
       setJoinRequestLoading(false);
@@ -122,6 +180,8 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     if (!devAuthBypassEnabled) return;
     localStorage.setItem("staffSession", JSON.stringify(DEV_STAFF_SESSION));
     window.dispatchEvent(new Event("staffLogin"));
+    initialLocaleRef.current = normalizeLocale(DEV_STAFF_SESSION.locale);
+    setDisplayLocale(initialLocaleRef.current);
     setIsAuthenticated(true);
     setLoading(false);
   }, [devAuthBypassEnabled]);
@@ -139,13 +199,13 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
           return false;
         }
         clearJoinRequestState();
-        setError("このメールアドレスはスタッフとして登録されていません。");
+        setError(getAuthText("staffNotRegistered", initialLocaleRef.current));
         return false;
       }
 
       if (allowedRoles && !allowedRoles.includes(profile.role as StaffRole)) {
         clearJoinRequestState();
-        setError("このページにアクセスする権限がありません");
+        setError(getAuthText("accessDenied", initialLocaleRef.current));
         localStorage.removeItem("staffSession");
         setIsAuthenticated(false);
         return false;
@@ -168,6 +228,9 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         locale: profile.locale,
       };
 
+      initialLocaleRef.current = profile.locale;
+      setDisplayLocale(profile.locale);
+
       clearJoinRequestState();
       localStorage.setItem("staffSession", JSON.stringify(userSession));
       window.dispatchEvent(new Event("staffLogin"));
@@ -176,7 +239,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     } catch (e) {
       console.error("Email staff lookup failed:", e);
       clearJoinRequestState();
-      setError("認証エラーが発生しました");
+      setError(getAuthText("authError", initialLocaleRef.current));
       localStorage.removeItem("staffSession");
       setIsAuthenticated(false);
       return false;
@@ -233,7 +296,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   const handlePasscodeLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!passcodeLoginEnabled) {
-      setError("パスコードログインは現在無効です。メールまたはGoogleでログインしてください。");
+      setError(getAuthText("passcodeDisabled", initialLocaleRef.current));
       localStorage.removeItem("staffSession");
       setIsAuthenticated(false);
       setLoading(false);
@@ -253,7 +316,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       const snap = await getDocs(q);
 
       if (snap.empty) {
-        setError("パスコードが一致しません");
+        setError(getAuthText("passcodeMismatch", initialLocaleRef.current));
         setChecking(false);
         return;
       }
@@ -262,7 +325,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       const data = doc.data();
 
       if (allowedRoles && !allowedRoles.includes(data.role as StaffRole)) {
-        setError("このページにアクセスする権限がありません");
+        setError(getAuthText("accessDenied", initialLocaleRef.current));
         setChecking(false);
         return;
       }
@@ -276,12 +339,15 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         locale: normalizeLocale(data.locale),
       };
 
+      initialLocaleRef.current = userSession.locale;
+      setDisplayLocale(userSession.locale);
+
       localStorage.setItem("staffSession", JSON.stringify(userSession));
       window.dispatchEvent(new Event("staffLogin"));
       setIsAuthenticated(true);
     } catch (e) {
       console.error("Login verify failed", e);
-      setError("認証エラーが発生しました");
+      setError(getAuthText("authError", initialLocaleRef.current));
     } finally {
       setChecking(false);
     }
@@ -299,11 +365,11 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       } else if (staffJoinRequestsEnabled) {
         await showJoinRequestPanel(result.user);
       } else {
-        setError("Googleアカウントにメールアドレスがありません。");
+        setError(getAuthText("googleEmailMissing", initialLocaleRef.current));
       }
     } catch (e: unknown) {
       console.error(e);
-      setError("Googleログインに失敗しました。");
+      setError(getAuthText("googleFailure", initialLocaleRef.current));
     } finally {
       setChecking(false);
     }
@@ -325,7 +391,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       }
     } catch (err: unknown) {
       console.error(err);
-      setError("メールアドレスまたはパスワードが間違っています。");
+      setError(getAuthText("credentialFailure", initialLocaleRef.current));
     } finally {
       setChecking(false);
     }
@@ -334,7 +400,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   const handleJoinRequestSubmit = async (input: { requestedName: string; message: string }) => {
     if (!firebaseUser) return;
     if (!firebaseUser.email) {
-      setJoinRequestError("申請には Firebase Auth のメールアドレスが必要です。");
+      setJoinRequestError(getAuthText("joinEmailRequired", initialLocaleRef.current));
       return;
     }
 
@@ -352,7 +418,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       setJoinRequest(request);
     } catch (e) {
       console.error("Staff join request save failed:", e);
-      setJoinRequestError("申請を保存できませんでした。時間をおいて再度お試しください。");
+      setJoinRequestError(getAuthText("joinSaveFailure", initialLocaleRef.current));
     } finally {
       setJoinRequestLoading(false);
     }
@@ -374,12 +440,12 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   // --- Render: Loading ---
   if (loading) {
     return (
-      <div style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
+      <div lang={displayLocale} style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
         <div aria-hidden="true" style={{ height: "env(safe-area-inset-top, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
         <div ref={authScreenRef} style={{ flex: 1, minHeight: 0, overflow: "hidden", display: "flex", alignItems: "center", justifyContent: "center", padding: 20, boxSizing: "border-box" }}>
           <div style={{ color: "#94a3b8", display: "flex", flexDirection: "column", alignItems: "center", gap: 12 }}>
             <div style={{ width: 32, height: 32, border: "3px solid #e2e8f0", borderTopColor: "#6366f1", borderRadius: "50%", animation: "spin 1s linear infinite" }} />
-            <p style={{ fontSize: 14, fontWeight: 600 }}>認証を確認中…</p>
+            <p role="status" style={{ fontSize: 14, fontWeight: 600 }}>{getAuthText("checkingAuth", displayLocale)}</p>
           </div>
         </div>
         <div aria-hidden="true" style={{ height: "env(safe-area-inset-bottom, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
@@ -404,10 +470,11 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
   if (staffJoinRequestsEnabled && joinRequestMode && firebaseUser) {
     return (
-      <div style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
+      <div lang={displayLocale} style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
         <div aria-hidden="true" style={{ height: "env(safe-area-inset-top, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
         <div ref={authScreenRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", display: "flex", flexDirection: "column", padding: 20, boxSizing: "border-box" }}>
           <StaffJoinRequestPanel
+            locale={displayLocale}
             firebaseUser={firebaseUser}
             existingRequest={joinRequest}
             loading={joinRequestLoading}
@@ -424,7 +491,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
   // --- Render: Login form ---
   return (
-    <div style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
+    <div lang={displayLocale} style={{ width: "100%", height: "100dvh", overflow: "hidden", display: "flex", flexDirection: "column", background: "#f8f9fb" }}>
       <div aria-hidden="true" style={{ height: "env(safe-area-inset-top, 0px)", flexShrink: 0, background: "#f8f9fb" }} />
       <div ref={authScreenRef} style={{ flex: 1, minHeight: 0, overflowY: "auto", WebkitOverflowScrolling: "touch", overscrollBehavior: "contain", display: "flex", flexDirection: "column", padding: 20, boxSizing: "border-box" }}>
         <div style={{
@@ -440,13 +507,13 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
           }}>
             <Lock size={28} color="#fff" />
           </div>
-          <h1 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>スタッフ用</h1>
-          <p style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>ログインしてください</p>
+          <h1 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>{getAuthText("heading", displayLocale)}</h1>
+          <p style={{ fontSize: 13, color: "#94a3b8", marginTop: 4 }}>{getAuthText("signInPrompt", displayLocale)}</p>
         </div>
 
         {/* Error */}
         {error && (
-          <div style={{
+          <div role="alert" style={{
             background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12,
             padding: "12px 16px", marginBottom: 20, display: "flex", alignItems: "center", gap: 10,
           }}>
@@ -457,6 +524,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
 
         {/* Google login button */}
         <button
+          type="button"
           onClick={handleGoogleLogin}
           disabled={checking}
           style={{
@@ -468,14 +536,15 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
             transition: "all 0.2s", opacity: checking ? 0.7 : 1,
           }}
         >
+          {/* eslint-disable-next-line @next/next/no-img-element -- existing Firebase-hosted sign-in icon */}
           <img src="https://www.gstatic.com/firebasejs/ui/2.0.0/images/auth/google.svg" alt="Google" style={{ width: 20, height: 20 }} />
-          Google でログイン
+          {getAuthText("googleSignIn", displayLocale)}
         </button>
 
         {/* Divider */}
         <div style={{ display: "flex", alignItems: "center", gap: 16, margin: "18px 0" }}>
           <div style={{ flex: 1, height: 1, background: "#e2e8f0" }} />
-          <span style={{ color: "#94a3b8", fontSize: 12, fontWeight: 600 }}>または</span>
+          <span style={{ color: "#94a3b8", fontSize: 12, fontWeight: 600 }}>{getAuthText("or", displayLocale)}</span>
           <div style={{ flex: 1, height: 1, background: "#e2e8f0" }} />
         </div>
 
@@ -483,6 +552,8 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
         {passcodeLoginEnabled && (
           <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 3, marginBottom: 16 }}>
             <button
+              type="button"
+              aria-pressed={loginMethod === "passcode"}
               onClick={() => { setLoginMethod("passcode"); setError(""); }}
               style={{
                 flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700,
@@ -492,9 +563,11 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
                 cursor: "pointer", transition: "all 0.2s",
               }}
             >
-              パスコード
+              {getAuthText("passcode", displayLocale)}
             </button>
             <button
+              type="button"
+              aria-pressed={loginMethod === "email"}
               onClick={() => { setLoginMethod("email"); setError(""); }}
               style={{
                 flex: 1, padding: "8px 0", borderRadius: 8, border: "none", fontSize: 13, fontWeight: 700,
@@ -504,7 +577,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
                 cursor: "pointer", transition: "all 0.2s",
               }}
             >
-              メール
+              {getAuthText("email", displayLocale)}
             </button>
           </div>
         )}
@@ -517,6 +590,7 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
               inputMode="numeric"
               pattern="[0-9]*"
               value={passcode}
+              aria-label={getAuthText("passcode", displayLocale)}
               onChange={(e) => setPasscode(e.target.value)}
               placeholder="••••"
               style={{
@@ -540,9 +614,9 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
               }}
             >
               {checking ? (
-                <><div style={{ width: 18, height: 18, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} /> 確認中…</>
+                <><div style={{ width: 18, height: 18, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} /> {getAuthText("checking", displayLocale)}</>
               ) : (
-                <><CheckCircle2 size={18} /> ログイン</>
+                <><CheckCircle2 size={18} /> {getAuthText("signIn", displayLocale)}</>
               )}
             </button>
           </form>
@@ -553,7 +627,8 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
               <Mail size={18} color="#94a3b8" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
               <input
                 type="email"
-                placeholder="メールアドレス"
+                aria-label={getAuthText("emailAddress", displayLocale)}
+                placeholder={getAuthText("emailAddress", displayLocale)}
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
@@ -570,7 +645,8 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
               <KeyRound size={18} color="#94a3b8" style={{ position: "absolute", left: 14, top: "50%", transform: "translateY(-50%)" }} />
               <input
                 type="password"
-                placeholder="パスワード"
+                aria-label={getAuthText("password", displayLocale)}
+                placeholder={getAuthText("password", displayLocale)}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -596,9 +672,9 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
               }}
             >
               {checking ? (
-                <><div style={{ width: 18, height: 18, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} /> 確認中…</>
+                <><div style={{ width: 18, height: 18, border: "2px solid #fff", borderTopColor: "transparent", borderRadius: "50%", animation: "spin 1s linear infinite" }} /> {getAuthText("checking", displayLocale)}</>
               ) : (
-                <><LogIn size={18} /> メールでログイン</>
+                <><LogIn size={18} /> {getAuthText("emailSignIn", displayLocale)}</>
               )}
             </button>
           </form>
