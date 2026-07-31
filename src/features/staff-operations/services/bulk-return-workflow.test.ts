@@ -575,6 +575,35 @@ describe("bulk-return-workflow", () => {
     ]);
   });
 
+  it("repository raw cycle marker を正規化済み表示値より優先して expectedCycle へ渡す", async () => {
+    await submitBulkReturnGroup({
+      tanks: [
+        {
+          id: "RAW-EXPECTED-01",
+          status: "lent",
+          customerId: "normalized-customer",
+          latestLogId: "normalized-log",
+          rawCycleMarkers: {
+            customerId: " raw-customer ",
+            latestLogId: " raw-log ",
+          },
+          location: "貸出先A",
+          tag: "normal",
+        },
+      ],
+      fallbackLocation: "貸出先A",
+      actor: ACTOR,
+    });
+
+    expect(applyBulkTankOperationsMock.mock.calls[0][0][0]).toMatchObject({
+      tankId: "RAW-EXPECTED-01",
+      expectedCycle: {
+        customerId: " raw-customer ",
+        latestLogId: " raw-log ",
+      },
+    });
+  });
+
   it("全tagを変換せずmarker ownerへ各1回委譲する", async () => {
     await updateBulkReturnTagMarker("MARKER-NORMAL", "normal");
     await updateBulkReturnTagMarker("MARKER-UNUSED", "unused");

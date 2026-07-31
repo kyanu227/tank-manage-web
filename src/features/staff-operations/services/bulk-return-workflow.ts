@@ -15,12 +15,17 @@ import {
   resolveReturnActionCode,
   type ReturnTag,
 } from "@/lib/tank-rules";
+import {
+  getBulkReturnObservedCycleMarkers,
+  type BulkReturnRawCycleMarkers,
+} from "../bulk-return-cycle-readiness";
 
 export type BulkReturnTargetInput = {
   id: string;
   status: string;
   customerId?: string | null;
   latestLogId?: string | null;
+  rawCycleMarkers?: BulkReturnRawCycleMarkers;
   location?: string;
   tag: ReturnTag;
 };
@@ -98,7 +103,7 @@ function requireBulkReturnExpectedCycles(
   }> = [];
 
   tanks.forEach((tank) => {
-    const { customerId, latestLogId } = tank;
+    const { customerId, latestLogId } = getBulkReturnObservedCycleMarkers(tank);
     const customerIdValid = isNonEmptyString(customerId);
     const latestLogIdValid = isNonEmptyString(latestLogId);
     if (!customerIdValid) {
