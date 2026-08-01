@@ -127,14 +127,9 @@ export const STAFF_OPERATION_TEXT = {
     en: "{customerCountLabel} / {tankCountLabel}",
   },
   hiddenItems: { ja: "+{count}件", en: "+{count} more" },
-  unknownReturnTag: { ja: "不明なタグ ({value})", en: "Unknown tag ({value})" },
-  chooseValidReturnTag: {
-    ja: "処理する前に有効な返却タグを選択してください。",
-    en: "Select a valid return tag before processing.",
-  },
-  chooseValidReturnTagForTank: {
-    ja: "{tankId}の有効な返却タグを先に選択してください",
-    en: "Select a valid return tag for {tankId} first",
+  unknownReturnTag: {
+    ja: "不明なタグ（既存の処理規則が適用されます） ({value})",
+    en: "Unknown tag (the existing processing rule will be applied) ({value})",
   },
   review: { ja: "確認", en: "Review" },
   tap: { ja: "タップ", en: "Tap" },
