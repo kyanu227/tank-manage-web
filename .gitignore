@@ -62,4 +62,5 @@ firestore-debug.log*
 !firebase.cutover-normal-rules.json
 !firestore.cutover-baseline.manifest.json
 !firebase.structural-smoke.json
+!scripts/staff-i18n-baseline.json
 !.firebaserc
