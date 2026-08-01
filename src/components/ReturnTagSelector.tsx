@@ -21,6 +21,7 @@ interface ReturnTagSelectorProps<T extends ReturnTagValue = ReturnTagValue> {
   swipeLeftValue?: T;
   swipeRightValue?: T;
   compact?: boolean;
+  stackedLabels?: boolean;
   locale?: Locale;
   ariaLabel?: string;
 }
@@ -77,6 +78,7 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
   swipeLeftValue,
   swipeRightValue,
   compact = false,
+  stackedLabels = false,
   locale = DEFAULT_LOCALE,
   ariaLabel,
 }: ReturnTagSelectorProps<T>) {
@@ -148,15 +150,18 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
               fontWeight: 800,
               cursor: "pointer",
               display: "flex",
+              flexDirection: stackedLabels ? "column" : "row",
               alignItems: "center",
               justifyContent: "center",
-              gap: 5,
+              gap: stackedLabels ? 2 : 5,
               transition: "background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s",
               boxShadow: active ? `0 2px 8px ${style.color}20` : "none",
             }}
           >
             <Icon size={compact ? 13 : 14} />
-            <span>{getReturnTagLabel(option.value, locale)}</span>
+            <span style={stackedLabels ? { minWidth: 0, lineHeight: 1.1, textAlign: "center", whiteSpace: "normal", overflowWrap: "anywhere" } : undefined}>
+              {getReturnTagLabel(option.value, locale)}
+            </span>
           </button>
         );
       })}

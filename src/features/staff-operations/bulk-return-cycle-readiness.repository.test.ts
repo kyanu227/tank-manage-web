@@ -88,6 +88,7 @@ function renderGroup(
   const readiness = getBulkReturnGroupReadiness(tanks);
   const bulk = {
     bulkLoading: false,
+    bulkLoadFailed: false,
     groupedTanks: result.groupedTanks,
     groupMeta: result.groupMeta,
     groupReadiness: { [groupKey]: readiness },

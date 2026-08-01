@@ -19,6 +19,7 @@ import {
 } from "../queries/bulk-return-candidates";
 import {
   submitBulkReturnGroup,
+  updateBulkReturnTagMarker,
 } from "../services/bulk-return-workflow";
 import type { BulkReturnGroupMeta } from "../types";
 import type { BulkTankWithTag } from "../queries/bulk-return-candidates";
@@ -82,6 +83,7 @@ const useStateMock = useState as unknown as Mock;
 const requireStaffIdentityMock = vi.mocked(requireStaffIdentity);
 const fetchBulkReturnCandidatesMock = vi.mocked(fetchBulkReturnCandidates);
 const submitBulkReturnGroupMock = vi.mocked(submitBulkReturnGroup);
+const updateBulkReturnTagMarkerMock = vi.mocked(updateBulkReturnTagMarker);
 
 function makeTank(
   id: string,
@@ -101,12 +103,16 @@ function makeTank(
   };
 }
 
-function HookHarness(tanks: BulkTankWithTag[]) {
+function HookHarness(
+  tanks: BulkTankWithTag[],
+  metaOverrides: Partial<BulkReturnGroupMeta> = {},
+) {
   const bulkLoadingSetter = vi.fn();
   const groupedTanksSetter = vi.fn();
   const groupMetaSetter = vi.fn();
   const expandedSetter = vi.fn();
   const returningSetter = vi.fn();
+  const bulkLoadFailedSetter = vi.fn();
   const meta = {
     key: "customer-001",
     location: "顧客A",
@@ -115,6 +121,7 @@ function HookHarness(tanks: BulkTankWithTag[]) {
     poolLabel: "本日貸出",
     dateLabel: "7/30 貸出分",
     sortMillis: 1,
+    ...metaOverrides,
   } satisfies BulkReturnGroupMeta;
 
   useStateMock
@@ -122,11 +129,17 @@ function HookHarness(tanks: BulkTankWithTag[]) {
     .mockImplementationOnce(() => [{ [GROUP_KEY]: tanks }, groupedTanksSetter])
     .mockImplementationOnce(() => [{ [GROUP_KEY]: meta }, groupMetaSetter])
     .mockImplementationOnce(() => [{ [GROUP_KEY]: true }, expandedSetter])
-    .mockImplementationOnce(() => [{ [GROUP_KEY]: false }, returningSetter]);
+    .mockImplementationOnce(() => [{ [GROUP_KEY]: false }, returningSetter])
+    .mockImplementationOnce(() => [false, bulkLoadFailedSetter]);
 
   return {
     result: useBulkReturnByLocation(),
+    bulkLoadingSetter,
+    groupedTanksSetter,
+    groupMetaSetter,
+    expandedSetter,
     returningSetter,
+    bulkLoadFailedSetter,
   };
 }
 
@@ -142,6 +155,8 @@ describe("useBulkReturnByLocation submission guard", () => {
     });
     submitBulkReturnGroupMock.mockReset();
     submitBulkReturnGroupMock.mockResolvedValue();
+    updateBulkReturnTagMarkerMock.mockReset();
+    updateBulkReturnTagMarkerMock.mockResolvedValue();
     localeState.current = "ja";
     vi.stubGlobal("alert", vi.fn());
     vi.stubGlobal("confirm", vi.fn(() => true));
@@ -203,6 +218,9 @@ describe("useBulkReturnByLocation submission guard", () => {
       issues: [],
     });
     expect(confirm).toHaveBeenCalledTimes(1);
+    expect(confirm).toHaveBeenCalledWith(
+      "顧客A（本日貸出） のタンク全 2 本を一括返却しますか？\n(タグ付けに応じて処理されます)",
+    );
     expect(requireStaffIdentityMock).toHaveBeenCalledTimes(1);
     expect(submitBulkReturnGroupMock).toHaveBeenCalledTimes(1);
     expect(submitBulkReturnGroupMock.mock.calls[0][0]).toMatchObject({
@@ -217,6 +235,173 @@ describe("useBulkReturnByLocation submission guard", () => {
     expect(returningSetter.mock.calls[1][0]({ [GROUP_KEY]: true })).toEqual({
       [GROUP_KEY]: false,
     });
+    expect(alert).toHaveBeenCalledWith(
+      "顧客A（本日貸出） の一括返却が完了しました。",
+    );
+  });
+
+  it("英語 locale で表示文言だけを変えraw fallbackLocation・配列・call countを維持する", async () => {
+    localeState.current = "en";
+    const tanks = [makeTank("EN-READY-01")];
+    const { result, returningSetter } = HookHarness(tanks);
+
+    await result.handleBulkReturnForGroup(GROUP_KEY);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(confirm).mock.calls[0][0])).toContain("Bulk return all 1 tank");
+    expect(String(vi.mocked(confirm).mock.calls[0][0])).toContain("Rented today");
+    expect(String(vi.mocked(confirm).mock.calls[0][0])).not.toContain("本日貸出");
+    expect(requireStaffIdentityMock).toHaveBeenCalledTimes(1);
+    expect(submitBulkReturnGroupMock).toHaveBeenCalledTimes(1);
+    expect(submitBulkReturnGroupMock.mock.calls[0][0]).toEqual({
+      tanks,
+      fallbackLocation: "顧客A",
+      actor: ACTOR,
+    });
+    expect(returningSetter).toHaveBeenCalledTimes(2);
+    expect(alert).toHaveBeenCalledTimes(1);
+    expect(String(vi.mocked(alert).mock.calls[0][0])).toContain("Bulk return is complete");
+    expect(fetchBulkReturnCandidatesMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("英語 locale でsystem-generated unknown customerだけを表示変換しraw fallbackを保存する", async () => {
+    localeState.current = "en";
+    const tanks = [makeTank("EN-UNKNOWN-01", {
+      customerId: "missing-name",
+      customerName: null,
+      location: "",
+    })];
+    const { result } = HookHarness(tanks, {
+      key: "today_lent::customer:missing-name",
+      customerId: "missing-name",
+      location: "不明な顧客",
+    });
+
+    await result.handleBulkReturnForGroup(GROUP_KEY);
+
+    expect(String(vi.mocked(confirm).mock.calls[0][0])).toContain("Unknown customer");
+    expect(String(vi.mocked(confirm).mock.calls[0][0])).not.toContain("不明な顧客");
+    expect(submitBulkReturnGroupMock.mock.calls[0][0].fallbackLocation).toBe("不明な顧客");
+  });
+
+  it("英語 locale の持ち越し確認・完了は単数形を使いraw payloadを変えない", async () => {
+    localeState.current = "en";
+    const tanks = [
+      makeTank("EN-RETURN-01"),
+      makeTank("EN-KEEP-01", { tag: "keep" }),
+    ];
+    const { result } = HookHarness(tanks);
+
+    await result.handleBulkReturnForGroup(GROUP_KEY);
+
+    const confirmation = String(vi.mocked(confirm).mock.calls[0][0]);
+    const completion = String(vi.mocked(alert).mock.calls[0][0]);
+    expect(confirmation).toContain("Return: 1 tank / Carry over: 1 tank");
+    expect(completion).toContain("Return: 1 tank / Carry over: 1 tank");
+    expect(submitBulkReturnGroupMock.mock.calls[0][0].tanks).toBe(tanks);
+    expect(submitBulkReturnGroupMock.mock.calls[0][0].fallbackLocation).toBe("顧客A");
+  });
+
+  it("英語 locale でinvalid KEEPをlocalized alertでsubmit前に停止する", async () => {
+    localeState.current = "en";
+    const tanks = [makeTank("EN-INVALID-KEEP", {
+      status: "unreturned",
+      tag: "keep",
+    })];
+    const { result, returningSetter } = HookHarness(tanks);
+
+    await result.handleBulkReturnForGroup(GROUP_KEY);
+
+    expect(alert).toHaveBeenCalledWith(
+      "Carry over can only be processed for rented tanks. Remove carry over from unreturned tanks.",
+    );
+    expect(confirm).not.toHaveBeenCalled();
+    expect(requireStaffIdentityMock).not.toHaveBeenCalled();
+    expect(submitBulkReturnGroupMock).not.toHaveBeenCalled();
+    expect(returningSetter).not.toHaveBeenCalled();
+  });
+
+  it("英語 locale でinvalid KEEP tag選択をmarker write前に停止する", async () => {
+    localeState.current = "en";
+    const tanks = [makeTank("EN-INVALID-TAG", { status: "unreturned" })];
+    const { result } = HookHarness(tanks);
+
+    await result.updateTag(GROUP_KEY, "EN-INVALID-TAG", "keep");
+
+    expect(alert).toHaveBeenCalledWith(
+      "Carry over can only be selected for rented tanks.",
+    );
+    expect(updateBulkReturnTagMarkerMock).not.toHaveBeenCalled();
+    expect(fetchBulkReturnCandidatesMock).not.toHaveBeenCalled();
+  });
+
+  it("confirm取消はidentity・submit・returning・refreshを開始しない", async () => {
+    vi.mocked(confirm).mockReturnValueOnce(false);
+    const { result, returningSetter } = HookHarness([makeTank("CANCEL-01")]);
+
+    await result.handleBulkReturnForGroup(GROUP_KEY);
+
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(requireStaffIdentityMock).not.toHaveBeenCalled();
+    expect(submitBulkReturnGroupMock).not.toHaveBeenCalled();
+    expect(returningSetter).not.toHaveBeenCalled();
+    expect(fetchBulkReturnCandidatesMock).not.toHaveBeenCalled();
+  });
+
+  it("英語 locale のunknown failureはraw errorをlogに保持しUIに露出しない", async () => {
+    localeState.current = "en";
+    const rawError = new Error("内部エラー: customerId=secret");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    submitBulkReturnGroupMock.mockRejectedValueOnce(rawError);
+    const { result } = HookHarness([makeTank("EN-ERROR-01")]);
+
+    await result.handleBulkReturnForGroup(GROUP_KEY);
+
+    expect(consoleError).toHaveBeenCalledWith("Bulk return failed", rawError);
+    expect(alert).toHaveBeenCalledWith(
+      "The operation failed. Please try again later.",
+    );
+    expect(String(vi.mocked(alert).mock.calls[0][0])).not.toContain("customerId");
+    expect(String(vi.mocked(alert).mock.calls[0][0])).not.toContain("内部エラー");
+    expect(fetchBulkReturnCandidatesMock).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("日本語 locale のunknown failureは従来どおりraw errorを表示する", async () => {
+    const rawError = new Error("業務エラー");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    submitBulkReturnGroupMock.mockRejectedValueOnce(rawError);
+    const { result } = HookHarness([makeTank("JA-ERROR-01")]);
+
+    await result.handleBulkReturnForGroup(GROUP_KEY);
+
+    expect(alert).toHaveBeenCalledWith("エラー: 業務エラー");
+    expect(fetchBulkReturnCandidatesMock).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("候補取得失敗をloadFailedへ分離しloadingを必ず終了する", async () => {
+    const rawError = new Error("read failed");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    fetchBulkReturnCandidatesMock.mockRejectedValueOnce(rawError);
+    const {
+      result,
+      bulkLoadingSetter,
+      groupedTanksSetter,
+      groupMetaSetter,
+      expandedSetter,
+      bulkLoadFailedSetter,
+    } = HookHarness([makeTank("LOAD-ERROR-01")]);
+
+    await result.fetchBulkTanks();
+
+    expect(bulkLoadingSetter.mock.calls.map(([value]) => value)).toEqual([true, false]);
+    expect(bulkLoadFailedSetter.mock.calls.map(([value]) => value)).toEqual([false, true]);
+    expect(groupedTanksSetter).not.toHaveBeenCalled();
+    expect(groupMetaSetter).not.toHaveBeenCalled();
+    expect(expandedSetter).not.toHaveBeenCalled();
+    expect(consoleError).toHaveBeenCalledWith(rawError);
+    consoleError.mockRestore();
   });
 
   it.each([
