@@ -81,6 +81,30 @@ describe("buildStaffDashboardReadModel tank summary", () => {
       "A-04",
     ]);
   });
+
+  it("status不明bucketのkeyと件数をlocale間で一致させる", () => {
+    const tanks = [
+      makeTank({ id: "A-01", status: "不明" }),
+      {
+        id: "A-02",
+        status: null,
+      } as unknown as TankDoc,
+    ];
+
+    const jaResult = buildReadModel({
+      tanks,
+      staffLocale: "ja",
+    });
+    const enResult = buildReadModel({
+      tanks,
+      staffLocale: "en",
+    });
+
+    expect(jaResult.tankSummary).toStrictEqual({ 不明: 2 });
+    expect(enResult.tankSummary).toStrictEqual(
+      jaResult.tankSummary,
+    );
+  });
 });
 
 describe("buildStaffDashboardReadModel byLocation", () => {
@@ -197,6 +221,47 @@ describe("buildStaffDashboardReadModel byLocation", () => {
       result.byLocation.map((group) => group.displayName),
     ).toStrictEqual(["Alpha", "Zulu"]);
   });
+
+  it("同数groupをlocale非依存keyで並べてから未設定labelを翻訳する", () => {
+    const tanks = [
+      makeTank({
+        id: "A-01",
+        status: "lent",
+        location: "Zulu",
+      }),
+      makeTank({
+        id: "A-02",
+        status: "unreturned",
+      }),
+    ];
+
+    const jaResult = buildReadModel({
+      tanks,
+      staffLocale: "ja",
+    });
+    const enResult = buildReadModel({
+      tanks,
+      staffLocale: "en",
+    });
+
+    expect(
+      jaResult.byLocation.map((group) => group.key),
+    ).toStrictEqual([
+      "legacy-location:__unknown__",
+      "legacy-location:Zulu",
+    ]);
+    expect(
+      enResult.byLocation.map((group) => group.key),
+    ).toStrictEqual(
+      jaResult.byLocation.map((group) => group.key),
+    );
+    expect(
+      jaResult.byLocation.map((group) => group.displayName),
+    ).toStrictEqual(["未設定", "Zulu"]);
+    expect(
+      enResult.byLocation.map((group) => group.displayName),
+    ).toStrictEqual(["Not set", "Zulu"]);
+  });
 });
 
 describe("buildStaffDashboardReadModel todayStats", () => {
@@ -270,10 +335,10 @@ describe("buildStaffDashboardReadModel todayStats", () => {
     expect(result.todayStats).toStrictEqual({
       total: 6,
       breakdown: [
-        { action: "Lend", count: 2 },
-        { action: "Zeta", count: 2 },
-        { action: "Alpha", count: 1 },
-        { action: "Beta", count: 1 },
+        { key: "lend", action: "Lend", count: 2 },
+        { key: "Zeta", action: "Unknown action", count: 2 },
+        { key: "Alpha", action: "Unknown action", count: 1 },
+        { key: "Beta", action: "Unknown action", count: 1 },
       ],
     });
     expect(logs.map((log) => log.id)).toStrictEqual([
@@ -288,6 +353,49 @@ describe("buildStaffDashboardReadModel todayStats", () => {
       "invalid-to-date",
       "invalid-to-millis",
     ]);
+  });
+
+  it("同数actionをlocale非依存keyで並べてlabelだけを翻訳する", () => {
+    const nowMillis =
+      new Date(2026, 6, 27, 12, 0, 0, 0).getTime();
+    const logs = [
+      makeLog({
+        id: "repaired",
+        timestamp: nowMillis,
+        action: "repaired",
+      }),
+      makeLog({
+        id: "fill",
+        timestamp: nowMillis,
+        action: "fill",
+      }),
+    ];
+
+    const jaResult = buildReadModel({
+      logs,
+      staffLocale: "ja",
+      nowMillis,
+    });
+    const enResult = buildReadModel({
+      logs,
+      staffLocale: "en",
+      nowMillis,
+    });
+
+    expect(
+      jaResult.todayStats.breakdown.map((row) => row.key),
+    ).toStrictEqual(["fill", "repaired"]);
+    expect(
+      enResult.todayStats.breakdown.map((row) => row.key),
+    ).toStrictEqual(
+      jaResult.todayStats.breakdown.map((row) => row.key),
+    );
+    expect(
+      jaResult.todayStats.breakdown.map((row) => row.action),
+    ).toStrictEqual(["充填", "修理済み"]);
+    expect(
+      enResult.todayStats.breakdown.map((row) => row.action),
+    ).toStrictEqual(["Fill", "Repaired"]);
   });
 });
 

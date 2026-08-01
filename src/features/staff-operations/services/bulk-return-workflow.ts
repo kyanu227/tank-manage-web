@@ -4,16 +4,28 @@ import {
   type TankStatusCode,
 } from "@/lib/tank-action-status-codes";
 import type { OperationActor } from "@/lib/operation-context";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
+import {
+  applyBulkTankOperations,
+  StaleTankCycleError,
+  type ExpectedTankCycle,
+  type StaleTankCycleIssue,
+} from "@/lib/tank-operation";
 import {
   RETURN_TAG,
   resolveReturnActionCode,
   type ReturnTag,
 } from "@/lib/tank-rules";
+import {
+  getBulkReturnObservedCycleMarkers,
+  type BulkReturnRawCycleMarkers,
+} from "../bulk-return-cycle-readiness";
 
 export type BulkReturnTargetInput = {
   id: string;
   status: string;
+  customerId?: string | null;
+  latestLogId?: string | null;
+  rawCycleMarkers?: BulkReturnRawCycleMarkers;
   location?: string;
   tag: ReturnTag;
 };
@@ -29,6 +41,7 @@ export async function submitBulkReturnGroup(
   input: SubmitBulkReturnGroupInput,
 ): Promise<void> {
   const { tanks, fallbackLocation, actor } = input;
+  const validatedTargets = requireBulkReturnExpectedCycles(tanks);
   const context = {
     actor,
     source: "bulk_return" as const,
@@ -36,7 +49,7 @@ export async function submitBulkReturnGroup(
   };
 
   await applyBulkTankOperations(
-    tanks.map((tank) => {
+    validatedTargets.map(({ tank, expectedCycle }) => {
       const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
       const isKeep = tag === RETURN_TAG.KEEP;
       return {
@@ -52,6 +65,7 @@ export async function submitBulkReturnGroup(
           : "倉庫",
         tankNote: "",
         logNote: isKeep ? "持ち越し" : "",
+        expectedCycle,
       };
     }),
   );
@@ -74,4 +88,55 @@ function requireBulkTankStatusCode(
     throw new Error(`[${tankId}] status が不正です`);
   }
   return code;
+}
+
+function requireBulkReturnExpectedCycles(
+  tanks: readonly BulkReturnTargetInput[],
+): Array<{
+  tank: BulkReturnTargetInput;
+  expectedCycle: ExpectedTankCycle;
+}> {
+  const issues: StaleTankCycleIssue[] = [];
+  const validated: Array<{
+    tank: BulkReturnTargetInput;
+    expectedCycle: ExpectedTankCycle;
+  }> = [];
+
+  tanks.forEach((tank) => {
+    const { customerId, latestLogId } = getBulkReturnObservedCycleMarkers(tank);
+    const customerIdValid = isNonEmptyString(customerId);
+    const latestLogIdValid = isNonEmptyString(latestLogId);
+    if (!customerIdValid) {
+      issues.push({
+        tankId: tank.id,
+        field: "customerId",
+        reason: "missing_expected",
+      });
+    }
+    if (!latestLogIdValid) {
+      issues.push({
+        tankId: tank.id,
+        field: "latestLogId",
+        reason: "missing_expected",
+      });
+    }
+    if (customerIdValid && latestLogIdValid) {
+      validated.push({
+        tank,
+        expectedCycle: {
+          customerId,
+          latestLogId,
+        },
+      });
+    }
+  });
+
+  if (issues.length > 0) {
+    throw new StaleTankCycleError(issues);
+  }
+  return validated;
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
 }

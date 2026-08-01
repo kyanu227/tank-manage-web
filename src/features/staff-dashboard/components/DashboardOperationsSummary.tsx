@@ -6,6 +6,13 @@ import {
   Users,
 } from "lucide-react";
 import { DashboardSectionLabel } from "@/features/staff-dashboard/components/DashboardSectionLabel";
+import {
+  formatDashboardCustomerCount,
+  formatDashboardOperationCount,
+  formatDashboardReportCount,
+  getDashboardText,
+} from "@/features/staff-dashboard/i18n";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 
 export type DashboardCustomerLoanRowView = Readonly<{
   key: string;
@@ -15,6 +22,7 @@ export type DashboardCustomerLoanRowView = Readonly<{
 }>;
 
 export type DashboardTodayOperationRowView = Readonly<{
+  key: string;
   action: string;
   count: number;
 }>;
@@ -35,6 +43,7 @@ export type DashboardOperationsSummaryProps = {
   todayOperations: readonly DashboardTodayOperationRowView[];
   unfilledReportCount: number;
   recentUnfilledReports: readonly DashboardUnfilledReportRowView[];
+  locale?: Locale;
 };
 
 export function DashboardOperationsSummary({
@@ -43,10 +52,11 @@ export function DashboardOperationsSummary({
   todayOperations,
   unfilledReportCount,
   recentUnfilledReports,
+  locale = DEFAULT_LOCALE,
 }: DashboardOperationsSummaryProps) {
   return (
     <>
-      <DashboardSectionLabel icon={<ClipboardList size={14} />} title="業務状況" />
+      <DashboardSectionLabel icon={<ClipboardList size={14} />} title={getDashboardText("operations", locale)} />
       <div
         style={{
           display: "grid",
@@ -57,9 +67,9 @@ export function DashboardOperationsSummary({
       >
         <DashboardPanel
           icon={<Users size={14} color="#3b82f6" />}
-          title="貸出先別"
-          badge={`${customerLoans.length}件`}
-          emptyText="貸出中のタンクはありません"
+          title={getDashboardText("byCustomer", locale)}
+          badge={formatDashboardCustomerCount(customerLoans.length, locale)}
+          emptyText={getDashboardText("noLoans", locale)}
           isEmpty={customerLoans.length === 0}
         >
           {customerLoans.map((row) => (
@@ -90,11 +100,11 @@ export function DashboardOperationsSummary({
                 {row.displayName}
               </span>
               <span style={{ fontSize: 11, fontWeight: 800, color: "#3b82f6", background: "#eff6ff", padding: "2px 8px", borderRadius: 6 }}>
-                貸出 {row.lent}
+                {getDashboardText("lent", locale)} {row.lent}
               </span>
               {row.unreturned > 0 ? (
                 <span style={{ fontSize: 11, fontWeight: 800, color: "#a78bfa", background: "#f5f3ff", padding: "2px 8px", borderRadius: 6 }}>
-                  未返却 {row.unreturned}
+                  {getDashboardText("unreturned", locale)} {row.unreturned}
                 </span>
               ) : (
                 <span style={{ width: 60 }} />
@@ -105,14 +115,14 @@ export function DashboardOperationsSummary({
 
         <DashboardPanel
           icon={<Clock size={14} color="#0ea5e9" />}
-          title="今日の操作"
-          badge={`${todayTotal}件`}
-          emptyText="本日の操作はまだありません"
+          title={getDashboardText("todayOperations", locale)}
+          badge={formatDashboardOperationCount(todayTotal, locale)}
+          emptyText={getDashboardText("noTodayOperations", locale)}
           isEmpty={todayOperations.length === 0}
         >
           {todayOperations.map((row) => (
             <div
-              key={row.action}
+              key={row.key}
               style={{
                 display: "grid",
                 gridTemplateColumns: "1fr auto",
@@ -143,9 +153,9 @@ export function DashboardOperationsSummary({
 
         <DashboardPanel
           icon={<AlertTriangle size={14} color="#dc2626" />}
-          title="顧客未充填報告"
-          badge={`${unfilledReportCount}件`}
-          emptyText="顧客未充填報告はありません"
+          title={getDashboardText("unfilledReports", locale)}
+          badge={formatDashboardReportCount(unfilledReportCount, locale)}
+          emptyText={getDashboardText("noUnfilledReports", locale)}
           isEmpty={recentUnfilledReports.length === 0}
         >
           {recentUnfilledReports.map((report) => (

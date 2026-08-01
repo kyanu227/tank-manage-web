@@ -2,28 +2,24 @@
 
 import { ArrowLeft, CheckCircle2, Loader2, ThumbsUp } from "lucide-react";
 import ReturnTagSelector from "@/components/ReturnTagSelector";
-import { useStaffLocale } from "@/hooks/useStaffSession";
-import type { Locale } from "@/lib/locale";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
+import { getReturnTagLabel, getReturnTagLabelOrNull } from "@/lib/return-tag-labels";
+import { formatStaffCount } from "@/lib/staff-display";
+import { getStaffOperationText } from "../i18n";
 import type { UseReturnTagProcessingResult } from "../hooks/useReturnTagProcessing";
 import type { Condition, ReturnGroup } from "../types";
 
 interface ReturnTagProcessingScreenProps {
   selectedReturnGroup: ReturnGroup;
   returnTagProcessing: UseReturnTagProcessingResult;
+  locale?: Locale;
 }
-
-const RETURN_TAG_PROCESSING_TEXT = {
-  title: {
-    ja: "返却タグ処理",
-    en: "Return tag processing",
-  },
-} satisfies Record<string, Record<Locale, string>>;
 
 export default function ReturnTagProcessingScreen({
   selectedReturnGroup,
   returnTagProcessing,
+  locale = DEFAULT_LOCALE,
 }: ReturnTagProcessingScreenProps) {
-  const staffLocale = useStaffLocale();
   const {
     returnTagSelections,
     setReturnTagSelections,
@@ -39,6 +35,8 @@ export default function ReturnTagProcessingScreen({
       {/* ヘッダー */}
       <div style={{ padding: "14px 20px", background: "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 12, flexShrink: 0 }}>
         <button
+          type="button"
+          aria-label={getStaffOperationText("back", locale)}
           onClick={() => setSelectedReturnGroup(null)}
           style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b", display: "flex", alignItems: "center", justifyContent: "center" }}
         >
@@ -47,7 +45,7 @@ export default function ReturnTagProcessingScreen({
         <div style={{ flex: 1 }}>
           <p style={{ fontSize: 15, fontWeight: 800, color: "#0f172a", margin: 0 }}>{selectedReturnGroup.customerName}</p>
           <p style={{ fontSize: 11, color: "#94a3b8", margin: 0 }}>
-            {RETURN_TAG_PROCESSING_TEXT.title[staffLocale]} — {selectedCount}/{selectedReturnGroup.items.length}
+            {getStaffOperationText("returnTagProcessing", locale)} — {selectedCount}/{selectedReturnGroup.items.length}
           </p>
         </div>
       </div>
@@ -57,6 +55,7 @@ export default function ReturnTagProcessingScreen({
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           {selectedReturnGroup.items.map((item) => {
             const selection = returnTagSelections[item.id] || { selected: false, condition: item.condition };
+            const conditionLabel = getReturnTagLabelOrNull(selection.condition, locale);
             return (
               <div
                 key={item.id}
@@ -65,21 +64,35 @@ export default function ReturnTagProcessingScreen({
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
                   <span style={{ fontSize: 24, fontWeight: 900, fontFamily: "monospace", color: "#0f172a" }}>{item.tankId}</span>
                   <button
+                    type="button"
+                    aria-label={getStaffOperationText(
+                      selection.selected ? "deselectTank" : "selectTank",
+                      locale,
+                      { tankId: item.tankId },
+                    )}
+                    aria-pressed={selection.selected}
                     onClick={() => setReturnTagSelections((p) => ({ ...p, [item.id]: { ...p[item.id], selected: !p[item.id].selected } }))}
                     style={{ width: 44, height: 44, borderRadius: 12, border: "none", background: selection.selected ? "#10b981" : "#f1f5f9", color: selection.selected ? "#fff" : "#cbd5e1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
                   >
                     <ThumbsUp size={20} />
                   </button>
                 </div>
+                {!conditionLabel && (
+                  <p role="alert" style={{ margin: "0 0 10px", padding: "6px 8px", borderRadius: 8, background: "#f1f5f9", color: "#475569", fontSize: 11, fontWeight: 800 }}>
+                    {getStaffOperationText("unknownReturnTag", locale, {
+                      value: String(selection.condition ?? ""),
+                    })}
+                  </p>
+                )}
                 <ReturnTagSelector<Condition>
                   value={selection.condition}
                   onChange={(condition) => setReturnTagSelections((p) => ({ ...p, [item.id]: { ...p[item.id], condition } }))}
                   options={[
-                    { value: "uncharged", label: "未充填" },
-                    { value: "keep", label: "持ち越し" },
-                    { value: "unused", label: "未使用" },
+                    { value: "uncharged", label: getReturnTagLabel("uncharged", locale) },
+                    { value: "keep", label: getReturnTagLabel("keep", locale) },
+                    { value: "unused", label: getReturnTagLabel("unused", locale) },
                   ]}
-                  locale={staffLocale}
+                  locale={locale}
                   compact
                 />
               </div>
@@ -88,12 +101,18 @@ export default function ReturnTagProcessingScreen({
 
           {selectedCount > 0 && (
             <button
+              type="button"
+              aria-busy={returnConfirmationSubmitting}
               onClick={confirmSelectedReturnRequests}
               disabled={returnConfirmationSubmitting}
               style={{ width: "100%", padding: 16, borderRadius: 16, border: "none", background: "#10b981", color: "#fff", fontSize: 16, fontWeight: 800, cursor: returnConfirmationSubmitting ? "wait" : "pointer", display: "flex", justifyContent: "center", alignItems: "center", gap: 8, marginTop: 8, boxShadow: "0 8px 16px rgba(16,185,129,0.25)" }}
             >
               {returnConfirmationSubmitting ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : <CheckCircle2 size={18} />}
-              {selectedCount}件の返却タグを処理する
+              {getStaffOperationText("processReturnTags", locale, {
+                countLabel: formatStaffCount(selectedCount, locale, {
+                  ja: "件", enSingular: "return tag", enPlural: "return tags",
+                }),
+              })}
             </button>
           )}
         </div>

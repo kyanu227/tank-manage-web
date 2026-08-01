@@ -1,11 +1,17 @@
 import type React from "react";
 import { Loader2 } from "lucide-react";
+import { getDashboardText, formatDashboardStaffName } from "@/features/staff-dashboard/i18n";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 
 export type StaffDashboardViewProps = {
   staffName: string | null;
   loading: boolean;
   children: React.ReactNode;
   overlays: React.ReactNode;
+  locale?: Locale;
+  loadFailed?: boolean;
+  showLoadWarning?: boolean;
+  onRetry?: () => void;
 };
 
 export function StaffDashboardView({
@@ -13,6 +19,10 @@ export function StaffDashboardView({
   loading,
   children,
   overlays,
+  locale = DEFAULT_LOCALE,
+  loadFailed = false,
+  showLoadWarning = false,
+  onRetry,
 }: StaffDashboardViewProps) {
   return (
     <div style={{ minHeight: "100%", background: "#f8fafc", padding: "14px 14px 32px" }}>
@@ -29,19 +39,21 @@ export function StaffDashboardView({
         >
           <div>
             <h1 style={{ fontSize: 22, fontWeight: 800, color: "#0f172a", lineHeight: 1.2 }}>
-              ダッシュボード
+              {getDashboardText("dashboard", locale)}
             </h1>
             <p style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
-              ステータス別内訳 / 業務状況 / 操作ログ
+              {getDashboardText("dashboardSubtitle", locale)}
             </p>
           </div>
           <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 700, whiteSpace: "nowrap" }}>
-            {staffName ? `${staffName} さん` : ""}
+            {staffName ? formatDashboardStaffName(staffName, locale) : ""}
           </div>
         </div>
 
         {loading ? (
           <div
+            role="status"
+            aria-live="polite"
             style={{
               textAlign: "center",
               padding: 60,
@@ -53,10 +65,31 @@ export function StaffDashboardView({
             }}
           >
             <Loader2 size={22} style={{ animation: "spin 1s linear infinite", verticalAlign: "middle", marginRight: 8 }} />
-            読み込み中...
+            {getDashboardText("loading", locale)}
+          </div>
+        ) : loadFailed ? (
+          <div role="alert" style={{ textAlign: "center", padding: 40, color: "#991b1b", background: "#fff", borderRadius: 16, border: "1px solid #fecaca" }}>
+            <p>{getDashboardText("loadFailure", locale)}</p>
+            {onRetry && (
+              <button type="button" onClick={onRetry}>
+                {getDashboardText("retry", locale)}
+              </button>
+            )}
           </div>
         ) : (
-          children
+          <>
+            {showLoadWarning && (
+              <div role="alert" style={{ marginBottom: 14, padding: "10px 12px", color: "#9a3412", background: "#fff7ed", borderRadius: 10, border: "1px solid #fed7aa", fontSize: 12 }}>
+                {getDashboardText("loadFailure", locale)}
+                {onRetry && (
+                  <button type="button" onClick={onRetry} style={{ marginLeft: 8 }}>
+                    {getDashboardText("retry", locale)}
+                  </button>
+                )}
+              </div>
+            )}
+            {children}
+          </>
         )}
       </div>
 

@@ -13,7 +13,7 @@
 | Next.js | 16.1.6 | フレームワーク（App Router, 静的エクスポート） |
 | React | 19.2.3 | UIライブラリ |
 | TypeScript | 5 | 型安全 |
-| Firebase Auth | 12.10.0 | 認証（Google, Email/Password, パスコード） |
+| Firebase Auth | 12.10.0 | 認証（Google, Email/Password） |
 | Firestore | 12.10.0 | データベース |
 | Firebase Hosting | — | デプロイ先（静的サイト） |
 | Tailwind CSS | 4 | スタイリング |
@@ -30,35 +30,51 @@ src/
 │   ├── admin/                  # 管理画面（AdminAuthGuard）
 │   │   ├── layout.tsx          # 管理レイアウト・ナビ
 │   │   ├── page.tsx            # ダッシュボード
-│   │   ├── settings/           # マスターデータ管理
+│   │   ├── settings/           # ポータル・耐圧検査・状態遷移モード設定
 │   │   ├── permissions/        # ページ権限制御
-│   │   ├── customers/          # 顧客管理・PIN管理
+│   │   ├── customers/          # 顧客管理・ポータル利用者管理
 │   │   ├── notifications/      # 通知設定（メール・LINE）
 │   │   ├── staff-analytics/    # スタッフ実績ランキング
+│   │   ├── staff/              # 担当者管理
 │   │   ├── money/              # 操作単価・ランク条件
 │   │   ├── billing/            # 請求書発行
-│   │   └── sales/              # 売上統計
+│   │   ├── sales/              # 売上統計
+│   │   ├── operation-reviews/  # 例外操作レビュー
+│   │   ├── order-master/       # 発注品目マスタ
+│   │   ├── state-diagram/      # 状態遷移図
+│   │   └── security-rules/     # Security Rules 確認
 │   ├── staff/                  # スタッフ操作画面（StaffAuthGuard）
 │   │   ├── layout.tsx          # スタッフレイアウト・ナビ
-│   │   ├── page.tsx            # メイン操作（貸出/返却/充填）
-│   │   ├── orders/             # 受注管理・返却承認・一括返却（3タブ）
-│   │   ├── returns/            # 現場返却（※ordersに統合済み、残存）
+│   │   ├── page.tsx            # → /staff/lend リダイレクト
+│   │   ├── lend/               # 貸出（手動/受注）
+│   │   ├── return/             # 返却タグ処理・一括返却・手動返却
+│   │   ├── fill/               # 充填
 │   │   ├── damage/             # 破損報告
-│   │   ├── maintenance/        # メンテナンス（修理・耐圧）
-│   │   ├── order/              # 資材発注
+│   │   ├── repair/             # 修理完了
+│   │   ├── inspection/         # 耐圧検査
+│   │   ├── order/              # → /staff/supply-order 互換リダイレクト
+│   │   ├── supply-order/       # 備品・資材発注
+│   │   ├── tank-purchase/      # タンク購入
+│   │   ├── tank-register/      # タンク登録
 │   │   ├── mypage/             # マイページ
 │   │   ├── inhouse/            # 自社タンク管理
-│   │   ├── bulk-return/        # 一括返却（※ordersに統合済み、残存）
 │   │   └── dashboard/          # ステータス集計・ログ管理
-│   └── portal/                 # 顧客ポータル（localStorageセッション）
-│       ├── layout.tsx          # ポータルレイアウト・セッション管理
+│   └── portal/                 # 顧客ポータル（Firebase Auth + customerUsers）
+│       ├── layout.tsx          # ポータルレイアウト・Auth状態管理
 │       ├── page.tsx            # ホーム（貸出状況・ログ）
-│       ├── login/              # ログイン（パスコード/Google/メール）
+│       ├── login/              # ログイン（Google/メール）
 │       ├── register/           # 新規登録
-│       ├── setup/              # 初期設定（会社名・パスコード表示）
+│       ├── setup/              # 初期設定（会社名・氏名・LINE名）
 │       ├── order/              # タンク発注
 │       ├── return/             # 返却申請（自動返却対応）
 │       └── unfilled/           # 未充填報告
+├── features/
+│   ├── staff-operations/       # 貸出・返却・充填・受注
+│   ├── staff-dashboard/        # スタッフ集計・ログ表示
+│   ├── maintenance/            # メンテナンス workflow
+│   ├── inhouse/                # 自社タンク workflow
+│   ├── procurement/            # 備品発注・タンク購入/登録
+│   └── admin-customers/        # 顧客・ポータル利用者管理
 ├── components/
 │   ├── AdminAuthGuard.tsx      # 管理者認証・権限ガード
 │   ├── StaffAuthGuard.tsx      # スタッフ認証ガード
@@ -67,7 +83,10 @@ src/
 └── lib/
     └── firebase/
         ├── config.ts           # Firebase初期化
-        └── customer-destination.ts  # 顧客・貸出先同期ヘルパー
+        ├── repositories/       # tanks/logs/transactions の読み取りrepository
+        ├── customer-user.ts    # portal Auth / customerUsers ヘルパー
+        ├── staff-auth.ts       # staff / staffByEmail 読み取り + mirror 同期・staffByUid write ヘルパー
+        └── diff-write.ts       # 差分更新ヘルパー
 ```
 
 ## AI組織構造（秘書ハブ型）
@@ -102,12 +121,18 @@ src/
   `codex-companion.mjs task --background --write` で独立プロセスとして起動する
   - Agent ツール経由だとサブプロセスが途中で止まる挙動を確認済み。独立プロセスなら親のターンが終わっても生存
   - 追跡: `codex-companion.mjs status <job-id>` / 完了後 `result <job-id>` / 必要なら `cancel <job-id>`
-- **Codexへの必須指示（サイズ問わず全発注で必須）**:
-  - 「論理単位を1つ完了するたびに、リポジトリ直下の `progress.md` に3〜5行の完了記録を追記すること」
-  - 単位の定義: 1フック / 1コンポーネント / 1つの削除作業 / 1回の検証（tsc・build 等）
-  - 追記フォーマット: `## <単位名> 完了` ＋ 変更ファイル列挙 ＋ 1文で何をしたか
-  - この仕組みにより、さなは途中経過をレビュー可能になり、万一プロセスが死んでも復元ポイントが残る
-- **小規模タスク（〜200行・1〜2ファイル）**: Agent 経由で可。ただし `progress.md` 追記指示は同じく必須
+- **進捗・判断の正本（2026-07-29 改訂）**:
+  - GitHub PR 本文
+  - merge 済み design note
+  - `docs/architecture/refactor-sequence.md`
+- **`progress.md`**: 長期 phase や cutover の集約記録に使う。
+  **PR ごとの毎回追記は必須にしない**
+  - 改訂前は「論理単位ごとに `progress.md` へ追記」を全発注で必須としていたが、
+    PR-01〜12 では一度も運用されず、`docs/architecture/refactor-sequence.md` §7 とも
+    矛盾していたため、実運用に合わせて正本を PR 本文側へ移した
+  - 長時間の background 発注で途中経過を残したい場合は、Codex への指示として
+    個別に追加してよい（既定では要求しない）
+- **小規模タスク（〜200行・1〜2ファイル）**: Agent 経由で可
 - **分割発注は原則しない**: 型や定数が絡む連鎖リファクタは途中状態で tsc/build が壊れるため、1本発注が原則
   - 例外: 独立機能が複数ある場合のみ、機能境界で分ける
 
@@ -238,7 +263,7 @@ For billing UI/design work:
 ## ディレクトリ階層の方針
 - `src/components/` は汎用部品のみ（`AuthPanel`, `DrumRoll`, `QuickSelect` 等）
 - 業務フロー単位の塊は `src/features/<feature-name>/` に閉じる
-  - 例: `src/features/staff-operations/`（貸出/返却/充填/受注/返却承認/一括返却）
+  - 例: `src/features/staff-operations/`（貸出/返却/充填/受注/返却タグ処理/一括返却）
   - 配下は `components/` `hooks/` `types.ts` `constants.ts` の緩い規約
 - `src/app/**/page.tsx` は `features/` を呼び出す薄い殻に留める
 - バグリスク低減のため階層追加は積極的に許容する（凝集度 > フラットさ）
@@ -269,11 +294,15 @@ firebase deploy      # Firebase Hosting デプロイ
 | コレクション | キー | 主要フィールド |
 |---|---|---|
 | staff | {docId} | id, name, email, isActive, role, rank, passcode |
-| customers | {docId} | uid, email, companyName, passcode, setupCompleted |
-| tanks | {docId} | status, location, staffId |
-| logs | {docId} | logStatus, rootLogId, revision, tankId, action, prev/nextTankSnapshot 等（詳細は「ログ設計」参照） |
-| transactions | {docId} | type(order/return/uncharged_report), status, items |
-| destinations | {uid} | name, companyName, email, passcode, price*, isActive |
+| staffByEmail | {emailKey} | staffId, email, role, isActive |
+| customers | {docId} | name, companyName, email, price*, isActive |
+| customerUsers | {uid} | uid, email, selfCompanyName, selfName, lineName, customerId, customerName, setupCompleted, disabled |
+| tanks | {tankId} | status, location, staff, latestLogId, nextMaintenanceDate |
+| logs | {docId} | timestamp, action, tankId, staff, location, customerId, logStatus, rootLogId, revision |
+| transactions | {docId} | type(order/return/uncharged_report), status, items, customerId, customerName, createdByUid |
+
+`destinations` コレクションは廃止済みで、同コレクションへのコード参照はなく、
+Firestore Rules も read / write を拒否する。
 
 ### マスター・設定
 
@@ -306,14 +335,19 @@ firebase deploy      # Firebase Hosting デプロイ
 
 ```
 顧客ポータル:
-  /portal/login → パスコード or Google/メール
-    ├─ 既存顧客（admin作成済み）→ /portal
-    └─ 新規 → /portal/register → /portal/setup → /portal
-  セッション: localStorage (customerSession)
+  /portal/login → Firebase Auth（Email/Password または Google）
+    ├─ customerUsers.setupCompleted=true → /portal
+    └─ setup未完了 → /portal/setup → /portal
+  正本: Firebase Auth uid + customerUsers/{uid}
+  画面互換セッション: localStorage (customerSession)
+  ※ 旧 customers.passcode 経路は Portal Auth Phase 0 で廃止済み。
 
 スタッフ:
-  StaffAuthGuard → パスコード or Google/メール
-  セッション: localStorage (staffSession) + Firestore staff検証
+  StaffAuthGuard → Firebase Auth（Google または Email/Password）
+  セッション: Firebase Auth + localStorage (staffSession) + Firestore staff検証
+  ※ パスコード実装は NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN=true の場合だけ表示される。
+     ただし未認証利用者は Firestore Rules により staff を read できず、
+     単独の未認証ログイン経路としては成立しない。
 
 管理者:
   AdminAuthGuard → Google/メール → Firebase Auth
@@ -324,7 +358,7 @@ firebase deploy      # Firebase Hosting デプロイ
 
 - `admin` — 管理者（全機能アクセス可）
 - `準管理者` — 一部管理ページへのアクセス（adminPermissions で制御）
-- `worker` — スタッフ（パスコード認証、操作画面のみ）
+- `worker` — スタッフ（操作画面のみ）
 - `customer` — 顧客（ポータルのみ）
 
 ## 旧システム参照

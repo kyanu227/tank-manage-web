@@ -20,21 +20,32 @@ import {
 } from "@/lib/tank-transition-projections";
 import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
 import {
-  getStaffLocaleSaveFailureMessage,
   getStaffLocaleSaveSuccessMessage,
 } from "@/lib/operation-messages";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
+import {
+  formatMyPageTime,
+  formatMyPageLocation,
+  formatProfileDescription,
+  formatRecentWorkTitle,
+  formatStaffProfileName,
+  formatStaffProfileRank,
+  getLocaleOptionLabel,
+  getMyPageText,
+} from "@/features/staff-dashboard/mypage-i18n";
 
 interface LogEntry {
   tankId: string;
   action: string;
+  transitionAction?: string;
   timestamp?: Timestamp;
   location: string;
+  customerId?: string;
+  customerName?: string;
 }
-
-const LOCALE_LABELS: Record<Locale, string> = {
-  ja: "日本語",
-  en: "English",
-};
 
 export default function MyPage() {
   const tankDataRevision = useTankDataRevision();
@@ -48,6 +59,8 @@ export default function MyPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [stats, setStats] = useState({ lend: 0, return: 0, fill: 0, other: 0 });
   const [loading, setLoading] = useState(true);
+  const [logsLoadFailed, setLogsLoadFailed] = useState(false);
+  const [logsLoadVersion, setLogsLoadVersion] = useState(0);
   const [selectedLocale, setSelectedLocale] = useState<Locale>(currentLocale);
   const [localeSaving, setLocaleSaving] = useState(false);
   const [localeMessage, setLocaleMessage] = useState("");
@@ -69,6 +82,7 @@ export default function MyPage() {
 
     (async () => {
       setLoading(true);
+      setLogsLoadFailed(false);
       try {
         // 必要 index: logs(logStatus Asc, staffId Asc, timestamp Desc, __name__ Desc)
         const fetched = await logsRepository.getActiveLogsByStaffId(staffId, { limit: 100 });
@@ -80,8 +94,11 @@ export default function MyPage() {
           entries.push({
             tankId: log.tankId ?? "",
             action,
+            transitionAction: log.transitionAction,
             timestamp: getOperationOccurredAt(log),
             location: log.location ?? "",
+            customerId: log.customerId,
+            customerName: log.customerName,
           });
           if (!officialEvent) return;
           if (isLendActionCode(officialEvent.action)) counts.lend++;
@@ -92,7 +109,10 @@ export default function MyPage() {
         if (cancelled) return;
         setLogs(entries);
         setStats(counts);
-      } catch (e) { console.error(e); }
+      } catch (e) {
+        console.error("getActiveLogsByStaffId failed", e);
+        if (!cancelled) setLogsLoadFailed(true);
+      }
       finally {
         if (!cancelled) setLoading(false);
       }
@@ -101,32 +121,41 @@ export default function MyPage() {
     return () => {
       cancelled = true;
     };
-  }, [profileLoading, staffId, tankDataRevision]);
+  }, [profileLoading, staffId, tankDataRevision, logsLoadVersion]);
 
   const formatTime = (ts?: Timestamp) => {
     if (!ts?.toDate) return "—";
     const d = ts.toDate();
-    return `${d.getMonth() + 1}/${d.getDate()} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    return formatMyPageTime(d, currentLocale);
   };
 
   const STAT_CARDS = [
-    { label: "貸出", value: stats.lend, color: "#6366f1", bg: "#eef2ff" },
-    { label: "返却", value: stats.return, color: "#0ea5e9", bg: "#f0f9ff" },
-    { label: "充填", value: stats.fill, color: "#10b981", bg: "#ecfdf5" },
-    { label: "その他", value: stats.other, color: "#f59e0b", bg: "#fffbeb" },
+    { label: getMyPageText("lend", currentLocale), value: stats.lend, color: "#6366f1", bg: "#eef2ff" },
+    { label: getMyPageText("return", currentLocale), value: stats.return, color: "#0ea5e9", bg: "#f0f9ff" },
+    { label: getMyPageText("fill", currentLocale), value: stats.fill, color: "#10b981", bg: "#ecfdf5" },
+    { label: getMyPageText("other", currentLocale), value: stats.other, color: "#f59e0b", bg: "#fffbeb" },
   ];
 
-  const displayName = profile?.name || session?.name || "スタッフ";
+  const displayName = profile
+    ? formatStaffProfileName(
+        profile.name,
+        currentLocale,
+        profile.generatedFallbacks?.name === true,
+      )
+    : getMyPageText("staff", currentLocale);
   const displayRole = profile?.role || session?.role || "";
-  const displayRank = profile?.rank || session?.rank || "";
+  const displayRank = profile
+    ? formatStaffProfileRank(
+        profile.rank,
+        currentLocale,
+        profile.generatedFallbacks?.rank === true,
+      )
+    : "";
   const displayEmail = profile?.email || session?.email || "";
-  const profileTitle = profileLoading && !profile && !session ? "読み込み中…" : displayName;
+  const profileTitle = profileLoading && !profile ? getMyPageText("loading", currentLocale) : displayName;
   const profileDescription = profileLoading && !profile
-    ? "プロフィール確認中…"
-    : [
-        displayRole || "権限未設定",
-        displayRank ? `ランク: ${displayRank}` : "ランク未設定",
-      ].join(" / ");
+    ? getMyPageText("profileChecking", currentLocale)
+    : formatProfileDescription(displayRole, displayRank, currentLocale);
   const localeChanged = selectedLocale !== currentLocale;
 
   const handleSaveLocale = async () => {
@@ -138,9 +167,8 @@ export default function MyPage() {
       setSelectedLocale(result.locale);
       setLocaleMessage(getStaffLocaleSaveSuccessMessage(result.locale));
     } catch (e) {
-      setLocaleError(e instanceof Error
-        ? e.message
-        : getStaffLocaleSaveFailureMessage(currentLocale));
+      logStaffOperationError("updateOwnStaffLocale failed", e);
+      setLocaleError(getStaffOperationErrorMessage(e, currentLocale));
     } finally {
       setLocaleSaving(false);
     }
@@ -169,15 +197,17 @@ export default function MyPage() {
           </div>
         </div>
         {profileError && (
-          <p style={{ marginBottom: 12, fontSize: 11, fontWeight: 700, color: "#fee2e2" }}>{profileError}</p>
+          <p role="alert" style={{ marginBottom: 12, fontSize: 11, fontWeight: 700, color: "#fee2e2" }}>
+            {currentLocale === "ja" ? profileError : getMyPageText("profileLoadFailure", currentLocale)}
+          </p>
         )}
         <div style={{ display: "flex", gap: 12 }}>
           <div style={{ flex: 1, background: "rgba(255,255,255,0.15)", borderRadius: 12, padding: "12px 14px" }}>
-            <p style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>今月のスコア</p>
+            <p style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>{getMyPageText("monthlyScore", currentLocale)}</p>
             <p style={{ fontSize: 24, fontWeight: 800 }}>—</p>
           </div>
           <div style={{ flex: 1, background: "rgba(255,255,255,0.15)", borderRadius: 12, padding: "12px 14px" }}>
-            <p style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>報酬見込み</p>
+            <p style={{ fontSize: 10, fontWeight: 600, opacity: 0.7 }}>{getMyPageText("estimatedReward", currentLocale)}</p>
             <p style={{ fontSize: 24, fontWeight: 800 }}>—</p>
           </div>
         </div>
@@ -186,14 +216,15 @@ export default function MyPage() {
       {/* Settings */}
       <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 18, marginBottom: 20 }}>
         <div style={{ marginBottom: 12 }}>
-          <p style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>表示設定</p>
-          <p style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>このスタッフアカウントの表示言語を保存します。</p>
+          <p style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{getMyPageText("displaySettings", currentLocale)}</p>
+          <p style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>{getMyPageText("displaySettingsHelp", currentLocale)}</p>
         </div>
-        <label style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
-          表示言語
+        <label htmlFor="staff-display-language" style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
+          {getMyPageText("displayLanguage", currentLocale)}
         </label>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <select
+            id="staff-display-language"
             value={selectedLocale}
             onChange={(e) => {
               setSelectedLocale(normalizeLocale(e.target.value));
@@ -204,7 +235,7 @@ export default function MyPage() {
             style={{ flex: 1, minWidth: 0, height: 40, border: "1px solid #cbd5e1", borderRadius: 10, padding: "0 12px", fontSize: 13, fontWeight: 700, color: "#0f172a", background: "#fff" }}
           >
             {SUPPORTED_LOCALES.map((locale) => (
-              <option key={locale} value={locale}>{LOCALE_LABELS[locale]}</option>
+              <option key={locale} value={locale}>{getLocaleOptionLabel(locale, currentLocale)}</option>
             ))}
           </select>
           <button
@@ -213,14 +244,14 @@ export default function MyPage() {
             disabled={localeSaving || !localeChanged}
             style={{ height: 40, border: "none", borderRadius: 10, padding: "0 14px", fontSize: 12, fontWeight: 800, color: localeSaving || !localeChanged ? "#94a3b8" : "#fff", background: localeSaving || !localeChanged ? "#e2e8f0" : "#2563eb", cursor: localeSaving || !localeChanged ? "not-allowed" : "pointer" }}
           >
-            {localeSaving ? "保存中…" : "保存"}
+            {localeSaving ? getMyPageText("saving", currentLocale) : getMyPageText("save", currentLocale)}
           </button>
         </div>
         {localeMessage && (
-          <p style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: "#047857" }}>{localeMessage}</p>
+          <p role="status" aria-live="polite" style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: "#047857" }}>{localeMessage}</p>
         )}
         {localeError && (
-          <p style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: "#dc2626" }}>{localeError}</p>
+          <p role="alert" style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: "#dc2626" }}>{localeError}</p>
         )}
       </div>
 
@@ -243,19 +274,41 @@ export default function MyPage() {
       <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 20 }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
           <Clock size={16} color="#64748b" />
-          <span style={{ fontSize: 13, fontWeight: 700, color: "#64748b" }}>最近の作業 (直近100件)</span>
+          <span style={{ fontSize: 13, fontWeight: 700, color: "#64748b" }}>{formatRecentWorkTitle(100, currentLocale)}</span>
         </div>
+        {logsLoadFailed && logs.length > 0 && (
+          <div role="alert" style={{ marginBottom: 10, padding: "8px 10px", borderRadius: 8, color: "#9a3412", background: "#fff7ed", border: "1px solid #fed7aa", fontSize: 11 }}>
+            {getMyPageText("logsLoadFailure", currentLocale)}
+            <button type="button" onClick={() => setLogsLoadVersion((value) => value + 1)} style={{ marginLeft: 8 }}>
+              {getMyPageText("retry", currentLocale)}
+            </button>
+          </div>
+        )}
         {loading ? (
-          <p style={{ textAlign: "center", padding: 20, color: "#94a3b8", fontSize: 14 }}>読み込み中…</p>
+          <p role="status" aria-live="polite" style={{ textAlign: "center", padding: 20, color: "#94a3b8", fontSize: 14 }}>
+            {getMyPageText("loading", currentLocale)}
+          </p>
+        ) : logsLoadFailed && logs.length === 0 ? (
+          <div role="alert" style={{ textAlign: "center", padding: 20, color: "#991b1b", fontSize: 14 }}>
+            <p>{getMyPageText("logsLoadFailure", currentLocale)}</p>
+            <button type="button" onClick={() => setLogsLoadVersion((value) => value + 1)}>
+              {getMyPageText("retry", currentLocale)}
+            </button>
+          </div>
         ) : logs.length === 0 ? (
-          <p style={{ textAlign: "center", padding: 20, color: "#cbd5e1", fontSize: 14 }}>ログがありません</p>
+          <p style={{ textAlign: "center", padding: 20, color: "#cbd5e1", fontSize: 14 }}>
+            {getMyPageText("noLogs", currentLocale)}
+          </p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             {logs.slice(0, 30).map((log, i) => (
               <div key={i} style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 10px", borderRadius: 8, background: "#f8fafc" }}>
                 <span style={{ fontFamily: "monospace", fontWeight: 700, fontSize: 13, color: "#0f172a", minWidth: 44 }}>{log.tankId}</span>
-                <span style={{ fontSize: 11, fontWeight: 600, color: "#6366f1", background: "#eef2ff", padding: "2px 8px", borderRadius: 6 }}>{getLegacyTankActionLabel(log.action, currentLocale) ?? log.action}</span>
-                <span style={{ flex: 1, fontSize: 11, color: "#94a3b8" }}>{log.location}</span>
+                <span style={{ fontSize: 11, fontWeight: 600, color: "#6366f1", background: "#eef2ff", padding: "2px 8px", borderRadius: 6 }}>
+                  {getLegacyTankActionLabel(log.action, currentLocale)
+                    ?? (currentLocale === "ja" ? log.action : getMyPageText("unknownAction", currentLocale))}
+                </span>
+                <span style={{ flex: 1, fontSize: 11, color: "#94a3b8" }}>{formatMyPageLocation(log, currentLocale)}</span>
                 <span style={{ fontSize: 10, color: "#cbd5e1" }}>{formatTime(log.timestamp)}</span>
               </div>
             ))}

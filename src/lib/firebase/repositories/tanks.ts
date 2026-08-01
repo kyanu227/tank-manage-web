@@ -21,7 +21,8 @@ import type { TankDoc, RepositoryWriter } from "./types";
  * getTank / getTanks の双方で同一変換を行うため、ここに集約する。
  * status / location / staff / type / note / logNote は String 化、
  * customerId / customerName は missing / null / string を区別して正規化し、
- * updatedAt / latestLogId / nextMaintenanceDate はそのまま透過する。
+ * updatedAt / nextMaintenanceDate はそのまま透過する。
+ * cycle 検査用に customerId / latestLogId の raw 値も別フィールドへ保持する。
  */
 function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
   const raw = snap.data() as Record<string, unknown>;
@@ -37,6 +38,10 @@ function toTankDoc(snap: DocumentSnapshot | QueryDocumentSnapshot): TankDoc {
     logNote: raw.logNote != null ? String(raw.logNote) : undefined,
     updatedAt: raw.updatedAt,
     latestLogId: raw.latestLogId != null ? String(raw.latestLogId) : undefined,
+    rawCycleMarkers: {
+      customerId: raw.customerId,
+      latestLogId: raw.latestLogId,
+    },
     nextMaintenanceDate: raw.nextMaintenanceDate,
   };
 }

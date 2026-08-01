@@ -8,6 +8,7 @@ export function useDestinations() {
   const [customerOptions, setCustomerOptions] = useState<CustomerSnapshot[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const selectedCustomer = useMemo<CustomerSnapshot | null>(() => {
     if (!selectedCustomerId) return null;
@@ -21,6 +22,7 @@ export function useDestinations() {
 
   const fetchDestinations = useCallback(async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       const customers = await listActiveCustomerSnapshots();
       setCustomerOptions(customers);
@@ -33,6 +35,7 @@ export function useDestinations() {
       });
     } catch (e) {
       console.error(e);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -50,6 +53,7 @@ export function useDestinations() {
     selectedCustomerName: selectedCustomer?.customerName ?? "",
     setSelectedCustomerId,
     loading,
+    loadFailed,
     fetchDestinations,
   };
 }

@@ -9,7 +9,7 @@ import {
   Trash2,
 } from "lucide-react";
 import ProcurementTabs from "@/components/ProcurementTabs";
-import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import type { TankStatusCode } from "@/lib/tank-action-status-codes";
 import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
@@ -20,6 +20,26 @@ import {
   type TankEntryMode,
 } from "@/features/procurement/lib/submitTankEntryBatch";
 import { useProcurementSwipe } from "@/features/procurement/hooks/useProcurementSwipe";
+import {
+  formatRemoveTankLabel,
+  formatProcurementJpy,
+  formatTankEntryConfirm,
+  formatTankEntryDuplicate,
+  formatTankEntryRegistered,
+  formatTankEntrySubmit,
+  formatTankEntrySuccess,
+  getProcurementText,
+  getTankEntryCopy,
+  getTankTypeDisplayLabel,
+} from "@/features/procurement/i18n";
+import {
+  formatStaffTankCount,
+  getStaffLocationLabel,
+} from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 
 const DEFAULT_TANK_TYPES = ["スチール 10L", "スチール 12L", "アルミ"];
 const LOCATION_OPTIONS = ["倉庫", "自社"];
@@ -32,11 +52,14 @@ interface TankEntryScreenProps {
 export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
   useProcurementSwipe(mode === "purchase" ? "tank-purchase" : "tank-register");
 
-  const { tanks, tankMap, prefixes, refetch } = useTanks();
+  const staffLocale = useStaffLocale();
+  const { tanks, tankMap, prefixes, loading: tanksLoading, loadFailed: tanksLoadFailed, refetch } = useTanks();
   const [tankIdInput, setTankIdInput] = useState("");
   const [tankIds, setTankIds] = useState<string[]>([]);
   const [masterTankTypes, setMasterTankTypes] = useState<string[]>([]);
   const [masterLoading, setMasterLoading] = useState(true);
+  const [masterLoadFailed, setMasterLoadFailed] = useState(false);
+  const [masterLoadVersion, setMasterLoadVersion] = useState(0);
   const [tankType, setTankType] = useState("");
   const [initialStatus, setInitialStatus] = useState<TankStatusCode>("empty");
   const [location, setLocation] = useState<string>("倉庫");
@@ -51,16 +74,13 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
   const isPurchase = mode === "purchase";
   const accent = isPurchase ? "#0ea5e9" : "#10b981";
   const accentBg = isPurchase ? "#e0f2fe" : "#dcfce7";
-  const pageTitle = isPurchase ? "タンク購入" : "タンク登録";
-  const pageDescription = isPurchase
-    ? "新しいタンクの登録と費用計上を同時に行います"
-    : "既存の実物タンクへIDを追加し、タンク情報だけ登録します";
-  const submitLabel = isPurchase ? "購入登録" : "登録";
+  const pageCopy = getTankEntryCopy(mode, staffLocale);
 
   useEffect(() => {
     let mounted = true;
     (async () => {
       setMasterLoading(true);
+      setMasterLoadFailed(false);
       try {
         const fromMaster = new Set<string>();
         const items = await listOrderItems();
@@ -71,8 +91,9 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
         });
         if (mounted) setMasterTankTypes(Array.from(fromMaster));
       } catch (error) {
-        console.error(error);
+        console.error("listOrderItems failed", error);
         if (mounted) setMasterTankTypes([]);
+        if (mounted) setMasterLoadFailed(true);
       } finally {
         if (mounted) setMasterLoading(false);
       }
@@ -80,7 +101,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
     return () => {
       mounted = false;
     };
-  }, []);
+  }, [masterLoadVersion]);
 
   const tankTypeOptions = useMemo(() => {
     const fromTanks = tanks
@@ -110,18 +131,21 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
     const parsed = tryParseTankId(tankIdInput);
 
     if (!parsed.ok) {
-      setResult({ success: false, message: parsed.reason });
+      setResult({
+        success: false,
+        message: staffLocale === "ja" ? parsed.reason : getProcurementText("invalidTankId", staffLocale),
+      });
       return;
     }
 
     const normalized = parsed.canonicalTankId;
 
     if (tankIds.includes(normalized)) {
-      setResult({ success: false, message: `${normalized} は追加済みです` });
+      setResult({ success: false, message: formatTankEntryDuplicate(normalized, staffLocale) });
       return;
     }
     if (tankMap[normalized]) {
-      setResult({ success: false, message: `${normalized} は既に登録されています` });
+      setResult({ success: false, message: formatTankEntryRegistered(normalized, staffLocale) });
       return;
     }
 
@@ -137,9 +161,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
   const handleSubmit = async () => {
     if (!canSubmit) return;
 
-    const message = isPurchase
-      ? `${tankIds.length}本を購入登録しますか？\n合計 ¥${totalCost.toLocaleString()} を計上します。`
-      : `${tankIds.length}本を登録しますか？`;
+    const message = formatTankEntryConfirm(mode, tankIds.length, totalCost, staffLocale);
 
     if (!confirm(message)) return;
 
@@ -172,12 +194,14 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
       }
       setResult({
         success: true,
-        message: isPurchase
-          ? `${outcome.count}本を購入登録しました（¥${outcome.totalCost.toLocaleString()}）`
-          : `${outcome.count}本を登録しました`,
+        message: formatTankEntrySuccess(mode, outcome.count, outcome.totalCost, staffLocale),
       });
     } catch (error) {
-      setResult({ success: false, message: errorMessage(error) });
+      logStaffOperationError("submitTankEntryBatch failed", error);
+      setResult({
+        success: false,
+        message: getStaffOperationErrorMessage(error, staffLocale),
+      });
     } finally {
       setSubmitting(false);
     }
@@ -213,35 +237,63 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
                 {isPurchase ? <Package size={22} color="#fff" /> : <Plus size={22} color="#fff" />}
               </div>
               <div>
-                <h1 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>{pageTitle}</h1>
-                <p style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{pageDescription}</p>
+                <h1 style={{ fontSize: 20, fontWeight: 800, color: "#0f172a" }}>{pageCopy.title}</h1>
+                <p style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>{pageCopy.description}</p>
               </div>
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 10 }}>
-              <MetricCard label="追加予定" value={`${tankIds.length}`} accent={accent} />
-              <MetricCard label="既存プレフィックス" value={`${prefixes.length}`} accent={accent} />
+              <MetricCard label={getProcurementText("toAdd", staffLocale)} value={`${tankIds.length}`} accent={accent} />
+              <MetricCard label={getProcurementText("prefixes", staffLocale)} value={`${prefixes.length}`} accent={accent} />
               <MetricCard
-                label={isPurchase ? "費用計上" : "費用計上"}
-                value={isPurchase ? `¥${totalCost.toLocaleString()}` : "なし"}
+                label={getProcurementText("cost", staffLocale)}
+                value={isPurchase ? formatProcurementJpy(totalCost, staffLocale) : getProcurementText("none", staffLocale)}
                 accent={accent}
               />
             </div>
           </div>
 
+          {(tanksLoading || masterLoading) && (
+            <div role="status" aria-live="polite" style={{ ...emptyStateStyle, marginBottom: 16 }}>
+              {getProcurementText("loading", staffLocale)}
+            </div>
+          )}
+
+          {(tanksLoadFailed || masterLoadFailed) && (
+            <div role="alert" style={{ ...emptyStateStyle, marginBottom: 16, color: "#9a3412", borderColor: "#fed7aa", background: "#fff7ed" }}>
+              <p>
+                {tanksLoadFailed
+                  ? getProcurementText("tankDataLoadFailure", staffLocale)
+                  : getProcurementText("orderItemsLoadFailure", staffLocale)}
+              </p>
+              <button
+                type="button"
+                onClick={() => {
+                  if (tanksLoadFailed) void refetch();
+                  if (masterLoadFailed) setMasterLoadVersion((value) => value + 1);
+                }}
+              >
+                {getProcurementText("retry", staffLocale)}
+              </button>
+            </div>
+          )}
+
           <section style={cardStyle}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
               <div>
-                <h2 style={sectionTitleStyle}>タンクID</h2>
-                <p style={sectionSubStyle}>1本ずつ追加してからまとめて保存します</p>
+                <h2 style={sectionTitleStyle}>{getProcurementText("tankId", staffLocale)}</h2>
+                <p style={sectionSubStyle}>{getProcurementText("tankIdHelp", staffLocale)}</p>
               </div>
               {tankIds.length > 0 && (
-                <span style={{ fontSize: 12, fontWeight: 800, color: accent }}>{tankIds.length}本</span>
+                <span style={{ fontSize: 12, fontWeight: 800, color: accent }}>
+                  {formatStaffTankCount(tankIds.length, staffLocale)}
+                </span>
               )}
             </div>
 
             <div style={{ display: "flex", gap: 8, marginBottom: 10 }}>
               <input
+                aria-label={getProcurementText("tankId", staffLocale)}
                 value={tankIdInput}
                 onChange={(e) => setTankIdInput(e.target.value)}
                 onKeyDown={(e) => {
@@ -254,7 +306,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
                 style={{ ...inputStyle, flex: 1, textTransform: "uppercase" }}
               />
               <button type="button" onClick={addTankId} style={smallButtonStyle(accent)}>
-                追加
+                {getProcurementText("add", staffLocale)}
               </button>
             </div>
 
@@ -283,7 +335,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
             )}
 
             {tankIds.length === 0 ? (
-              <div style={emptyStateStyle}>追加予定のタンクIDはまだありません</div>
+              <div style={emptyStateStyle}>{getProcurementText("noTankIds", staffLocale)}</div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                 {tankIds.map((tankId) => (
@@ -305,6 +357,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
                     </span>
                     <button
                       type="button"
+                      aria-label={formatRemoveTankLabel(tankId, staffLocale)}
                       onClick={() => removeTankId(tankId)}
                       style={{
                         border: "none",
@@ -316,7 +369,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
                         justifyContent: "center",
                       }}
                     >
-                      <Trash2 size={16} />
+                      <Trash2 size={16} aria-hidden="true" />
                     </button>
                   </div>
                 ))}
@@ -325,54 +378,56 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
           </section>
 
           <section style={cardStyle}>
-            <h2 style={sectionTitleStyle}>登録情報</h2>
-            <p style={sectionSubStyle}>購入・登録どちらでも共通の情報です</p>
+            <h2 style={sectionTitleStyle}>{getProcurementText("registrationInfo", staffLocale)}</h2>
+            <p style={sectionSubStyle}>{getProcurementText("registrationInfoHelp", staffLocale)}</p>
 
             <label style={labelStyle}>
-              タンク種別
+              {getProcurementText("tankType", staffLocale)}
               <select value={tankType} onChange={(e) => setTankType(e.target.value)} style={inputStyle} disabled={masterLoading}>
                 {tankTypeOptions.map((option) => (
                   <option key={option} value={option}>
-                    {option}
+                    {getTankTypeDisplayLabel(option, staffLocale)}
                   </option>
                 ))}
               </select>
             </label>
 
             <div style={fieldGroupStyle}>
-              <span style={fieldLabelStyle}>初期ステータス</span>
+              <span style={fieldLabelStyle}>{getProcurementText("initialStatus", staffLocale)}</span>
               <div style={chipRowStyle}>
                 {STATUS_OPTIONS.map((status) => (
                   <button
                     key={status}
                     type="button"
+                    aria-pressed={initialStatus === status}
                     onClick={() => setInitialStatus(status)}
                     style={toggleButtonStyle(initialStatus === status, accent, accentBg)}
                   >
-                    {getTankStatusLabel(status)}
+                    {getTankStatusLabel(status, staffLocale)}
                   </button>
                 ))}
               </div>
             </div>
 
             <div style={fieldGroupStyle}>
-              <span style={fieldLabelStyle}>保管場所</span>
+              <span style={fieldLabelStyle}>{getProcurementText("storageLocation", staffLocale)}</span>
               <div style={chipRowStyle}>
                 {LOCATION_OPTIONS.map((value) => (
                   <button
                     key={value}
                     type="button"
+                    aria-pressed={location === value}
                     onClick={() => setLocation(value)}
                     style={toggleButtonStyle(location === value, accent, accentBg)}
                   >
-                    {value}
+                    {getStaffLocationLabel(value, staffLocale)}
                   </button>
                 ))}
               </div>
             </div>
 
             <label style={labelStyle}>
-              次回耐圧期限
+              {getProcurementText("nextInspectionDue", staffLocale)}
               <input
                 type="date"
                 value={nextMaintenanceDate}
@@ -382,7 +437,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
             </label>
 
             <label style={labelStyle}>
-              メモ
+              {getProcurementText("note", staffLocale)}
               <textarea
                 value={note}
                 onChange={(e) => setNote(e.target.value)}
@@ -394,11 +449,11 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
 
           {isPurchase && (
             <section style={cardStyle}>
-              <h2 style={sectionTitleStyle}>費用計上</h2>
-              <p style={sectionSubStyle}>タンク購入のときだけ記録します</p>
+              <h2 style={sectionTitleStyle}>{getProcurementText("costDetails", staffLocale)}</h2>
+              <p style={sectionSubStyle}>{getProcurementText("costDetailsHelp", staffLocale)}</p>
 
               <label style={labelStyle}>
-                購入日
+                {getProcurementText("purchaseDate", staffLocale)}
                 <input
                   type="date"
                   value={purchaseDate}
@@ -408,17 +463,17 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
               </label>
 
               <label style={labelStyle}>
-                購入先
+                {getProcurementText("vendor", staffLocale)}
                 <input
                   value={vendor}
                   onChange={(e) => setVendor(e.target.value)}
-                  placeholder="仕入先名"
+                  placeholder={getProcurementText("vendorPlaceholder", staffLocale)}
                   style={inputStyle}
                 />
               </label>
 
               <label style={labelStyle}>
-                単価
+                {getProcurementText("unitCost", staffLocale)}
                 <input
                   inputMode="numeric"
                   value={unitCostInput}
@@ -440,9 +495,9 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
                   gap: 12,
                 }}
               >
-                <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>合計</span>
+                <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>{getProcurementText("total", staffLocale)}</span>
                 <span style={{ fontSize: 24, fontWeight: 900, color: "#0f172a", fontFamily: "ui-monospace, SFMono-Regular, monospace" }}>
-                  ¥{totalCost.toLocaleString()}
+                  {formatProcurementJpy(totalCost, staffLocale)}
                 </span>
               </div>
             </section>
@@ -450,6 +505,8 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
 
           {result && (
             <div
+              role={result.success ? "status" : "alert"}
+              aria-live="polite"
               style={{
                 marginBottom: 16,
                 padding: "14px 16px",
@@ -472,6 +529,7 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
             type="button"
             onClick={handleSubmit}
             disabled={!canSubmit || submitting}
+            aria-busy={submitting}
             style={{
               width: "100%",
               padding: "14px 0",
@@ -491,10 +549,8 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
           >
             {submitting ? <Loader2 size={18} style={{ animation: "spin 1s linear infinite" }} /> : isPurchase ? <Package size={18} /> : <Plus size={18} />}
             {submitting
-              ? "保存中..."
-              : isPurchase
-              ? `${tankIds.length}本を${submitLabel}`
-              : `${tankIds.length}本を${submitLabel}`}
+              ? getProcurementText("saving", staffLocale)
+              : formatTankEntrySubmit(mode, tankIds.length, staffLocale)}
           </button>
         </div>
       </div>
@@ -536,10 +592,6 @@ function todayInputValue(): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 const cardStyle: React.CSSProperties = {

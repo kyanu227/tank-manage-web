@@ -12,6 +12,12 @@ import {
   Undo2,
 } from "lucide-react";
 import { DashboardSectionLabel } from "@/features/staff-dashboard/components/DashboardSectionLabel";
+import {
+  formatDashboardActiveLogs,
+  formatDashboardSelectedCount,
+  getDashboardText,
+} from "@/features/staff-dashboard/i18n";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 
 export type DashboardHistoryEntryView = Readonly<{
   id: string;
@@ -64,6 +70,7 @@ export type DashboardLogsSectionProps = {
   onOpenEdit: (logId: string) => void;
   onOpenVoid: (logId: string) => void;
   onToggleHistory: (logId: string) => Promise<void>;
+  locale?: Locale;
 };
 
 export function DashboardLogsSection({
@@ -85,19 +92,20 @@ export function DashboardLogsSection({
   onOpenEdit,
   onOpenVoid,
   onToggleHistory,
+  locale = DEFAULT_LOCALE,
 }: DashboardLogsSectionProps) {
   return (
     <>
-      <DashboardSectionLabel icon={<Clock size={14} />} title="最近の操作ログ" />
+      <DashboardSectionLabel icon={<Clock size={14} />} title={getDashboardText("recentLogs", locale)} />
       <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 14, padding: "14px 16px" }}>
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
           <span style={{ fontSize: 11, fontWeight: 800, color: "#94a3b8", letterSpacing: "0.04em", flex: 1 }}>
-            直近 {activeLogCount} 件（active）
+            {formatDashboardActiveLogs(activeLogCount, locale)}
           </span>
           <button
             type="button"
             onClick={onToggleSort}
-            title={sortOrder === "desc" ? "新しい順 → 古い順に切替" : "古い順 → 新しい順に切替"}
+            title={getDashboardText(sortOrder === "desc" ? "newestToOldest" : "oldestToNewest", locale)}
             style={{
               border: "1px solid #e2e8f0",
               background: "#fff",
@@ -114,11 +122,12 @@ export function DashboardLogsSection({
             }}
           >
             {sortOrder === "desc" ? <ArrowDownWideNarrow size={13} /> : <ArrowUpNarrowWide size={13} />}
-            {sortOrder === "desc" ? "新しい順" : "古い順"}
+            {getDashboardText(sortOrder === "desc" ? "newestFirst" : "oldestFirst", locale)}
           </button>
           <button
             type="button"
             onClick={onToggleEditMode}
+            aria-pressed={isEditMode}
             style={{
               border: "1px solid #dbeafe",
               background: isEditMode ? "#eff6ff" : "#fff",
@@ -135,7 +144,7 @@ export function DashboardLogsSection({
             }}
           >
             {isEditMode ? <CheckSquare size={13} /> : <Edit2 size={13} />}
-            {isEditMode ? "完了" : "編集"}
+            {getDashboardText(isEditMode ? "done" : "edit", locale)}
           </button>
         </div>
 
@@ -154,13 +163,13 @@ export function DashboardLogsSection({
             }}
           >
             <span style={{ fontSize: 12, fontWeight: 800, color: "#334155", marginRight: 4 }}>
-              選択 {selectedCount} 件
+              {formatDashboardSelectedCount(selectedCount, locale)}
             </span>
             <button type="button" onClick={onSelectAll} style={miniActionButtonStyle()}>
-              全選択
+              {getDashboardText("selectAll", locale)}
             </button>
             <button type="button" onClick={onClearSelection} style={miniActionButtonStyle()}>
-              選択解除
+              {getDashboardText("clearSelection", locale)}
             </button>
             <button
               type="button"
@@ -168,7 +177,7 @@ export function DashboardLogsSection({
               disabled={bulkLocationDisabled}
               style={miniActionButtonStyle(bulkLocationDisabled)}
             >
-              貸出先変更
+              {getDashboardText("changeCustomer", locale)}
             </button>
             <button
               type="button"
@@ -176,7 +185,7 @@ export function DashboardLogsSection({
               disabled={bulkVoidDisabled}
               style={dangerMiniButtonStyle(bulkVoidDisabled)}
             >
-              一括取消
+              {getDashboardText("bulkVoid", locale)}
             </button>
             {bulkLocationUnavailableReason && (
               <span style={{ fontSize: 11, color: "#94a3b8" }}>
@@ -187,7 +196,9 @@ export function DashboardLogsSection({
         )}
 
         {rows.length === 0 ? (
-          <p style={{ fontSize: 13, color: "#cbd5e1", textAlign: "center", padding: 20 }}>ログがありません</p>
+          <p style={{ fontSize: 13, color: "#cbd5e1", textAlign: "center", padding: 20 }}>
+            {getDashboardText("noLogs", locale)}
+          </p>
         ) : (
           <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
             {rows.map((row) => (
@@ -198,7 +209,9 @@ export function DashboardLogsSection({
                       type="button"
                       onClick={() => onToggleSelection(row.id)}
                       disabled={!row.canModify}
-                      title={row.canModify ? "選択" : row.modifyDisabledReason ?? "期限外または対象外"}
+                      title={row.canModify ? getDashboardText("select", locale) : row.modifyDisabledReason ?? getDashboardText("unavailable", locale)}
+                      aria-label={`${getDashboardText("select", locale)} ${row.tankId}`}
+                      aria-pressed={row.isSelected}
                       className="dashboard-log-checkbox"
                       style={{
                         border: "none",
@@ -273,23 +286,28 @@ export function DashboardLogsSection({
                   {row.isTankLog && isEditMode ? (
                     <div className="dashboard-log-actions" style={{ display: "flex", gap: 4, flexWrap: "wrap", justifyContent: "flex-end" }}>
                       <IconTextButton
-                        label="ID変更"
+                        label={getDashboardText("changeId", locale)}
                         icon={<Edit2 size={13} />}
                         disabled={!row.canCorrect}
                         disabledReason={row.correctionDisabledReason ?? undefined}
+                        unavailableLabel={getDashboardText("unavailable", locale)}
                         onClick={() => onOpenEdit(row.id)}
                       />
                       <IconTextButton
-                        label="取消"
+                        label={getDashboardText("void", locale)}
                         icon={<Undo2 size={13} />}
                         disabled={!row.canModify}
                         disabledReason={row.modifyDisabledReason ?? undefined}
+                        unavailableLabel={getDashboardText("unavailable", locale)}
                         onClick={() => onOpenVoid(row.id)}
                       />
                       <IconTextButton
-                        label="履歴"
+                        label={getDashboardText("history", locale)}
                         icon={row.isExpanded ? <ChevronUp size={13} /> : <ChevronDown size={13} />}
                         onClick={() => onToggleHistory(row.id)}
+                        unavailableLabel={getDashboardText("unavailable", locale)}
+                        expanded={row.isExpanded}
+                        controls={`dashboard-log-history-${row.id}`}
                       />
                       {row.modifyDisabledReason && (
                         <span style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", alignSelf: "center" }}>
@@ -310,13 +328,16 @@ export function DashboardLogsSection({
                 </div>
 
                 {isEditMode && row.isExpanded && (
-                  <div style={{ borderTop: "1px solid #e2e8f0", background: "#fff", padding: 12 }}>
+                  <div
+                    id={`dashboard-log-history-${row.id}`}
+                    style={{ borderTop: "1px solid #e2e8f0", background: "#fff", padding: 12 }}
+                  >
                     {row.historyLoading ? (
-                      <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#94a3b8", fontSize: 12 }}>
-                        <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> 履歴を読み込み中...
+                      <div role="status" aria-live="polite" style={{ display: "flex", alignItems: "center", gap: 8, color: "#94a3b8", fontSize: 12 }}>
+                        <Loader2 size={14} style={{ animation: "spin 1s linear infinite" }} /> {getDashboardText("historyLoading", locale)}
                       </div>
                     ) : row.historyEntries.length === 0 ? (
-                      <p style={{ color: "#cbd5e1", fontSize: 12, margin: 0 }}>履歴がありません</p>
+                      <p style={{ color: "#cbd5e1", fontSize: 12, margin: 0 }}>{getDashboardText("noHistory", locale)}</p>
                     ) : (
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {row.historyEntries.map((revision) => (
@@ -371,12 +392,18 @@ function IconTextButton({
   icon,
   disabled,
   disabledReason,
+  unavailableLabel,
+  expanded,
+  controls,
   onClick,
 }: {
   label: string;
   icon: React.ReactNode;
   disabled?: boolean;
   disabledReason?: string;
+  unavailableLabel: string;
+  expanded?: boolean;
+  controls?: string;
   onClick: () => void;
 }) {
   return (
@@ -384,7 +411,9 @@ function IconTextButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      title={disabled ? disabledReason ?? "期限外または対象外" : label}
+      title={disabled ? disabledReason ?? unavailableLabel : label}
+      aria-expanded={expanded}
+      aria-controls={controls}
       style={{
         border: "1px solid #e2e8f0",
         background: disabled ? "#f8fafc" : "#fff",
