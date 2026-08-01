@@ -15,6 +15,7 @@ import {
   TANK_STATUS_LABELS,
 } from "../src/lib/tank-action-status-labels";
 import { TANK_RECOVERY_CONFIRMATION_TEXT } from "../src/lib/tank-recovery-confirmation-message";
+import { STAFF_OPERATION_ERROR_TEXT } from "../src/lib/staff-operation-error";
 import {
   findStaleBaselineFingerprints,
   findUnmanagedJapanese,
@@ -42,6 +43,7 @@ describe("staff locale dictionaries", () => {
     ["tank action labels", TANK_ACTION_LABELS],
     ["tank status labels", TANK_STATUS_LABELS],
     ["tank recovery confirmation", TANK_RECOVERY_CONFIRMATION_TEXT],
+    ["staff operation errors", STAFF_OPERATION_ERROR_TEXT],
   ])("keeps non-empty ja/en values in %s", (_name, table) => {
     Object.entries(table).forEach(([key, localized]) => {
       expect(Object.keys(localized).sort(), key).toEqual(["en", "ja"]);

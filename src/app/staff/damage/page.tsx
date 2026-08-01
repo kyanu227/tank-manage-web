@@ -15,7 +15,10 @@ import {
 import { submitDamageReport } from "@/features/maintenance/services/damage-workflow";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
-import { getStaffGenericErrorMessage } from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 import { getStaffOperationText } from "@/features/staff-operations/i18n";
 
 const ACCENT = "#ef4444";
@@ -82,10 +85,10 @@ export default function DamageReportPage() {
       setQueue([]);
       setNote("");
     } catch (e: unknown) {
-      console.error("submitDamageReport failed", e);
+      logStaffOperationError("submitDamageReport failed", e);
       setResult({
         success: false,
-        message: staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale),
+        message: getStaffOperationErrorMessage(e, staffLocale),
       });
     } finally {
       setSubmitting(false);
@@ -217,8 +220,4 @@ export default function DamageReportPage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

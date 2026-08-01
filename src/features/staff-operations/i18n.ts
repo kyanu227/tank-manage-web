@@ -54,16 +54,16 @@ export const STAFF_OPERATION_TEXT = {
   operationNotAllowed: { ja: "{status} は不可", en: "Not allowed from {status}" },
   customerRequired: { ja: "貸出先を選択してください。", en: "Select a customer." },
   operationFailure: {
-    ja: "操作に失敗しました。時間をおいて再度お試しください。",
-    en: "The operation failed. Please try again later.",
+    ja: "操作を完了できませんでした。問題が続く場合は管理者に連絡してください。",
+    en: "The operation could not be completed. Contact an administrator if the problem persists.",
   },
   approveConfirm: {
     ja: "{customerName} の受注を承認しますか？",
     en: "Approve the order for {customerName}?",
   },
   approvalFailure: {
-    ja: "受注を承認できませんでした。時間をおいて再度お試しください。",
-    en: "The order could not be approved. Please try again later.",
+    ja: "受注を承認できませんでした。問題が続く場合は管理者に連絡してください。",
+    en: "The order could not be approved. Contact an administrator if the problem persists.",
   },
   customerLinkRequired: {
     ja: "顧客に紐付いていない受注は承認できません。管理画面で紐付けてください。",
@@ -80,8 +80,8 @@ export const STAFF_OPERATION_TEXT = {
   },
   fulfillmentSuccess: { ja: "受注したタンクを貸し出しました", en: "The ordered tanks were lent successfully." },
   fulfillmentFailure: {
-    ja: "受注処理に失敗しました。時間をおいて再度お試しください。",
-    en: "Order fulfillment failed. Please try again later.",
+    ja: "受注処理を完了できませんでした。問題が続く場合は管理者に連絡してください。",
+    en: "Order fulfillment could not be completed. Contact an administrator if the problem persists.",
   },
   noOrders: { ja: "未対応の受注はありません", en: "There are no orders requiring action" },
   loadingOrders: { ja: "受注を読み込み中", en: "Loading orders" },
@@ -147,8 +147,8 @@ export const STAFF_OPERATION_TEXT = {
     en: "Processed {countLabel}.",
   },
   returnTagFailure: {
-    ja: "返却タグを処理できませんでした。時間をおいて再度お試しください。",
-    en: "The return tags could not be processed. Please try again later.",
+    ja: "返却タグを処理できませんでした。問題が続く場合は管理者に連絡してください。",
+    en: "The return tags could not be processed. Contact an administrator if the problem persists.",
   },
 } satisfies Record<string, LocalizedText>;
 

@@ -58,6 +58,7 @@ import {
   type InitialTransitionReviewStatus,
   type TransitionEnforcementMode,
   type TransitionPlan,
+  type TransitionPlanBlockCode,
 } from "./tank-transition-policy";
 import { getStaffLocale } from "@/hooks/useStaffSession";
 import {
@@ -70,6 +71,7 @@ import {
 
 export { MAX_ATOMIC_TANK_OPERATIONS } from "./tank-operation-limits";
 import { assertRecoveryConfirmationsMatchReplannedState } from "./tank-recovery-confirmation-validation";
+import { StaffOperationError } from "./staff-operation-error";
 
 /* ════════════════════════════════════════════
    型定義
@@ -284,13 +286,12 @@ export class TankRecoveryConfirmationRequiredError extends Error {
   }
 }
 
-export class StaleTankCycleError extends Error {
+export class StaleTankCycleError extends StaffOperationError {
   readonly name = "StaleTankCycleError";
-  readonly code = "stale_tank_cycle";
   readonly issues: readonly StaleTankCycleIssue[];
 
   constructor(issues: readonly StaleTankCycleIssue[]) {
-    super("タンクの貸出cycleが操作候補の作成後に変更されています。");
+    super("stale_tank_cycle");
     this.issues = Object.freeze(
       issues.map((issue) => Object.freeze({ ...issue })),
     );
@@ -485,7 +486,9 @@ async function commitPlannedOperations(
   const readStates = planned.map((op, index): ReadTankOperationState => {
     const tankSnap = tankSnaps[index];
     if (!tankSnap.exists()) {
-      throw new Error(`[${op.input.tankId}] タンクが存在しません`);
+      throw new StaffOperationError("tank_not_found", {
+        params: { tankId: op.input.tankId },
+      });
     }
 
     const tankData = tankSnap.data();
@@ -551,7 +554,13 @@ async function commitPlannedOperations(
       targetLocation: op.input.location ?? null,
     });
     if (!planResult.ok) {
-      throw new Error(`[${op.input.tankId}] ${planResult.reason}`);
+      throw createTransitionPlanError(
+        op.input.tankId,
+        planResult.code,
+        prevSnapshot.status,
+        requestedAction,
+        `[${op.input.tankId}] ${planResult.reason}`,
+      );
     }
     if (planResult.transitionAction !== expectedTransitionAction) {
       throw new Error(`[${op.input.tankId}] 表示操作と状態遷移操作が一致しません。`);
@@ -766,7 +775,9 @@ function requestRecoveryConfirmation(
 ): TankRecoveryConfirmation {
   const locale = getStaffLocale();
   if (typeof window === "undefined") {
-    throw new Error(getTankRecoveryText("browserRequired", locale));
+    throw new StaffOperationError("recovery_browser_required", {
+      message: getTankRecoveryText("browserRequired", locale),
+    });
   }
 
   error.requirements.forEach((requirement) => {
@@ -782,7 +793,9 @@ function requestRecoveryConfirmation(
       locale,
     ));
     if (!accepted) {
-      throw new Error(getTankRecoveryText("cancelled", locale));
+      throw new StaffOperationError("recovery_cancelled", {
+        message: getTankRecoveryText("cancelled", locale),
+      });
     }
   }
 
@@ -808,9 +821,12 @@ function assertRecoveryRequirementCanBeConfirmed(
     (step) => step.businessEffect === "rental_close",
   );
   if (!previousCustomerStep?.customerId?.trim() || !previousCustomerStep.customerName?.trim()) {
-    throw new Error(getTankRecoveryText("missingPreviousCustomer", locale, {
-      tankId: requirement.tankId,
-    }));
+    throw new StaffOperationError("recovery_previous_customer_missing", {
+      params: { tankId: requirement.tankId },
+      message: getTankRecoveryText("missingPreviousCustomer", locale, {
+        tankId: requirement.tankId,
+      }),
+    });
   }
 }
 
@@ -823,7 +839,9 @@ export async function applyLogCorrection(
 ): Promise<{ logId: string }> {
   const reason = input.reason.trim();
   if (reason.length < 5) {
-    throw new Error("理由は5文字以上で入力してください");
+    throw new StaffOperationError("reason_too_short", {
+      params: { minLength: 5 },
+    });
   }
   if (input.mode === "revert" && !input.sourceLogId) {
     throw new Error("復元元ログが指定されていません");
@@ -840,7 +858,7 @@ export async function applyLogCorrection(
     ]);
     const targetSnap = await tx.get(targetRef);
     if (!targetSnap.exists()) {
-      throw new Error("対象ログが存在しません");
+      throw new StaffOperationError("target_log_not_found");
     }
 
     const oldLog = targetSnap.data() as TankLogData;
@@ -850,24 +868,28 @@ export async function applyLogCorrection(
       throw new Error("対象ログのtransitionPlanを検証できません");
     }
     if (oldTransitionPlan.kind === "recovery") {
-      throw new Error("自動補完ログは直接編集できません。取消後に正しい操作を再実行してください");
+      throw new StaffOperationError("recovery_log_not_editable");
     }
     if (oldLog.transitionReviewStatus !== "not_required") {
       throw new Error("直接操作ログの集計状態が不正なため編集できません");
     }
     if (oldLog.supersededByLogId) {
-      throw new Error("このログはすでに置換されています");
+      throw new StaffOperationError("log_already_replaced");
     }
 
     const oldTankId = requireString(oldLog.tankId, "対象ログのtankId");
     const oldTankRef = doc(db, "tanks", oldTankId);
     const oldTankSnap = await tx.get(oldTankRef);
     if (!oldTankSnap.exists()) {
-      throw new Error(`[${oldTankId}] タンクが存在しません`);
+      throw new StaffOperationError("tank_not_found", {
+        params: { tankId: oldTankId },
+      });
     }
     const oldTankData = oldTankSnap.data();
     if (stringOrNull(oldTankData.latestLogId) !== input.targetLogId) {
-      throw new Error("最新の有効ログだけ編集できます");
+      throw new StaffOperationError("latest_log_required", {
+        message: "最新の有効ログだけ編集できます",
+      });
     }
 
     enforceCorrectionWindow(oldLog, input.editedByRole);
@@ -908,7 +930,9 @@ export async function applyLogCorrection(
     const newTankRef = sameTank ? oldTankRef : doc(db, "tanks", newTankId);
     const newTankSnap = sameTank ? oldTankSnap : await tx.get(newTankRef);
     if (!newTankSnap.exists()) {
-      throw new Error(`[${newTankId}] タンクが存在しません`);
+      throw new StaffOperationError("tank_not_found", {
+        params: { tankId: newTankId },
+      });
     }
 
     const prevSnapshot = sameTank
@@ -916,9 +940,14 @@ export async function applyLogCorrection(
       : snapshotFromTankData(newTankSnap.data());
 
     if (!validateTransitionCode(prevSnapshot.status, content.transitionAction)) {
-      throw new Error(
-        `[${newTankId}] ${transitionFailureReason(prevSnapshot.status, content.transitionAction)}`
-      );
+      throw new StaffOperationError("operation_not_allowed", {
+        params: {
+          tankId: newTankId,
+          status: prevSnapshot.status,
+          action: content.transitionAction,
+        },
+        message: `[${newTankId}] ${transitionFailureReason(prevSnapshot.status, content.transitionAction)}`,
+      });
     }
 
     const correctionPlanResult = planTankTransition({
@@ -934,13 +963,21 @@ export async function applyLogCorrection(
       targetLocation: content.location,
     });
     const expectedTransitionAction = normalizeTransitionAction(content.transitionAction);
+    if (!correctionPlanResult.ok) {
+      throw createTransitionPlanError(
+        newTankId,
+        correctionPlanResult.code,
+        prevSnapshot.status,
+        content.action,
+        `[${newTankId}] 訂正後の正規状態遷移を構成できません: ${correctionPlanResult.reason}`,
+      );
+    }
     if (
-      !correctionPlanResult.ok
-      || correctionPlanResult.plan.kind !== "direct"
+      correctionPlanResult.plan.kind !== "direct"
       || correctionPlanResult.transitionAction !== expectedTransitionAction
     ) {
       throw new Error(
-        `[${newTankId}] 訂正後の正規状態遷移を構成できません${correctionPlanResult.ok ? "" : `: ${correctionPlanResult.reason}`}`,
+        `[${newTankId}] 訂正後の正規状態遷移を構成できません`,
       );
     }
     const affectedCustomers = deriveAffectedCustomers(
@@ -1040,7 +1077,9 @@ export async function applyLogCorrection(
 export async function voidLog(input: VoidLogInput): Promise<void> {
   const reason = input.reason.trim();
   if (reason.length < 5) {
-    throw new Error("理由は5文字以上で入力してください");
+    throw new StaffOperationError("reason_too_short", {
+      params: { minLength: 5 },
+    });
   }
 
   const logRef = doc(db, "logs", input.logId);
@@ -1052,7 +1091,7 @@ export async function voidLog(input: VoidLogInput): Promise<void> {
       tx.get(aggregationRevisionRef),
     ]);
     if (!logSnap.exists()) {
-      throw new Error("対象ログが存在しません");
+      throw new StaffOperationError("target_log_not_found");
     }
 
     const log = logSnap.data() as TankLogData;
@@ -1063,10 +1102,14 @@ export async function voidLog(input: VoidLogInput): Promise<void> {
     const tankRef = doc(db, "tanks", tankId);
     const tankSnap = await tx.get(tankRef);
     if (!tankSnap.exists()) {
-      throw new Error(`[${tankId}] タンクが存在しません`);
+      throw new StaffOperationError("tank_not_found", {
+        params: { tankId },
+      });
     }
     if (stringOrNull(tankSnap.data().latestLogId) !== input.logId) {
-      throw new Error("最新の有効ログだけ取消できます");
+      throw new StaffOperationError("latest_log_required", {
+        message: "最新の有効ログだけ取消できます",
+      });
     }
 
     const prevSnapshot = requireTankSnapshot(log.prevTankSnapshot, "対象ログのprevTankSnapshot");
@@ -1274,7 +1317,7 @@ function resolveCarryOverCustomerProjection(
     return previousProjection;
   }
   if (customerProjection && previousProjection.customerId !== customerProjection.customerId) {
-    throw new Error("持ち越し操作の顧客情報が現在貸出先と一致しません");
+    throw new StaffOperationError("customer_mismatch");
   }
   return previousProjection;
 }
@@ -1567,10 +1610,10 @@ function sanitizeLogExtra(logExtra?: Record<string, unknown>): Record<string, un
 
 function assertActiveTankLog(log: TankLogData): void {
   if (log.logKind !== "tank") {
-    throw new Error("タンク操作ログだけ編集・取消できます");
+    throw new StaffOperationError("tank_log_required");
   }
   if (log.logStatus !== "active") {
-    throw new Error("有効なログだけ編集・取消できます");
+    throw new StaffOperationError("log_not_active");
   }
   if (!normalizeTransitionPlan(log.transitionPlan)) {
     throw new Error("transitionPlanを検証できないログは編集・取消できません");
@@ -1596,7 +1639,7 @@ function enforceCorrectionWindow(log: TankLogData, role: StaffCorrectionRole | u
     throw new Error("対象ログの作成日時を確認できません");
   }
   if (Date.now() - createdAt > CORRECTION_LIMIT_MS) {
-    throw new Error("一般スタッフは72時間を過ぎたログを編集・取消できません");
+    throw new StaffOperationError("correction_window_expired");
   }
 }
 
@@ -1767,8 +1810,42 @@ function assertNoDuplicateTankIds(inputs: TankOperationInput[]): void {
   for (const input of inputs) {
     const tankId = normalizeTankId(input.tankId);
     if (seen.has(tankId)) {
-      throw new Error(`[${tankId}] 同一タンクへの複数操作は一括処理できません`);
+      throw new StaffOperationError("duplicate_tank", {
+        params: { tankId },
+      });
     }
     seen.add(tankId);
   }
+}
+
+function createTransitionPlanError(
+  tankId: string,
+  code: TransitionPlanBlockCode,
+  status: TankStatusCode,
+  action: TankActionCode,
+  message: string,
+): Error {
+  if (code === "disposed") {
+    return new StaffOperationError("tank_disposed", {
+      params: { tankId },
+      message,
+    });
+  }
+  if (code === "missing_target_customer") {
+    return new StaffOperationError("customer_required", {
+      params: { tankId },
+      message,
+    });
+  }
+  if (
+    code === "strict_transition_required"
+    || code === "maintenance_direct_only"
+    || code === "no_recovery_recipe"
+  ) {
+    return new StaffOperationError("operation_not_allowed", {
+      params: { tankId, status, action },
+      message,
+    });
+  }
+  return new Error(message);
 }

@@ -12,6 +12,7 @@ import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { confirmPendingReturnRequests } from "@/lib/firebase/return-tag-processing-service";
 import type { Locale } from "@/lib/locale";
 import type { OperationActor } from "@/lib/operation-context";
+import { StaffOperationError } from "@/lib/staff-operation-error";
 import type { ReturnConfirmationSelectionMap, ReturnGroup } from "../types";
 import { useReturnTagProcessing } from "./useReturnTagProcessing";
 
@@ -161,4 +162,58 @@ describe("useReturnTagProcessing confirmation", () => {
       expect(alert).toHaveBeenCalledTimes(1);
     },
   );
+
+  it("renders a typed return-tag validation specifically in English without changing submission calls", async () => {
+    const group = createReturnGroup("unused");
+    const selections = createSelections("unused");
+    const error = new StaffOperationError("invalid_tank_id", {
+      params: { tankId: "BAD/01" },
+      message: "[BAD/01] タンクIDを入力してください",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    confirmPendingReturnRequestsMock.mockRejectedValueOnce(error);
+    const { result, setReturnConfirmationSubmitting } = HookHarness(
+      group,
+      selections,
+      "en",
+    );
+
+    await result.confirmSelectedReturnRequests();
+
+    expect(confirmPendingReturnRequestsMock).toHaveBeenCalledTimes(1);
+    expect(alert).toHaveBeenCalledWith(
+      "Tank ID BAD/01 is invalid. Review the tank number.",
+    );
+    expect(String(vi.mocked(alert).mock.calls[0][0])).not.toMatch(
+      /[\u3040-\u30ff\u3400-\u9fff]/u,
+    );
+    expect(setReturnConfirmationSubmitting.mock.calls.map(([value]) => value)).toEqual([
+      true,
+      false,
+    ]);
+    consoleError.mockRestore();
+  });
+
+  it("uses the return-tag scoped fallback for an unknown English failure", async () => {
+    const group = createReturnGroup("unused");
+    const selections = createSelections("unused");
+    const error = new Error("内部エラー");
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    confirmPendingReturnRequestsMock.mockRejectedValueOnce(error);
+    const { result } = HookHarness(group, selections, "en");
+
+    await result.confirmSelectedReturnRequests();
+
+    expect(consoleError).toHaveBeenCalledWith(
+      "Return tag processing failed",
+      error,
+    );
+    expect(alert).toHaveBeenCalledWith(
+      "The return tags could not be processed. Contact an administrator if the problem persists.",
+    );
+    expect(String(vi.mocked(alert).mock.calls[0][0])).not.toMatch(
+      /[\u3040-\u30ff\u3400-\u9fff]/u,
+    );
+    consoleError.mockRestore();
+  });
 });

@@ -75,9 +75,11 @@ describe("staff display mapping", () => {
   });
 
   it("uses a non-sensitive generic error in both locales", () => {
-    expect(getStaffGenericErrorMessage("ja")).toContain("失敗");
+    expect(getStaffGenericErrorMessage("ja")).toBe(
+      "操作を完了できませんでした。問題が続く場合は管理者に連絡してください。",
+    );
     expect(getStaffGenericErrorMessage("en")).toBe(
-      "The operation failed. Please try again later.",
+      "The operation could not be completed. Contact an administrator if the problem persists.",
     );
   });
 });

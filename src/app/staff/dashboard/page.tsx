@@ -52,7 +52,10 @@ import {
 } from "@/lib/tank-action-status-codes";
 import { getDashboardActionBadgeTone } from "@/lib/tank-action-status-display";
 import type { Locale } from "@/lib/locale";
-import { getStaffGenericErrorMessage } from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 
 interface EditForm {
   tankId: string | null;
@@ -243,10 +246,11 @@ export default function StaffDashboard() {
       setExpandedRootId(null);
       await refreshAfterCorrection();
     } catch (e: unknown) {
-      console.error("correctDashboardLogTankId failed", e);
+      logStaffOperationError("correctDashboardLogTankId failed", e);
+      const message = getStaffOperationErrorMessage(e, staffLocale);
       alert(staffLocale === "ja"
-        ? `${getDashboardText("correctionFailure", staffLocale)}: ${errorMessage(e)}`
-        : getStaffGenericErrorMessage(staffLocale));
+        ? `${getDashboardText("correctionFailure", staffLocale)}: ${message}`
+        : message);
     } finally {
       setSavingEdit(false);
     }
@@ -269,10 +273,11 @@ export default function StaffDashboard() {
       setExpandedRootId(null);
       await refreshAfterCorrection();
     } catch (e: unknown) {
-      console.error("voidDashboardLog failed", e);
+      logStaffOperationError("voidDashboardLog failed", e);
+      const message = getStaffOperationErrorMessage(e, staffLocale);
       alert(staffLocale === "ja"
-        ? `${getDashboardText("voidFailure", staffLocale)}: ${errorMessage(e)}`
-        : getStaffGenericErrorMessage(staffLocale));
+        ? `${getDashboardText("voidFailure", staffLocale)}: ${message}`
+        : message);
     } finally {
       setSavingVoid(false);
     }
@@ -345,8 +350,8 @@ export default function StaffDashboard() {
       }
       alert(formatDashboardUpdateSuccess(selectedLogs.length, staffLocale));
     } catch (e: unknown) {
-      console.error("correctDashboardLogLocations failed", e);
-      alert(staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale));
+      logStaffOperationError("correctDashboardLogLocations failed", e);
+      alert(getStaffOperationErrorMessage(e, staffLocale));
     } finally {
       setSavingBulkLocation(false);
     }
@@ -378,8 +383,8 @@ export default function StaffDashboard() {
       }
       alert(formatDashboardVoidSuccess(selectedLogs.length, staffLocale));
     } catch (e: unknown) {
-      console.error("voidDashboardLogs failed", e);
-      alert(staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale));
+      logStaffOperationError("voidDashboardLogs failed", e);
+      alert(getStaffOperationErrorMessage(e, staffLocale));
     } finally {
       setSavingBulkVoid(false);
     }
@@ -399,10 +404,8 @@ export default function StaffDashboard() {
       const entries = await fetchStaffDashboardLogHistory(rootId);
       setHistoryByRoot((prev) => ({ ...prev, [rootId]: entries }));
     } catch (e: unknown) {
-      console.error("fetchStaffDashboardLogHistory failed", e);
-      alert(staffLocale === "ja"
-        ? `${getDashboardText("historyFailure", staffLocale)}: ${errorMessage(e)}`
-        : getDashboardText("historyFailure", staffLocale));
+      logStaffOperationError("fetchStaffDashboardLogHistory failed", e);
+      alert(getDashboardText("historyFailure", staffLocale));
     } finally {
       setHistoryLoadingRoot(null);
     }
@@ -871,8 +874,4 @@ function actionBg(action?: string): string {
 
 function actionFg(action?: string): string {
   return getDashboardActionBadgeTone(action).color;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

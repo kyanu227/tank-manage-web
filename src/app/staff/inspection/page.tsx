@@ -19,7 +19,11 @@ import { submitInspectionCompletion } from "@/features/maintenance/services/insp
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import { useInspectionSettings } from "@/hooks/useInspectionSettings";
-import { formatStaffTankCount, getStaffGenericErrorMessage } from "@/lib/staff-display";
+import { formatStaffTankCount } from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 
 const ACCENT = "#8b5cf6"; // Violet
 const ACCENT_DARK = "#7c3aed";
@@ -129,10 +133,10 @@ export default function InspectionPage() {
       setSelectedIds(new Set());
       refetch();
     } catch (e: unknown) {
-      console.error("submitInspectionCompletion failed", e);
+      logStaffOperationError("submitInspectionCompletion failed", e);
       setResult({
         success: false,
-        message: staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale),
+        message: getStaffOperationErrorMessage(e, staffLocale),
       });
     } finally {
       setSubmitting(false);
@@ -436,8 +440,4 @@ export default function InspectionPage() {
       `}</style>
     </div>
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

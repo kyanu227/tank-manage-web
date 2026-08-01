@@ -14,6 +14,10 @@ import { tryParseTankId } from "@/lib/tank-id";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
 import type { CustomerSnapshot } from "@/lib/operation-context";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 import { planTankTransition } from "@/lib/tank-transition-policy";
 import {
   RETURN_TAG,
@@ -304,11 +308,11 @@ export function useManualTankOperation({
       setOpQueue([]);
       fetchData();
     } catch (e: unknown) {
-      const rawMessage = e && typeof e === "object" && "message" in e
-        ? String((e as { message: unknown }).message)
-        : undefined;
-      if (locale === "en") console.error("Manual staff operation failed", e);
-      alert(locale === "ja" ? `エラー: ${rawMessage}` : getStaffOperationText("operationFailure", locale));
+      logStaffOperationError("Manual staff operation failed", e);
+      const message = getStaffOperationErrorMessage(e, locale, {
+        unknownMessage: getStaffOperationText("operationFailure", locale),
+      });
+      alert(locale === "ja" ? `エラー: ${message}` : message);
     } finally {
       setSubmitting(false);
     }

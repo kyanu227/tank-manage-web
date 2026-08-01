@@ -20,6 +20,10 @@ import { tryParseTankId } from "@/lib/tank-id";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
 import { validateTransitionCode } from "@/lib/tank-rules";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 import type { ScannedTank, TankMap } from "../types";
 import { getStaffOperationText } from "../i18n";
 
@@ -123,8 +127,11 @@ export function useOrderFulfillment({
       await approveOrderTransaction(order.id, actor);
       await fetchOrders();
     } catch (err: unknown) {
-      if (locale === "en") console.error("Order approval failed", err);
-      alert(locale === "ja" ? `承認エラー: ${errorMessage(err)}` : getStaffOperationText("approvalFailure", locale));
+      logStaffOperationError("Order approval failed", err);
+      const message = getStaffOperationErrorMessage(err, locale, {
+        unknownMessage: getStaffOperationText("approvalFailure", locale),
+      });
+      alert(locale === "ja" ? `承認エラー: ${message}` : message);
     } finally {
       setApprovingOrderId(null);
     }
@@ -266,8 +273,11 @@ export function useOrderFulfillment({
       fetchOrders();
       fetchData();
     } catch (err: unknown) {
-      if (locale === "en") console.error("Order fulfillment failed", err);
-      alert(locale === "ja" ? `エラー: ${errorMessage(err)}` : getStaffOperationText("fulfillmentFailure", locale));
+      logStaffOperationError("Order fulfillment failed", err);
+      const message = getStaffOperationErrorMessage(err, locale, {
+        unknownMessage: getStaffOperationText("fulfillmentFailure", locale),
+      });
+      alert(locale === "ja" ? `エラー: ${message}` : message);
     } finally {
       setOrderSubmitting(false);
     }
@@ -296,8 +306,4 @@ export function useOrderFulfillment({
     removeScannedTank,
     fulfillOrder,
   };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

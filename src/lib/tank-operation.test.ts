@@ -12,13 +12,16 @@ import type {
 } from "@/lib/tank-transition-policy";
 import type { OperationActor } from "@/lib/operation-context";
 import {
+  applyLogCorrection,
   applyBulkTankOperations,
   applyTankOperation,
   StaleTankCycleError,
+  voidLog,
   type ExpectedTankCycle,
   type StaleTankCycleIssue,
   type TankOperationInput,
 } from "@/lib/tank-operation";
+import { StaffOperationError } from "@/lib/staff-operation-error";
 
 type PlanTankTransition = (
   request: TransitionPlanRequest,
@@ -239,6 +242,18 @@ function requireStaleError(
     expect(issue.field).toBe(issues[index]?.field);
     expect(issue.reason).toBe(issues[index]?.reason);
   });
+  return error;
+}
+
+function requireStaffOperationError(
+  error: unknown,
+  code: StaffOperationError["code"],
+): StaffOperationError {
+  expect(error).toBeInstanceOf(StaffOperationError);
+  if (!(error instanceof StaffOperationError)) {
+    throw new Error("StaffOperationError が返りませんでした");
+  }
+  expect(error.code).toBe(code);
   return error;
 }
 
@@ -778,11 +793,117 @@ describe("tank cycle guard", () => {
       location: "Customer B",
     })));
 
-    expect(error).toEqual(new Error(locale === "ja"
+    const operationError = requireStaffOperationError(error, "recovery_cancelled");
+    expect(operationError.message).toBe(locale === "ja"
       ? "自動補完操作をキャンセルしました。"
-      : "The recovery operation was cancelled."));
+      : "The recovery operation was cancelled.");
     expect(confirm).toHaveBeenCalledTimes(1);
     expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
+    expectNoWrites(recordedTransactions[0]!);
+  });
+
+  it.each(["ja", "en"] as const)("browser外のrecovery確認は%sのtyped messageを返しwriteしない", async (locale) => {
+    mocks.staffLocale = locale;
+    mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
+    setTankAttempts({
+      T001: tankData({
+        status: "empty",
+        customerId: null,
+        customerName: null,
+        location: "倉庫",
+      }),
+    });
+
+    const error = await captureError(applyTankOperation(operationInput({
+      transitionAction: "lend",
+      context: {
+        actor: ACTOR,
+        customer: {
+          customerId: "customer-002",
+          customerName: "Customer B",
+        },
+        source: "manual",
+        workflow: "tank_operation",
+      },
+      location: "Customer B",
+    })));
+
+    const operationError = requireStaffOperationError(
+      error,
+      "recovery_browser_required",
+    );
+    expect(operationError.message).toBe(locale === "ja"
+      ? "自動補完には画面上での現物確認が必要です。ブラウザから操作してください。"
+      : "Physical verification on screen is required for recovery. Run this operation in a browser.");
+    expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
+    expect(transactionCallbackCount).toBe(1);
+    expectNoWrites(recordedTransactions[0]!);
+  });
+
+  it.each(["ja", "en"] as const)("旧貸出先を表示できないrecoveryは%sのtyped messageを返しwriteしない", async (locale) => {
+    mocks.staffLocale = locale;
+    vi.stubGlobal("window", { confirm: vi.fn() });
+    const planned = mocks.actualPlanTankTransition?.({
+      policyMode: "advisory",
+      current: {
+        status: "lent",
+        customerId: "customer-001",
+        customerName: "Customer A",
+        location: "Customer A",
+      },
+      requestedAction: "lend",
+      targetCustomer: {
+        customerId: "customer-002",
+        customerName: "Customer B",
+      },
+      targetLocation: "Customer B",
+    });
+    if (!planned?.ok) throw new Error("recovery planを作成できませんでした");
+    mocks.planTankTransition.mockReturnValue({
+      ...planned,
+      plan: {
+        ...planned.plan,
+        steps: planned.plan.steps.map((step) => (
+          step.businessEffect === "rental_close"
+            ? { ...step, customerId: null, customerName: null }
+            : step
+        )),
+      },
+    });
+    setTankAttempts({
+      T001: tankData({
+        status: "lent",
+        customerId: "customer-001",
+        customerName: "Customer A",
+        location: "Customer A",
+      }),
+    });
+
+    const error = await captureError(applyTankOperation(operationInput({
+      transitionAction: "lend",
+      context: {
+        actor: ACTOR,
+        customer: {
+          customerId: "customer-002",
+          customerName: "Customer B",
+        },
+        source: "manual",
+        workflow: "tank_operation",
+      },
+      location: "Customer B",
+    })));
+
+    const operationError = requireStaffOperationError(
+      error,
+      "recovery_previous_customer_missing",
+    );
+    expect(operationError.params).toEqual({ tankId: "T001" });
+    expect(operationError.message).toBe(locale === "ja"
+      ? "[T001] 旧貸出先customerId/customerNameを表示できないため、自動補完を確認完了にできません。"
+      : "[T001] Recovery cannot be confirmed because the previous customer ID and name cannot be displayed.");
+    expect(window.confirm).toHaveBeenCalledTimes(0);
+    expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
+    expect(transactionCallbackCount).toBe(1);
     expectNoWrites(recordedTransactions[0]!);
   });
 
@@ -865,6 +986,36 @@ describe("tank cycle guard", () => {
     expect(stale.code).toBe("stale_tank_cycle");
     expect(stale.issues).toHaveLength(4);
     expect(mocks.planTankTransition).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("typed correction input validation", () => {
+  it.each([
+    [
+      "correction",
+      () => applyLogCorrection({
+        targetLogId: "log-001",
+        mode: "replace" as const,
+        reason: "abc",
+        editor: ACTOR,
+      }),
+    ],
+    [
+      "void",
+      () => voidLog({
+        logId: "log-001",
+        reason: "abc",
+        voider: ACTOR,
+      }),
+    ],
+  ])("%s reason_too_shortはtransactionを開始しない", async (_name, run) => {
+    const error = await captureError(run());
+
+    const operationError = requireStaffOperationError(error, "reason_too_short");
+    expect(operationError.message).toBe("理由は5文字以上で入力してください");
+    expect(operationError.params).toEqual({ minLength: 5 });
+    expect(mocks.runTransaction).toHaveBeenCalledTimes(0);
+    expect(transactionCallbackCount).toBe(0);
   });
 });
 

@@ -16,7 +16,11 @@ import {
 import { submitRepairCompletion } from "@/features/maintenance/services/repair-workflow";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
-import { formatStaffTankCount, getStaffGenericErrorMessage } from "@/lib/staff-display";
+import { formatStaffTankCount } from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 
 const ACCENT = "#0ea5e9"; // Sky
 const ACCENT_DARK = "#0284c7";
@@ -89,10 +93,10 @@ export default function RepairPage() {
       setSelectedIds(new Set());
       refetch();
     } catch (e: unknown) {
-      console.error("submitRepairCompletion failed", e);
+      logStaffOperationError("submitRepairCompletion failed", e);
       setResult({
         success: false,
-        message: staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale),
+        message: getStaffOperationErrorMessage(e, staffLocale),
       });
     } finally {
       setSubmitting(false);
@@ -378,8 +382,4 @@ export default function RepairPage() {
       `}</style>
     </div>
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -3,10 +3,11 @@
 import { useCallback, useMemo, useState } from "react";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import type { Locale } from "@/lib/locale";
+import { formatStaffTankCount } from "@/lib/staff-display";
 import {
-  formatStaffTankCount,
-  getStaffGenericErrorMessage,
-} from "@/lib/staff-display";
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import {
   StaleTankCycleError,
@@ -148,13 +149,14 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
       alert(completeMessage);
       fetchBulkTanks();
     } catch (e: unknown) {
+      logStaffOperationError("Bulk return failed", e);
       if (e instanceof StaleTankCycleError) {
         alert(formatStaleCycleAlert(e.issues, staffLocale));
       } else {
-        console.error("Bulk return failed", e);
-        alert(staffLocale === "ja"
-          ? `${BULK_RETURN_ERROR_TEXT.errorPrefix[staffLocale]}${errorMessage(e)}`
-          : getStaffGenericErrorMessage(staffLocale));
+        const message = getStaffOperationErrorMessage(e, staffLocale, {
+          unknownMessage: BULK_RETURN_ERROR_TEXT.bulkReturnFailure[staffLocale],
+        });
+        alert(`${BULK_RETURN_ERROR_TEXT.messagePrefix[staffLocale]}${message}`);
       }
     } finally {
       setReturning(prev => ({ ...prev, [groupKey]: false }));
@@ -189,14 +191,14 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   };
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
-
 const BULK_RETURN_ERROR_TEXT = {
-  errorPrefix: {
+  messagePrefix: {
     ja: "エラー: ",
-    en: "Error: ",
+    en: "",
+  },
+  bulkReturnFailure: {
+    ja: "一括返却を完了できませんでした。問題が続く場合は管理者に連絡してください。",
+    en: "Bulk return could not be completed. Contact an administrator if the problem persists.",
   },
   keepSelectionRentedOnly: {
     ja: "持ち越しは貸出中のタンクのみ選択できます。",

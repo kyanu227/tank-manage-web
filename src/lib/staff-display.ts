@@ -119,6 +119,6 @@ export function getStaffGenericErrorMessage(
   locale: Locale = DEFAULT_LOCALE,
 ): string {
   return locale === "ja"
-    ? "操作に失敗しました。時間をおいて再度お試しください。"
-    : "The operation failed. Please try again later.";
+    ? "操作を完了できませんでした。問題が続く場合は管理者に連絡してください。"
+    : "The operation could not be completed. Contact an administrator if the problem persists.";
 }
