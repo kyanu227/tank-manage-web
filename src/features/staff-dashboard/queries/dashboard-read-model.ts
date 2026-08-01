@@ -6,6 +6,7 @@ import type { TransactionDoc } from "@/lib/firebase/repositories/types";
 import type { Locale } from "@/lib/locale";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import {
+  LEGACY_UNKNOWN_TANK_STATUS_KEY,
   coerceTankActionCode,
   coerceTankStatusCode,
 } from "@/lib/tank-action-status-codes";
@@ -73,6 +74,14 @@ export type DashboardCustomerIdentitySummary = {
   isLegacy: boolean;
 };
 
+type DashboardCustomerIdentityAggregate =
+  DashboardCustomerIdentitySummary & {
+    sortKey: string;
+  };
+
+const LEGACY_UNKNOWN_CUSTOMER_KEY =
+  "legacy-location:__unknown__";
+
 export type DashboardTodayStats = {
   total: number;
   breakdown: Array<{
@@ -117,7 +126,7 @@ export function buildStaffDashboardReadModel(
     const status =
       coerceTankStatusCode(tank.status)
       ?? tank.status
-      ?? (locale === "ja" ? "不明" : "unknown");
+      ?? LEGACY_UNKNOWN_TANK_STATUS_KEY;
 
     counts[status] = (counts[status] || 0) + 1;
   });
@@ -132,7 +141,7 @@ export function buildStaffDashboardReadModel(
 
   const locationGroups = new Map<
     string,
-    DashboardCustomerIdentitySummary
+    DashboardCustomerIdentityAggregate
   >();
 
   tanks.forEach((tank) => {
@@ -157,7 +166,6 @@ export function buildStaffDashboardReadModel(
         currentCustomerName: customerId
           ? customerNameById.get(customerId)
           : undefined,
-        legacyUnknownLabel: locale === "ja" ? "未設定" : "Not set",
       },
     );
 
@@ -165,6 +173,9 @@ export function buildStaffDashboardReadModel(
       key: identity.key,
       customerId: identity.customerId,
       displayName: identity.displayName,
+      sortKey: identity.key === LEGACY_UNKNOWN_CUSTOMER_KEY
+        ? identity.key
+        : identity.displayName,
       lent: 0,
       unreturned: 0,
       total: 0,
@@ -185,8 +196,19 @@ export function buildStaffDashboardReadModel(
     .sort(
       (a, b) =>
         b.total - a.total
-        || a.displayName.localeCompare(b.displayName),
-    );
+        || a.sortKey.localeCompare(b.sortKey),
+    )
+    .map((group): DashboardCustomerIdentitySummary => ({
+      key: group.key,
+      customerId: group.customerId,
+      displayName: group.key === LEGACY_UNKNOWN_CUSTOMER_KEY
+        ? (locale === "ja" ? "未設定" : "Not set")
+        : group.displayName,
+      lent: group.lent,
+      unreturned: group.unreturned,
+      total: group.total,
+      isLegacy: group.isLegacy,
+    }));
 
   const now = new Date(nowMillis);
   const startOfDay = new Date(
@@ -222,7 +244,6 @@ export function buildStaffDashboardReadModel(
     .sort(
       (a, b) =>
         b.count - a.count
-        || a.action.localeCompare(b.action)
         || a.key.localeCompare(b.key),
     );
 
