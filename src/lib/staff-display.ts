@@ -1,0 +1,91 @@
+import { DEFAULT_LOCALE, type Locale } from "./locale";
+
+export type LocalizedText = Readonly<Record<Locale, string>>;
+
+export function getLocalizedText(
+  text: LocalizedText,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return text[locale];
+}
+
+const SYSTEM_LOCATION_LABELS = {
+  "倉庫": { ja: "倉庫", en: "Warehouse" },
+  "自社": { ja: "自社", en: "In-house" },
+} satisfies Record<string, LocalizedText>;
+
+export function getStaffLocationLabel(
+  value: string | null | undefined,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  const normalized = value?.trim();
+  if (!normalized) return locale === "ja" ? "未設定" : "Not set";
+  if (normalized in SYSTEM_LOCATION_LABELS) {
+    return SYSTEM_LOCATION_LABELS[
+      normalized as keyof typeof SYSTEM_LOCATION_LABELS
+    ][locale];
+  }
+  return value!;
+}
+
+export function formatStaffTankCount(
+  count: number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  if (locale === "ja") return `${count}本`;
+  return `${new Intl.NumberFormat("en-US").format(count)} ${count === 1 ? "tank" : "tanks"}`;
+}
+
+export function formatStaffItemCount(
+  count: number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  if (locale === "ja") return `${count}件`;
+  return `${new Intl.NumberFormat("en-US").format(count)} ${count === 1 ? "item" : "items"}`;
+}
+
+export function formatStaffDate(
+  value: Date | number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : "en-US", {
+    year: "numeric",
+    month: locale === "ja" ? "numeric" : "short",
+    day: "numeric",
+    timeZone: "Asia/Tokyo",
+  }).format(value);
+}
+
+export function formatStaffDateTime(
+  value: Date | number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : "en-US", {
+    year: "numeric",
+    month: locale === "ja" ? "numeric" : "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Tokyo",
+  }).format(value);
+}
+
+export function formatStaffJpy(
+  value: number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return new Intl.NumberFormat(locale === "ja" ? "ja-JP" : "en-US", {
+    style: "currency",
+    currency: "JPY",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+export function getStaffGenericErrorMessage(
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return locale === "ja"
+    ? "操作に失敗しました。時間をおいて再度お試しください。"
+    : "The operation failed. Please try again later.";
+}

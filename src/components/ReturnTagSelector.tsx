@@ -22,6 +22,7 @@ interface ReturnTagSelectorProps<T extends ReturnTagValue = ReturnTagValue> {
   swipeRightValue?: T;
   compact?: boolean;
   locale?: Locale;
+  ariaLabel?: string;
 }
 
 const TAG_STYLES: Record<Exclude<ReturnTagValue, "normal">, {
@@ -77,6 +78,7 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
   swipeRightValue,
   compact = false,
   locale = DEFAULT_LOCALE,
+  ariaLabel,
 }: ReturnTagSelectorProps<T>) {
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
   const suppressClickRef = useRef(false);
@@ -101,6 +103,8 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
 
   return (
     <div
+      role="group"
+      aria-label={ariaLabel ?? (locale === "ja" ? "返却タグ" : "Return tag")}
       onPointerDown={(event) => {
         if (!enableSwipe) return;
         pointerStart.current = { x: event.clientX, y: event.clientY };

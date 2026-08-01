@@ -10,6 +10,7 @@ import {
 import {
   findStaleBaselineFingerprints,
   findUnmanagedJapanese,
+  isLocaleManagedLine,
   listStaffI18nSourceFiles,
   readStaffI18nBaseline,
   scanStaffJapanese,
@@ -76,5 +77,11 @@ describe("staff Japanese residual enforcement", () => {
     if (baseline.strict) {
       expect(findStaleBaselineFingerprints(occurrences, baseline)).toEqual([]);
     }
+  });
+
+  it("recognizes only explicit ja dictionary and locale branches as managed copy", () => {
+    expect(isLocaleManagedLine('title: { ja: "見出し", en: "Heading" }')).toBe(true);
+    expect(isLocaleManagedLine('locale === "ja" ? "保存" : "Save"')).toBe(true);
+    expect(isLocaleManagedLine('<button>保存</button>')).toBe(false);
   });
 });

@@ -120,15 +120,26 @@ export function findUnmanagedJapanese(
   baseline: StaffI18nBaseline,
 ): StaffJapaneseOccurrence[] {
   const allowed = new Set(baseline.fingerprints);
-  return occurrences.filter((occurrence) => !allowed.has(occurrence.fingerprint));
+  return occurrences.filter(
+    (occurrence) => !isLocaleManagedLine(occurrence.text)
+      && !allowed.has(occurrence.fingerprint),
+  );
 }
 
 export function findStaleBaselineFingerprints(
   occurrences: readonly StaffJapaneseOccurrence[],
   baseline: StaffI18nBaseline,
 ): string[] {
-  const current = new Set(occurrences.map((occurrence) => occurrence.fingerprint));
+  const current = new Set(
+    occurrences
+      .filter((occurrence) => !isLocaleManagedLine(occurrence.text))
+      .map((occurrence) => occurrence.fingerprint),
+  );
   return baseline.fingerprints.filter((fingerprint) => !current.has(fingerprint));
+}
+
+export function isLocaleManagedLine(text: string): boolean {
+  return /(?:\bja\s*:|locale\s*={2,3}\s*["']ja["'])/u.test(text);
 }
 
 function walkSourceFiles(directory: string): string[] {
@@ -164,7 +175,10 @@ function writeCurrentBaseline(repositoryRoot: string): void {
   const baseline: StaffI18nBaseline = {
     version: 1,
     strict: false,
-    fingerprints: occurrences.map((occurrence) => occurrence.fingerprint).sort(),
+    fingerprints: occurrences
+      .filter((occurrence) => !isLocaleManagedLine(occurrence.text))
+      .map((occurrence) => occurrence.fingerprint)
+      .sort(),
   };
   writeFileSync(
     resolve(repositoryRoot, BASELINE_PATH),

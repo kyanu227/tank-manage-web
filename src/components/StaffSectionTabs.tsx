@@ -20,8 +20,9 @@ export interface StaffSectionTabItem {
 }
 
 interface StaffSectionTabsProps {
-  tabs: StaffSectionTabItem[];
+  tabs: readonly StaffSectionTabItem[];
   activeHref?: string;
+  ariaLabel?: string;
   fontSize?: number;
   iconSize?: number;
   /** 3タブ切替では履歴を増やしすぎないため replace 遷移を使う */
@@ -30,7 +31,7 @@ interface StaffSectionTabsProps {
   animationKey?: string;
 }
 
-function buildTabsSignature(tabs: StaffSectionTabItem[]) {
+function buildTabsSignature(tabs: readonly StaffSectionTabItem[]) {
   return JSON.stringify(tabs.map((tab) => tab.matchHrefs ?? [tab.href]));
 }
 
@@ -46,6 +47,7 @@ function findTabIndexFromSignature(tabsSignature: string, href: string) {
 export default function StaffSectionTabs({
   tabs,
   activeHref,
+  ariaLabel,
   fontSize = 12,
   iconSize = 14,
   replace = false,
@@ -196,7 +198,8 @@ export default function StaffSectionTabs({
   const renderedIndicatorPosition = activeIndex >= 0 && tabCount > 0 ? indicatorPosition : null;
 
   return (
-    <div
+    <nav
+      aria-label={ariaLabel}
       style={{
         padding: "12px 16px",
         background: "rgba(255,255,255,0.8)",
@@ -247,21 +250,26 @@ export default function StaffSectionTabs({
               key={tab.href}
               href={tab.href}
               replace={replace}
+              aria-current={active ? "page" : undefined}
               style={{
                 flex: 1,
+                minWidth: 0,
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 position: "relative",
                 zIndex: 1,
                 gap: 6,
-                padding: "8px 0",
+                padding: "8px 4px",
                 borderRadius: 10,
                 textDecoration: "none",
                 background: showFallbackActive ? "#fff" : "transparent",
                 color: active ? tab.color : "#94a3b8",
                 fontWeight: active ? 800 : 600,
                 fontSize,
+                lineHeight: 1.2,
+                textAlign: "center",
+                overflowWrap: "anywhere",
                 transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
                 boxShadow: showFallbackActive ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
               }}
@@ -272,6 +280,6 @@ export default function StaffSectionTabs({
           );
         })}
       </div>
-    </div>
+    </nav>
   );
 }

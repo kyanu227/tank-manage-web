@@ -10,19 +10,41 @@ import {
 import StaffAuthGuard from "@/components/StaffAuthGuard";
 import { PROCUREMENT_PATHS } from "@/features/procurement/constants";
 import { usePendingOrderCount } from "@/hooks/usePendingOrderCount";
+import { useStaffLocale } from "@/hooks/useStaffSession";
 import { useTankOperationPolicy } from "@/hooks/useTankOperationPolicy";
+import type { LocalizedText } from "@/lib/staff-display";
+import type { Locale } from "@/lib/locale";
 
 /* ── Side menu ──
    破損報告/修理完了/耐圧検査完了の3画面は「メンテナンス」グループとして
    /staff/damage を代表パスにする。3画面の切替は共通タブ (MaintenanceTabs) で行う。*/
 const SIDE_NAV = [
-  { href: "/staff/lend",      label: "操作 (貸出/返却/充填)", icon: Hand },
-  { href: "/staff/inhouse",   label: "自社管理",       icon: Building2 },
-  { href: "/staff/damage",    label: "メンテナンス",   icon: Wrench },
-  { href: "/staff/dashboard", label: "ダッシュボード", icon: LayoutDashboard },
-  { href: "/staff/supply-order", label: "発注/タンク登録", icon: ShoppingCart },
-  { href: "/staff/mypage",    label: "マイページ",     icon: User },
-];
+  { href: "/staff/lend", label: { ja: "操作 (貸出/返却/充填)", en: "Operations (Lend / Return / Fill)" }, icon: Hand },
+  { href: "/staff/inhouse", label: { ja: "自社管理", en: "In-house" }, icon: Building2 },
+  { href: "/staff/damage", label: { ja: "メンテナンス", en: "Maintenance" }, icon: Wrench },
+  { href: "/staff/dashboard", label: { ja: "ダッシュボード", en: "Dashboard" }, icon: LayoutDashboard },
+  { href: "/staff/supply-order", label: { ja: "発注/タンク登録", en: "Orders / Tank entry" }, icon: ShoppingCart },
+  { href: "/staff/mypage", label: { ja: "マイページ", en: "My page" }, icon: User },
+] satisfies Array<{ href: string; label: LocalizedText; icon: typeof Hand }>;
+
+const LAYOUT_TEXT = {
+  openMenu: { ja: "メニューを開く", en: "Open menu" },
+  closeMenu: { ja: "メニューを閉じる", en: "Close menu" },
+  navigation: { ja: "スタッフメニュー", en: "Staff menu" },
+  pendingOrdersTitle: { ja: "未処理の受注があります", en: "Customer orders are waiting" },
+  pendingOrders: { ja: "受注", en: "Orders" },
+  inhouse: { ja: "自社管理", en: "In-house" },
+  manual: { ja: "手動", en: "Manual" },
+  order: { ja: "受注", en: "Orders" },
+  policyError: {
+    ja: "方針を取得できないため厳格モードで動作します",
+    en: "The policy could not be loaded. Strict mode is active.",
+  },
+  advisory: {
+    ja: "自動補完モード中：不一致操作は現物確認後に正規手順へ展開し、管理者レビューまで正式集計を保留します",
+    en: "Automatic recovery mode: mismatched operations are expanded into the valid sequence after physical verification and remain excluded from official totals until administrator review.",
+  },
+} satisfies Record<string, LocalizedText>;
 
 // 操作ページ（貸出/返却/充填）配下の判定
 const OPS_PATHS = ["/staff/lend", "/staff/return", "/staff/fill"];
@@ -31,7 +53,11 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const pathname = usePathname();
   const [menuOpen, setMenuOpen] = useState(false);
   const mainRef = useRef<HTMLElement | null>(null);
+  const menuButtonRef = useRef<HTMLButtonElement | null>(null);
+  const drawerRef = useRef<HTMLDivElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
   const pendingOrderCount = usePendingOrderCount();
+  const locale = useStaffLocale();
 
   // iOS: 前画面のキーボードでズレたビューポートを強制リセット（スクロールロック画面のため手動では戻せない）
   useEffect(() => {
@@ -59,9 +85,46 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
     window.dispatchEvent(new CustomEvent("opStyleChange", { detail: style }));
   }, []);
 
+  useEffect(() => {
+    if (!menuOpen) return;
+    previousFocusRef.current = document.activeElement as HTMLElement | null;
+    const drawer = drawerRef.current;
+    const focusableSelector = "a[href], button:not([disabled]), [tabindex]:not([tabindex='-1'])";
+    const focusable = () => Array.from(
+      drawer?.querySelectorAll<HTMLElement>(focusableSelector) ?? [],
+    );
+    focusable()[0]?.focus();
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setMenuOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const items = focusable();
+      if (items.length === 0) return;
+      const first = items[0];
+      const last = items.at(-1)!;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocusRef.current?.focus();
+      previousFocusRef.current = null;
+    };
+  }, [menuOpen]);
+
   return (
     <StaffAuthGuard>
-      <div style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "#f8f9fb", paddingBottom: "env(safe-area-inset-bottom)" }}>
+      <div lang={locale} style={{ display: "flex", flexDirection: "column", height: "100dvh", overflow: "hidden", background: "#f8f9fb", paddingBottom: "env(safe-area-inset-bottom)" }}>
         {/* Dynamic Island 等のノッチ端末でのみ高さを持つスペーサー。ヘッダー背景と一致させる */}
         <div
           aria-hidden="true"
@@ -74,16 +137,22 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
         {/* Header */}
         <header
           style={{
-            height: 56, flexShrink: 0,
+            minHeight: 56, flexShrink: 0,
             background: "rgba(255,255,255,0.9)",
             backdropFilter: "blur(12px)",
             WebkitBackdropFilter: "blur(12px)",
             borderBottom: "1px solid #e8eaed",
             display: "flex", alignItems: "center",
-            padding: "0 16px", zIndex: 30,
+            padding: "8px 16px", zIndex: 30,
+            flexWrap: "wrap", rowGap: 6,
           }}
         >
           <button
+            ref={menuButtonRef}
+            type="button"
+            aria-controls="staff-menu-drawer"
+            aria-label={LAYOUT_TEXT.openMenu[locale]}
+            aria-expanded={menuOpen}
             onClick={() => setMenuOpen(true)}
             style={{
               width: 36, height: 36, borderRadius: 8,
@@ -98,7 +167,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
           {pendingOrderCount !== null && pendingOrderCount > 0 && (
             <Link
               href="/staff/lend"
-              title="未処理の受注があります"
+              title={LAYOUT_TEXT.pendingOrdersTitle[locale]}
               style={{
                 display: "flex", alignItems: "center", gap: 6,
                 padding: "6px 10px", borderRadius: 8,
@@ -111,7 +180,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
               }}
             >
               <Inbox size={14} />
-              受注 {pendingOrderCount}
+              {LAYOUT_TEXT.pendingOrders[locale]} {pendingOrderCount}
             </Link>
           )}
           <Link
@@ -126,17 +195,19 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             }}
           >
             <Building2 size={14} />
-            自社管理
+            {LAYOUT_TEXT.inhouse[locale]}
           </Link>
           {isLendPage && (
             <div style={{ display: "flex", background: "#f1f5f9", borderRadius: 10, padding: 3 }}>
               {([
-                { id: "manual" as const, label: "手動" },
-                { id: "order" as const, label: "受注" },
+                { id: "manual" as const, label: LAYOUT_TEXT.manual[locale] },
+                { id: "order" as const, label: LAYOUT_TEXT.order[locale] },
               ]).map(({ id, label }) => {
                 const active = opStyle === id;
                 return (
                   <button
+                    type="button"
+                    aria-pressed={active}
                     key={id}
                     onClick={() => toggleOpStyle(id)}
                     style={{
@@ -155,30 +226,44 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
           )}
         </header>
 
-        <TankOperationPolicyBanner />
+        <TankOperationPolicyBanner locale={locale} />
 
         {/* Slide-over menu */}
         {menuOpen && (
-          <div onClick={() => setMenuOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 40 }} />
+          <button
+            type="button"
+            aria-label={LAYOUT_TEXT.closeMenu[locale]}
+            tabIndex={-1}
+            onClick={() => setMenuOpen(false)}
+            style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.3)", zIndex: 40, border: "none", padding: 0 }}
+          />
         )}
         <div
+          ref={drawerRef}
+          id="staff-menu-drawer"
+          role="dialog"
+          aria-modal={menuOpen || undefined}
+          aria-label={LAYOUT_TEXT.navigation[locale]}
+          aria-hidden={!menuOpen}
+          inert={!menuOpen}
           style={{
-            position: "fixed", top: 0, left: 0, bottom: 0, width: 280,
+            position: "fixed", top: 0, left: 0, bottom: 0, width: "min(280px, 100vw)",
             background: "#fff", zIndex: 50, borderRight: "1px solid #e8eaed",
             transform: menuOpen ? "translateX(0)" : "translateX(-100%)",
             transition: "transform 0.25s ease",
             display: "flex", flexDirection: "column",
             paddingTop: "env(safe-area-inset-top)",
             paddingBottom: "env(safe-area-inset-bottom)",
+            pointerEvents: menuOpen ? "auto" : "none",
           }}
         >
           <div style={{ padding: "20px 24px", borderBottom: "1px solid #e8eaed", display: "flex", alignItems: "center", justifyContent: "flex-end", minHeight: 56 }}>
-            <button onClick={() => setMenuOpen(false)}
+            <button type="button" aria-label={LAYOUT_TEXT.closeMenu[locale]} onClick={() => setMenuOpen(false)}
               style={{ width: 32, height: 32, borderRadius: 8, border: "none", background: "#f1f5f9", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", color: "#64748b" }}>
               <X size={16} />
             </button>
           </div>
-          <nav style={{ flex: 1, padding: "8px 8px", overflowY: "auto" }}>
+          <nav aria-label={LAYOUT_TEXT.navigation[locale]} style={{ flex: 1, padding: "8px 8px", overflowY: "auto" }}>
             {SIDE_NAV.map((item) => {
               const Icon = item.icon;
               // 複数URLを束ねるグループナビは個別判定
@@ -197,6 +282,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
                   key={item.href}
                   href={item.href}
                   onClick={() => setMenuOpen(false)}
+                  aria-current={active ? "page" : undefined}
                   style={{
                     display: "flex", alignItems: "center", gap: 12,
                     padding: "10px 16px", borderRadius: 10, textDecoration: "none",
@@ -207,7 +293,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
                   }}
                 >
                   <Icon size={16} />
-                  <span>{item.label}</span>
+                  <span style={{ minWidth: 0, lineHeight: 1.3 }}>{item.label[locale]}</span>
                 </Link>
               );
             })}
@@ -235,7 +321,7 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   );
 }
 
-function TankOperationPolicyBanner() {
+function TankOperationPolicyBanner({ locale }: { locale: Locale }) {
   const { runtimeTransitionEnforcement, loading, error } = useTankOperationPolicy();
   if (loading) return null;
 
@@ -257,7 +343,7 @@ function TankOperationPolicyBanner() {
           fontWeight: 700,
         }}
       >
-        <AlertTriangle size={14} /> 方針を取得できないため厳格モードで動作します
+        <AlertTriangle size={14} /> {LAYOUT_TEXT.policyError[locale]}
       </div>
     );
   }
@@ -282,7 +368,7 @@ function TankOperationPolicyBanner() {
       }}
     >
       <AlertTriangle size={14} />
-      自動補完モード中：不一致操作は現物確認後に正規手順へ展開し、管理者レビューまで正式集計を保留します
+      {LAYOUT_TEXT.advisory[locale]}
     </div>
   );
 }
