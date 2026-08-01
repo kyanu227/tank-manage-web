@@ -34,9 +34,12 @@ import {
 } from "@/features/procurement/i18n";
 import {
   formatStaffTankCount,
-  getStaffGenericErrorMessage,
   getStaffLocationLabel,
 } from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 
 const DEFAULT_TANK_TYPES = ["スチール 10L", "スチール 12L", "アルミ"];
 const LOCATION_OPTIONS = ["倉庫", "自社"];
@@ -194,10 +197,10 @@ export default function TankEntryScreen({ mode }: TankEntryScreenProps) {
         message: formatTankEntrySuccess(mode, outcome.count, outcome.totalCost, staffLocale),
       });
     } catch (error) {
-      console.error("submitTankEntryBatch failed", error);
+      logStaffOperationError("submitTankEntryBatch failed", error);
       setResult({
         success: false,
-        message: staffLocale === "ja" ? errorMessage(error) : getStaffGenericErrorMessage(staffLocale),
+        message: getStaffOperationErrorMessage(error, staffLocale),
       });
     } finally {
       setSubmitting(false);
@@ -589,10 +592,6 @@ function todayInputValue(): string {
   const month = String(date.getMonth() + 1).padStart(2, "0");
   const day = String(date.getDate()).padStart(2, "0");
   return `${year}-${month}-${day}`;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 const cardStyle: React.CSSProperties = {

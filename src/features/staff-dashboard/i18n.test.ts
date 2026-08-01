@@ -20,6 +20,7 @@ import {
   formatDashboardTankId,
   formatDashboardTankStatusLabel,
 } from "./i18n";
+import { StaffOperationError } from "@/lib/staff-operation-error";
 
 const JAPANESE_TEXT = /[\u3040-\u30ff\u3400-\u9fff]/u;
 
@@ -83,9 +84,26 @@ describe("staff dashboard i18n", () => {
   });
 
   it("does not expose raw partial failure details in English", () => {
-    const message = formatDashboardPartialFailure("void", ["内部エラー"], "en");
+    const message = formatDashboardPartialFailure("void", [{
+      tankId: "A-01",
+      error: new Error("内部エラー: projects/secret/databases/internal"),
+    }], "en");
     expect(message).not.toMatch(JAPANESE_TEXT);
     expect(message).not.toContain("内部エラー");
+    expect(message).not.toContain("projects/");
+    expect(message).toContain("Contact an administrator");
     expect(formatDashboardDateTime(new Date(2026, 6, 25, 10, 5), "ja")).toBe("7/25 10:05");
+  });
+
+  it("keeps a typed partial failure specific in English", () => {
+    const message = formatDashboardPartialFailure("location", [{
+      tankId: "A-01",
+      error: new StaffOperationError("reason_too_short", {
+        params: { minLength: 5 },
+      }),
+    }], "en");
+
+    expect(message).toContain("A-01: Enter a reason of at least 5 characters.");
+    expect(message).not.toMatch(JAPANESE_TEXT);
   });
 });

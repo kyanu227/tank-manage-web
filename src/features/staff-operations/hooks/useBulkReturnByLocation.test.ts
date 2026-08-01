@@ -13,6 +13,7 @@ import {
 } from "@/hooks/useStaffSession";
 import type { Locale } from "@/lib/locale";
 import type { OperationActor } from "@/lib/operation-context";
+import { StaffOperationError } from "@/lib/staff-operation-error";
 import { StaleTankCycleError } from "@/lib/tank-operation";
 import {
   fetchBulkReturnCandidates,
@@ -359,7 +360,7 @@ describe("useBulkReturnByLocation submission guard", () => {
 
     expect(consoleError).toHaveBeenCalledWith("Bulk return failed", rawError);
     expect(alert).toHaveBeenCalledWith(
-      "The operation failed. Please try again later.",
+      "Bulk return could not be completed. Contact an administrator if the problem persists.",
     );
     expect(String(vi.mocked(alert).mock.calls[0][0])).not.toContain("customerId");
     expect(String(vi.mocked(alert).mock.calls[0][0])).not.toContain("内部エラー");
@@ -375,7 +376,32 @@ describe("useBulkReturnByLocation submission guard", () => {
 
     await result.handleBulkReturnForGroup(GROUP_KEY);
 
-    expect(alert).toHaveBeenCalledWith("エラー: 業務エラー");
+    expect(alert).toHaveBeenCalledWith(
+      "エラー: 業務エラー",
+    );
+    expect(fetchBulkReturnCandidatesMock).not.toHaveBeenCalled();
+    consoleError.mockRestore();
+  });
+
+  it("英語 locale のknown operation validationは具体的に表示する", async () => {
+    localeState.current = "en";
+    const error = new StaffOperationError("operation_not_allowed", {
+      params: { tankId: "BLOCKED-01", status: "filled", action: "return" },
+      message: "[BLOCKED-01] 現在の状態では返却できません",
+    });
+    const consoleError = vi.spyOn(console, "error").mockImplementation(() => {});
+    submitBulkReturnGroupMock.mockRejectedValueOnce(error);
+    const { result } = HookHarness([makeTank("BLOCKED-01")]);
+
+    await result.handleBulkReturnForGroup(GROUP_KEY);
+
+    expect(submitBulkReturnGroupMock).toHaveBeenCalledTimes(1);
+    expect(alert).toHaveBeenCalledWith(
+      "Tank BLOCKED-01 cannot run Return while its status is Filled.",
+    );
+    expect(String(vi.mocked(alert).mock.calls[0][0])).not.toMatch(
+      /[\u3040-\u30ff\u3400-\u9fff]/u,
+    );
     expect(fetchBulkReturnCandidatesMock).not.toHaveBeenCalled();
     consoleError.mockRestore();
   });

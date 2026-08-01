@@ -1,5 +1,6 @@
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
-import { formatStaffTankCount, getStaffGenericErrorMessage, type LocalizedText } from "@/lib/staff-display";
+import { formatStaffTankCount, type LocalizedText } from "@/lib/staff-display";
+import { getStaffOperationErrorMessage } from "@/lib/staff-operation-error";
 
 export const INHOUSE_TEXT = {
   sending: { ja: "送信中…", en: "Sending…" },
@@ -46,6 +47,6 @@ export function formatReturnTagAriaLabel(tankId: string, locale: Locale): string
 }
 
 export function formatInHouseError(error: unknown, locale: Locale): string {
-  if (locale === "ja") return `エラー: ${error instanceof Error ? error.message : String(error)}`;
-  return getStaffGenericErrorMessage(locale);
+  const message = getStaffOperationErrorMessage(error, locale);
+  return locale === "ja" ? `エラー: ${message}` : message;
 }

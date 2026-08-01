@@ -16,7 +16,10 @@ import {
 import { submitSupplyOrder } from "@/lib/firebase/supply-order";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { listOrderItems, type OrderMasterItem } from "@/lib/firebase/order-master-settings";
-import { getStaffGenericErrorMessage } from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 
 interface CartItem { uid: string; name: string; count: number; price: number; }
 
@@ -78,12 +81,10 @@ export default function SupplyOrderPage() {
       setResult({ success: true, message: formatSupplyOrderSuccess(cart.length, total, staffLocale) });
       setCart([]);
     } catch (e: unknown) {
-      console.error("submitSupplyOrder failed", e);
+      logStaffOperationError("submitSupplyOrder failed", e);
       setResult({
         success: false,
-        message: staffLocale === "ja"
-          ? e instanceof Error ? e.message : String(e)
-          : getStaffGenericErrorMessage(staffLocale),
+        message: getStaffOperationErrorMessage(e, staffLocale),
       });
     } finally {
       setSubmitting(false);

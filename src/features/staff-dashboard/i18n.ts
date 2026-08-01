@@ -10,6 +10,7 @@ import {
   getLegacyTankStatusLabel,
 } from "@/lib/tank-action-status-labels";
 import { coerceTankLogActionCode } from "@/lib/tank-action-status-codes";
+import { getStaffOperationErrorMessage } from "@/lib/staff-operation-error";
 
 export const DASHBOARD_TEXT = {
   dashboard: { ja: "ダッシュボード", en: "Dashboard" },
@@ -162,14 +163,18 @@ export function formatDashboardVoidSuccess(count: number, locale: Locale): strin
 
 export function formatDashboardPartialFailure(
   kind: "location" | "void",
-  failures: readonly string[],
+  failures: readonly Readonly<{ tankId: string; error: unknown }>[],
   locale: Locale,
 ): string {
-  if (locale === "ja" && kind === "location") return `貸出先変更は一部失敗しました。\n${failures.join("\n")}`;
-  if (locale === "ja") return `一括取消は一部失敗しました。\n${failures.join("\n")}`;
-  return kind === "location"
-    ? "Some customer changes failed. Refresh and try again."
-    : "Some logs could not be voided. Refresh and try again.";
+  const details = failures.map(({ tankId, error }) => (
+    `${tankId}: ${getStaffOperationErrorMessage(error, locale)}`
+  )).join("\n");
+  if (locale === "ja" && kind === "location") return `貸出先変更は一部失敗しました。\n${details}`;
+  if (locale === "ja") return `一括取消は一部失敗しました。\n${details}`;
+  const summary = kind === "location"
+    ? "Some customer changes could not be completed."
+    : "Some logs could not be voided.";
+  return `${summary}\n${details}`;
 }
 
 export function formatDashboardTankCount(count: number, locale: Locale): string {

@@ -20,9 +20,12 @@ import {
 } from "@/lib/tank-transition-projections";
 import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
 import {
-  getStaffLocaleSaveFailureMessage,
   getStaffLocaleSaveSuccessMessage,
 } from "@/lib/operation-messages";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 import {
   formatMyPageTime,
   formatMyPageLocation,
@@ -164,10 +167,8 @@ export default function MyPage() {
       setSelectedLocale(result.locale);
       setLocaleMessage(getStaffLocaleSaveSuccessMessage(result.locale));
     } catch (e) {
-      console.error("updateOwnStaffLocale failed", e);
-      setLocaleError(currentLocale === "ja" && e instanceof Error
-        ? e.message
-        : getStaffLocaleSaveFailureMessage(currentLocale));
+      logStaffOperationError("updateOwnStaffLocale failed", e);
+      setLocaleError(getStaffOperationErrorMessage(e, currentLocale));
     } finally {
       setLocaleSaving(false);
     }

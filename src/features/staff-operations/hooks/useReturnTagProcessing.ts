@@ -4,6 +4,10 @@ import { useCallback, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 import { formatStaffCount } from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 import { confirmPendingReturnRequests } from "@/lib/firebase/return-tag-processing-service";
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import type { PendingReturn, ReturnConfirmationSelectionMap, ReturnGroup } from "../types";
@@ -96,8 +100,11 @@ export function useReturnTagProcessing({
       fetchPendingReturnTags();
       fetchBulkTanks();
     } catch (e: unknown) {
-      if (locale === "en") console.error("Return tag processing failed", e);
-      alert(locale === "ja" ? `エラー: ${errorMessage(e)}` : getStaffOperationText("returnTagFailure", locale));
+      logStaffOperationError("Return tag processing failed", e);
+      const message = getStaffOperationErrorMessage(e, locale, {
+        unknownMessage: getStaffOperationText("returnTagFailure", locale),
+      });
+      alert(locale === "ja" ? `エラー: ${message}` : message);
     } finally {
       setReturnConfirmationSubmitting(false);
     }
@@ -116,8 +123,4 @@ export function useReturnTagProcessing({
     openReturnTagGroup,
     confirmSelectedReturnRequests,
   };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -35,10 +35,14 @@ describe("in-house i18n", () => {
     );
   });
 
-  it("preserves Japanese error details and hides them from English UI", () => {
+  it("preserves unknown Error details in Japanese and hides them in English", () => {
     const error = new Error("内部エラー");
-    expect(formatInHouseError(error, "ja")).toBe("エラー: 内部エラー");
-    expect(formatInHouseError(error, "en")).toBe("The operation failed. Please try again later.");
+    expect(formatInHouseError(error, "ja")).toBe(
+      "エラー: 内部エラー",
+    );
+    expect(formatInHouseError(error, "en")).toBe(
+      "The operation could not be completed. Contact an administrator if the problem persists.",
+    );
     expect(formatInHouseError(error, "en")).not.toMatch(JAPANESE_TEXT);
   });
 });

@@ -24,7 +24,8 @@ import {
 } from "@/features/inhouse/i18n";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
-import { formatStaffTankCount, getStaffGenericErrorMessage } from "@/lib/staff-display";
+import { formatStaffTankCount } from "@/lib/staff-display";
+import { logStaffOperationError } from "@/lib/staff-operation-error";
 import { getStaffOperationText } from "@/features/staff-operations/i18n";
 
 type TagType = Exclude<ReturnTag, typeof RETURN_TAG.KEEP>;
@@ -83,10 +84,10 @@ export default function InHousePage() {
     try {
       await updateInHouseReturnTagMarker(tankId, newTag);
     } catch (e) {
-      console.error("Failed to update tag", e);
+      logStaffOperationError("Failed to update tag", e);
       setReportResult({
         success: false,
-        message: staffLocale === "ja" ? errorMessage(e) : getStaffGenericErrorMessage(staffLocale),
+        message: formatInHouseError(e, staffLocale),
       });
       // 失敗時はオーバーライドを取り消して最新状態を取り直す
       setTagOverrides((prev) => {
@@ -142,7 +143,7 @@ export default function InHousePage() {
       setTagOverrides({});
       refetch();
     } catch (e: unknown) {
-      console.error("submitInHouseUseReport failed", e);
+      logStaffOperationError("submitInHouseUseReport failed", e);
       setReportResult({
         success: false,
         message: formatInHouseError(e, staffLocale),
@@ -169,7 +170,7 @@ export default function InHousePage() {
       setTagOverrides({});
       refetch();
     } catch (e: unknown) {
-      console.error("submitInHouseBulkReturn failed", e);
+      logStaffOperationError("submitInHouseBulkReturn failed", e);
       alert(formatInHouseError(e, staffLocale));
     } finally {
       setReturning(false);
@@ -305,8 +306,4 @@ export default function InHousePage() {
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
     </div>
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
