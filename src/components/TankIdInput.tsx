@@ -2,6 +2,7 @@
 
 import { useRef } from "react";
 import DrumRoll from "@/components/DrumRoll";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 
 /**
  * タンクID入力（業務ラッパー）
@@ -36,6 +37,8 @@ export type TankIdInputProps = {
   digits?: number;
   /** 直近に追加されたタンクID（ボタン上に一瞬表示）。null なら通常表示 */
   lastAdded?: string | null;
+  locale?: Locale;
+  numberInputLabel?: string;
 
   /** OK入力ボタンの前に差し込むヘッダー領域 */
   headerSlot?: React.ReactNode;
@@ -52,15 +55,18 @@ export default function TankIdInput({
   numberValue,
   onNumberChange,
   onCommit,
-  confirmLabel = "OK入力",
+  confirmLabel,
   accentColor = "#3b82f6",
   digits = 2,
   lastAdded = null,
+  locale = DEFAULT_LOCALE,
+  numberInputLabel,
   headerSlot,
   beforeConfirm,
   footerSlot,
 }: TankIdInputProps) {
   const inputRef = useRef<HTMLInputElement>(null);
+  const resolvedConfirmLabel = confirmLabel ?? (locale === "ja" ? "OK入力" : "Enter OK");
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/[^0-9]/g, "");
@@ -118,7 +124,7 @@ export default function TankIdInput({
             {lastAdded
               ? lastAdded
               : !activePrefix
-              ? confirmLabel
+              ? resolvedConfirmLabel
               : numberValue
               ? `${activePrefix} - ${numberValue}`
               : `${activePrefix} - OK`}
@@ -138,6 +144,7 @@ export default function TankIdInput({
         onChange={onPrefixChange}
         onSelect={handlePrefixChange}
         accentColor={accentColor}
+        locale={locale}
       />
 
       {/* 数字入力（隠し） */}
@@ -148,6 +155,7 @@ export default function TankIdInput({
         pattern="[0-9]*"
         value={numberValue}
         onChange={handleInputChange}
+        aria-label={numberInputLabel ?? (locale === "ja" ? "タンク番号" : "Tank number")}
         style={{
           position: "absolute",
           opacity: 0,

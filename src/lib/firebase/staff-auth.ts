@@ -24,6 +24,10 @@ export interface StaffAuthProfile {
   rank: string;
   isActive: boolean;
   locale: Locale;
+  readonly generatedFallbacks?: Readonly<{
+    name: boolean;
+    rank: boolean;
+  }>;
 }
 
 export interface StaffByUidMirror extends StaffAuthProfile {
@@ -35,7 +39,7 @@ export function staffEmailKey(email: string): string {
 }
 
 export function buildStaffAuthProfile(staffId: string, data: DocumentData): StaffAuthProfile {
-  return {
+  const profile = {
     staffId,
     name: String(data.name || "スタッフ"),
     email: String(data.email || ""),
@@ -43,7 +47,20 @@ export function buildStaffAuthProfile(staffId: string, data: DocumentData): Staf
     rank: String(data.rank || "レギュラー"),
     isActive: data.isActive === true,
     locale: normalizeLocale(data.locale),
-  };
+  } as StaffAuthProfile;
+
+  // 表示用の由来情報は mirror 書き込みや staffSession へ混入させない。
+  Object.defineProperty(profile, "generatedFallbacks", {
+    value: Object.freeze({
+      name: !data.name,
+      rank: !data.rank,
+    }),
+    enumerable: false,
+    configurable: false,
+    writable: false,
+  });
+
+  return profile;
 }
 
 export function setStaffAuthMirrorInBatch(

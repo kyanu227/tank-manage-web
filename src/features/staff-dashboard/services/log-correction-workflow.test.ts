@@ -341,7 +341,7 @@ describe("log-correction-workflow", () => {
     expect(voidLogMock).toHaveBeenCalledTimes(0);
   });
 
-  it("一括貸出先変更はitem失敗を入力順の文字列へ変換し後続を継続する", async () => {
+  it("一括貸出先変更はitem失敗を入力順のstructured failureへ変換し後続を継続する", async () => {
     applyLogCorrectionMock.mockImplementation(({ targetLogId }) => {
       if (targetLogId === "log-b") {
         return Promise.reject(new Error("correction failed"));
@@ -367,9 +367,12 @@ describe("log-correction-workflow", () => {
       resolveActor,
     });
 
-    expect(result).toStrictEqual([
-      "B-02: correction failed",
-      "C-03: plain failure",
+    expect(result.map(({ tankId, error }) => [
+      tankId,
+      error instanceof Error ? error.message : String(error),
+    ])).toStrictEqual([
+      ["B-02", "correction failed"],
+      ["C-03", "plain failure"],
     ]);
     expect(resolveActor).toHaveBeenCalledTimes(4);
     expect(applyLogCorrectionMock).toHaveBeenCalledTimes(4);
@@ -402,7 +405,7 @@ describe("log-correction-workflow", () => {
       resolveActor,
     });
 
-    expect(result).toStrictEqual(["B-02: actor unavailable"]);
+    expect(result).toStrictEqual([{ tankId: "B-02", error: failure }]);
     expect(resolveActor).toHaveBeenCalledTimes(3);
     expect(applyLogCorrectionMock).toHaveBeenCalledTimes(2);
     expect(
@@ -488,7 +491,7 @@ describe("log-correction-workflow", () => {
     expect(applyLogCorrectionMock).toHaveBeenCalledTimes(0);
   });
 
-  it("一括取消はitem失敗を入力順の文字列へ変換し後続を継続する", async () => {
+  it("一括取消はitem失敗を入力順のstructured failureへ変換し後続を継続する", async () => {
     voidLogMock.mockImplementation(({ logId }) => {
       if (logId === "void-b") {
         return Promise.reject(new Error("void failed"));
@@ -512,9 +515,12 @@ describe("log-correction-workflow", () => {
       resolveActor,
     });
 
-    expect(result).toStrictEqual([
-      "B-02: void failed",
-      "C-03: plain failure",
+    expect(result.map(({ tankId, error }) => [
+      tankId,
+      error instanceof Error ? error.message : String(error),
+    ])).toStrictEqual([
+      ["B-02", "void failed"],
+      ["C-03", "plain failure"],
     ]);
     expect(resolveActor).toHaveBeenCalledTimes(4);
     expect(voidLogMock).toHaveBeenCalledTimes(4);
@@ -545,7 +551,7 @@ describe("log-correction-workflow", () => {
       resolveActor,
     });
 
-    expect(result).toStrictEqual(["B-02: actor unavailable"]);
+    expect(result).toStrictEqual([{ tankId: "B-02", error: failure }]);
     expect(resolveActor).toHaveBeenCalledTimes(3);
     expect(voidLogMock).toHaveBeenCalledTimes(2);
     expect(

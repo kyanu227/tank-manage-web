@@ -3,7 +3,10 @@
 import { ArrowLeft, CheckCircle2, Loader2, Store, Truck, X } from "lucide-react";
 import DrumRoll from "@/components/DrumRoll";
 import { totalOrderQuantity, type PendingOrder } from "@/lib/order-types";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
+import { formatStaffCount, formatStaffTankCount } from "@/lib/staff-display";
 import type { UseOrderFulfillmentResult } from "../hooks/useOrderFulfillment";
+import { getStaffOperationText } from "../i18n";
 import type { TankMap } from "../types";
 
 interface OrderFulfillmentScreenProps {
@@ -11,6 +14,10 @@ interface OrderFulfillmentScreenProps {
   prefixes: string[];
   allTanks: TankMap;
   fulfillment: UseOrderFulfillmentResult;
+  locale?: Locale;
+  dataLoading?: boolean;
+  dataLoadFailed?: boolean;
+  retryData?: () => void | Promise<void>;
 }
 
 export default function OrderFulfillmentScreen({
@@ -18,6 +25,10 @@ export default function OrderFulfillmentScreen({
   prefixes,
   allTanks,
   fulfillment,
+  locale = DEFAULT_LOCALE,
+  dataLoading = false,
+  dataLoadFailed = false,
+  retryData,
 }: OrderFulfillmentScreenProps) {
   const {
     scannedTanks,
@@ -55,8 +66,15 @@ export default function OrderFulfillmentScreen({
   //  - 複数種別: "2種・合計5本"（幅を食わないコンパクト表記）
   const isSingleType = selectedOrder.items.length === 1;
   const headerBadgeText = isSingleType
-    ? `${selectedOrder.items[0].tankType} × ${selectedOrder.items[0].quantity}本`
-    : `${selectedOrder.items.length}種・合計${requiredQty}本`;
+    ? `${selectedOrder.items[0].tankType} ${getStaffOperationText("quantityTanks", locale, {
+        countLabel: formatStaffTankCount(selectedOrder.items[0].quantity, locale),
+      })}`
+    : getStaffOperationText("typeSummary", locale, {
+        typeCountLabel: formatStaffCount(selectedOrder.items.length, locale, {
+          ja: "種", enSingular: "type", enPlural: "types",
+        }),
+        tankCountLabel: formatStaffTankCount(requiredQty, locale),
+      });
   const isDelivery = selectedOrder.deliveryType === "delivery";
   const memo = selectedOrder.note || selectedOrder.deliveryNote;
 
@@ -64,7 +82,7 @@ export default function OrderFulfillmentScreen({
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "#f8fafc" }}>
       {/* 統合ヘッダー（1行・Packageアイコン無し） */}
       <div style={{ padding: "10px 16px", background: "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-        <button onClick={closeFulfillment} style={{ width: 32, height: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b" }}>
+        <button type="button" aria-label={getStaffOperationText("back", locale)} onClick={closeFulfillment} style={{ width: 32, height: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b" }}>
           <ArrowLeft size={16} />
         </button>
         {/* 顧客名 */}
@@ -86,14 +104,34 @@ export default function OrderFulfillmentScreen({
         </div>
       </div>
 
+      {dataLoading && (
+        <div role="status" aria-label={getStaffOperationText("operationDataLoading", locale)} style={{ padding: "8px 16px", background: "#eff6ff", color: "#1d4ed8", fontSize: 12, fontWeight: 800 }}>
+          {getStaffOperationText("operationDataLoading", locale)}
+        </div>
+      )}
+      {!dataLoading && dataLoadFailed && (
+        <div role="alert" style={{ padding: "8px 16px", background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <span>{getStaffOperationText("operationDataLoadFailure", locale)}</span>
+          {retryData && (
+            <button type="button" onClick={() => void retryData()} style={{ flexShrink: 0, border: "none", borderRadius: 8, padding: "6px 10px", background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+              {getStaffOperationText("retry", locale)}
+            </button>
+          )}
+        </div>
+      )}
+
       <div style={{ padding: "8px 16px", background: isDelivery ? "#f0f9ff" : "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
         <span style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 12, fontWeight: 900, color: isDelivery ? "#0369a1" : "#475569" }}>
           {isDelivery ? <Truck size={14} /> : <Store size={14} />}
-          {isDelivery ? `配達: ${selectedOrder.deliveryTargetName || "配達先未入力"}` : "引き取り"}
+          {isDelivery
+            ? getStaffOperationText("deliveryDetail", locale, {
+                target: selectedOrder.deliveryTargetName || getStaffOperationText("deliveryTargetMissing", locale),
+              })
+            : getStaffOperationText("pickup", locale)}
         </span>
         {memo && (
           <span style={{ fontSize: 12, fontWeight: 600, color: "#64748b", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-            メモ: {memo}
+            {getStaffOperationText("memo", locale, { memo })}
           </span>
         )}
       </div>
@@ -133,11 +171,13 @@ export default function OrderFulfillmentScreen({
             pattern="[0-9]*"
             value={orderInputValue}
             onChange={handleOrderInputChange}
+            aria-label={getStaffOperationText("tankNumberInput", locale)}
             style={{ position: "absolute", opacity: 0, width: 1, height: 1, overflow: "hidden", pointerEvents: "none", caretColor: "transparent" }}
           />
           {/* OKボタン */}
           <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
             <button
+              type="button"
               onClick={handleOrderOkTrigger}
               disabled={!orderActivePrefix}
               style={{
@@ -152,14 +192,14 @@ export default function OrderFulfillmentScreen({
             >
               {orderLastAdded
                 ? orderLastAdded
-                : (!orderActivePrefix ? "OK入力" : orderInputValue ? `${orderActivePrefix} - ${orderInputValue}` : `${orderActivePrefix} - OK`)}
+                : (!orderActivePrefix ? getStaffOperationText("okInput", locale) : orderInputValue ? `${orderActivePrefix} - ${orderInputValue}` : `${orderActivePrefix} - OK`)}
             </button>
           </div>
 
           {/* スキャン済みリスト（下部にフローティングボタン分の余白を確保） */}
           <div style={{ flex: 1, overflowY: "auto", padding: 16, paddingBottom: 96 }}>
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-              <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>スキャンリスト</span>
+              <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>{getStaffOperationText("scannedList", locale)}</span>
               {scannedTanks.length > 0 && (
                 <span style={{ background: "#3b82f6", color: "#fff", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 800 }}>
                   {scannedTanks.length}
@@ -168,8 +208,8 @@ export default function OrderFulfillmentScreen({
             </div>
             {scannedTanks.length === 0 ? (
               <div style={{ textAlign: "center", padding: "40px 20px", color: "#cbd5e1" }}>
-                <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>右側のリストからアルファベットを選び、</p>
-                <p style={{ margin: "4px 0", fontSize: 14, fontWeight: 600 }}>タンクの数字を入力してください</p>
+                <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{getStaffOperationText("choosePrefix", locale)}</p>
+                <p style={{ margin: "4px 0", fontSize: 14, fontWeight: 600 }}>{getStaffOperationText("enterTankNumber", locale)}</p>
               </div>
             ) : (
               <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -179,7 +219,7 @@ export default function OrderFulfillmentScreen({
                       <span style={{ fontSize: 18, fontWeight: 900, fontFamily: "monospace", color: "#0f172a" }}>{item.id}</span>
                       <div style={{ fontSize: 11, color: item.valid ? "#64748b" : "#ef4444", fontWeight: 600, marginTop: 4 }}>{item.valid ? "OK" : item.error}</div>
                     </div>
-                    <button onClick={() => removeScannedTank(item.id)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer" }}><X size={18} /></button>
+                    <button type="button" aria-label={getStaffOperationText("removeTank", locale, { tankId: item.id })} onClick={() => removeScannedTank(item.id)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer" }}><X size={18} /></button>
                   </div>
                 ))}
               </div>
@@ -193,7 +233,7 @@ export default function OrderFulfillmentScreen({
             background: "linear-gradient(transparent, rgba(248,250,252,0.95) 20%)",
             zIndex: 20, pointerEvents: "none",
           }}>
-            <button onClick={fulfillOrder} disabled={!isReady || orderSubmitting}
+            <button type="button" aria-busy={orderSubmitting} onClick={fulfillOrder} disabled={!isReady || orderSubmitting}
               style={{
                 width: "100%", padding: "14px", borderRadius: 12, border: "none",
                 background: isReady ? "#10b981" : "#cbd5e1",
@@ -210,8 +250,12 @@ export default function OrderFulfillmentScreen({
                 <CheckCircle2 size={18} />
               )}
               {isReady
-                ? `受注を完了する（${selectedOrder.customerName}）`
-                : `あと ${remaining} 本スキャンしてください`}
+                ? getStaffOperationText("completeOrder", locale, { customerName: selectedOrder.customerName })
+                : getStaffOperationText(
+                    remaining === 1 ? "scanRemainingOne" : "scanRemainingMany",
+                    locale,
+                    { count: remaining },
+                  )}
             </button>
           </div>
         </div>
@@ -223,6 +267,7 @@ export default function OrderFulfillmentScreen({
           onChange={(p) => setOrderActivePrefix(p)}
           onSelect={(p) => orderFocusInput(p)}
           accentColor="#3b82f6"
+          locale={locale}
         />
       </div>
 

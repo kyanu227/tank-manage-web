@@ -8,6 +8,7 @@ import type {
 } from "@/lib/operation-context";
 import { conditionToReturnTag, returnTagToReturnCondition } from "@/lib/return-tag-rules";
 import { tryParseTankId } from "@/lib/tank-id";
+import { StaffOperationError } from "@/lib/staff-operation-error";
 import {
   applyBulkTankOperations,
   type TankOperationInput,
@@ -72,7 +73,7 @@ export async function confirmPendingReturnRequests(
   const { group, selections, actor } = input;
   const selectedItems = selectPendingReturnRequestItems(group.items, selections);
   if (selectedItems.length === 0) {
-    throw new Error("処理するタンクを選択してください");
+    throw new StaffOperationError("selection_required");
   }
 
   const baseContext = buildReturnConfirmationContext(group, actor);
@@ -126,7 +127,10 @@ async function resolveReturnConfirmation(
 ): Promise<ReturnConfirmation> {
   const tankIdResult = tryParseTankId(item.tankId);
   if (!tankIdResult.ok) {
-    throw new Error(`[${item.tankId}] ${tankIdResult.reason}`);
+    throw new StaffOperationError("invalid_tank_id", {
+      params: { tankId: item.tankId },
+      message: `[${item.tankId}] ${tankIdResult.reason}`,
+    });
   }
 
   const tankId = tankIdResult.canonicalTankId;
@@ -136,7 +140,9 @@ async function resolveReturnConfirmation(
   const note = `[返却タグ処理] 顧客: ${group.customerName} (タグ:${condition})`;
   const tank = await tanksRepository.getTank(tankId);
   if (!tank) {
-    throw new Error(`[${tankId}] タンクが存在しません`);
+    throw new StaffOperationError("tank_not_found", {
+      params: { tankId },
+    });
   }
 
   const currentStatus = tank.status ?? "";

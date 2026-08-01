@@ -7,6 +7,7 @@ import {
   voidLog,
   type StaffCorrectionRole,
 } from "@/lib/tank-operation";
+import { logStaffOperationError } from "@/lib/staff-operation-error";
 
 export type ResolveCorrectionActor = () => OperationActor;
 
@@ -45,6 +46,11 @@ export type VoidDashboardLogsInput = {
   voidedByRole: StaffCorrectionRole;
   resolveActor: ResolveCorrectionActor;
 };
+
+export type DashboardLogOperationFailure = Readonly<{
+  tankId: string;
+  error: unknown;
+}>;
 
 /** 単一ログのタンクID訂正を既存atomic coreへ委譲する。 */
 export async function correctDashboardLogTankId(
@@ -92,7 +98,7 @@ export async function voidDashboardLog(
 /** 選択ログを入力順で逐次訂正し、item単位の失敗だけを返す。 */
 export async function correctDashboardLogLocations(
   input: CorrectDashboardLogLocationsInput,
-): Promise<string[]> {
+): Promise<DashboardLogOperationFailure[]> {
   const {
     logs,
     location,
@@ -101,7 +107,7 @@ export async function correctDashboardLogLocations(
     editedByRole,
     resolveActor,
   } = input;
-  const failures: string[] = [];
+  const failures: DashboardLogOperationFailure[] = [];
 
   for (const log of logs) {
     try {
@@ -117,7 +123,8 @@ export async function correctDashboardLogLocations(
         editedByRole,
       });
     } catch (error: unknown) {
-      failures.push(`${log.tankId}: ${errorMessage(error)}`);
+      logStaffOperationError("Dashboard log location correction failed", error);
+      failures.push({ tankId: log.tankId, error });
     }
   }
 
@@ -127,14 +134,14 @@ export async function correctDashboardLogLocations(
 /** 選択ログを入力順で逐次取消し、item単位の失敗だけを返す。 */
 export async function voidDashboardLogs(
   input: VoidDashboardLogsInput,
-): Promise<string[]> {
+): Promise<DashboardLogOperationFailure[]> {
   const {
     logs,
     reason,
     voidedByRole,
     resolveActor,
   } = input;
-  const failures: string[] = [];
+  const failures: DashboardLogOperationFailure[] = [];
 
   for (const log of logs) {
     try {
@@ -145,13 +152,10 @@ export async function voidDashboardLogs(
         reason,
       });
     } catch (error: unknown) {
-      failures.push(`${log.tankId}: ${errorMessage(error)}`);
+      logStaffOperationError("Dashboard log void failed", error);
+      failures.push({ tankId: log.tankId, error });
     }
   }
 
   return failures;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

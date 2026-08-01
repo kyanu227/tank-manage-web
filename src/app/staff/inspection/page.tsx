@@ -5,10 +5,25 @@ import { ShieldCheck, CheckCircle2, Send, Loader2, Sparkles, AlertTriangle } fro
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import MaintenanceTabs from "@/components/MaintenanceTabs";
 import { useMaintenanceSwipe } from "@/features/maintenance/hooks/useMaintenanceSwipe";
+import {
+  formatInspectionConfirm,
+  formatInspectionDate,
+  formatInspectionDescription,
+  formatInspectionRemaining,
+  formatInspectionSubmit,
+  formatInspectionSuccess,
+  formatSelectTankLabel,
+  getMaintenanceText,
+} from "@/features/maintenance/i18n";
 import { submitInspectionCompletion } from "@/features/maintenance/services/inspection-workflow";
-import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
 import { useInspectionSettings } from "@/hooks/useInspectionSettings";
+import { formatStaffTankCount } from "@/lib/staff-display";
+import {
+  getStaffOperationErrorMessage,
+  logStaffOperationError,
+} from "@/lib/staff-operation-error";
 
 const ACCENT = "#8b5cf6"; // Violet
 const ACCENT_DARK = "#7c3aed";
@@ -42,7 +57,8 @@ function toDate(v: unknown): Date | null {
  */
 export default function InspectionPage() {
   useMaintenanceSwipe("inspection");
-  const { tanks: allTanks, loading: tanksLoading, refetch } = useTanks();
+  const staffLocale = useStaffLocale();
+  const { tanks: allTanks, loading: tanksLoading, loadFailed, refetch } = useTanks();
   const { settings, loading: settingsLoading } = useInspectionSettings();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
@@ -97,7 +113,7 @@ export default function InspectionPage() {
   const handleSubmit = async () => {
     const selected = tanks.filter((t) => t.selected);
     if (selected.length === 0) return;
-    if (!confirm(`耐圧検査完了：${selected.length}本を処理しますか？\n次回期限は ${settings.validityYears}年後 に更新されます。`)) return;
+    if (!confirm(formatInspectionConfirm(selected.length, settings.validityYears, staffLocale))) return;
     setSubmitting(true);
     try {
       const actor = requireStaffIdentity();
@@ -113,21 +129,18 @@ export default function InspectionPage() {
         inspectionDate,
         actor,
       });
-      setResult({ success: true, message: `${selected.length}本の耐圧検査完了を処理しました` });
+      setResult({ success: true, message: formatInspectionSuccess(selected.length, staffLocale) });
       setSelectedIds(new Set());
       refetch();
     } catch (e: unknown) {
-      setResult({ success: false, message: errorMessage(e) });
+      logStaffOperationError("submitInspectionCompletion failed", e);
+      setResult({
+        success: false,
+        message: getStaffOperationErrorMessage(e, staffLocale),
+      });
     } finally {
       setSubmitting(false);
     }
-  };
-
-  /** daysLeft を日本語ラベル化。マイナスは「●期限切」、0以上は「あとNヶ月」 */
-  const formatDaysLeft = (daysLeft: number) => {
-    if (daysLeft < 0) return "●期限切";
-    if (daysLeft < 30) return "あと今月中";
-    return `あと${Math.floor(daysLeft / 30)}ヶ月`;
   };
 
   const expiredCount = tanks.filter((t) => t.daysLeft < 0).length;
@@ -168,9 +181,11 @@ export default function InspectionPage() {
                 <ShieldCheck size={24} color="#fff" />
               </div>
               <div style={{ flex: 1 }}>
-                <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.01em" }}>耐圧検査完了</h1>
+                <h1 style={{ fontSize: 20, fontWeight: 800, letterSpacing: "0.01em" }}>
+                  {getMaintenanceText("inspectionTitle", staffLocale)}
+                </h1>
                 <p style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
-                  期限 {settings.alertMonths}ヶ月前〜期限切れのタンクが対象です
+                  {formatInspectionDescription(settings.alertMonths, staffLocale)}
                 </p>
               </div>
             </div>
@@ -182,30 +197,33 @@ export default function InspectionPage() {
                 flex: 1, padding: "10px 14px", borderRadius: 12,
                 background: "rgba(255,255,255,0.18)", backdropFilter: "blur(6px)",
               }}>
-                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>対象</div>
-                <div style={{ fontSize: 22, fontWeight: 900, marginTop: 2 }}>
-                  {tanks.length}
-                  <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.8, marginLeft: 3 }}>本</span>
+                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>
+                  {getMaintenanceText("inspectionDue", staffLocale)}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 900, marginTop: 2 }}>
+                  {formatStaffTankCount(tanks.length, staffLocale)}
                 </div>
               </div>
               <div style={{
                 flex: 1, padding: "10px 14px", borderRadius: 12,
                 background: "rgba(255,255,255,0.18)", backdropFilter: "blur(6px)",
               }}>
-                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>うち期限切</div>
-                <div style={{ fontSize: 22, fontWeight: 900, marginTop: 2 }}>
-                  {expiredCount}
-                  <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.8, marginLeft: 3 }}>本</span>
+                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>
+                  {getMaintenanceText("expired", staffLocale)}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 900, marginTop: 2 }}>
+                  {formatStaffTankCount(expiredCount, staffLocale)}
                 </div>
               </div>
               <div style={{
                 flex: 1, padding: "10px 14px", borderRadius: 12,
                 background: "rgba(255,255,255,0.18)", backdropFilter: "blur(6px)",
               }}>
-                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>選択中</div>
-                <div style={{ fontSize: 22, fontWeight: 900, marginTop: 2 }}>
-                  {selectedCount}
-                  <span style={{ fontSize: 12, fontWeight: 700, opacity: 0.8, marginLeft: 3 }}>本</span>
+                <div style={{ fontSize: 11, opacity: 0.8, fontWeight: 600 }}>
+                  {getMaintenanceText("selected", staffLocale)}
+                </div>
+                <div style={{ fontSize: 16, fontWeight: 900, marginTop: 2 }}>
+                  {formatStaffTankCount(selectedCount, staffLocale)}
                 </div>
               </div>
             </div>
@@ -219,7 +237,7 @@ export default function InspectionPage() {
               background: "#fff", borderRadius: 12, border: "1px solid #e8eaed",
             }}>
               <span style={{ fontSize: 12, fontWeight: 700, color: "#64748b" }}>
-                タップして選択
+                {getMaintenanceText("tapToSelect", staffLocale)}
               </span>
               <button
                 onClick={selectAll}
@@ -230,20 +248,30 @@ export default function InspectionPage() {
                   padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer",
                 }}
               >
-                {tanks.every((t) => t.selected) ? "全解除" : "全選択"}
+                {getMaintenanceText(tanks.every((t) => t.selected) ? "clearAll" : "selectAll", staffLocale)}
               </button>
             </div>
           )}
 
           {/* Tank grid */}
           {loading ? (
-            <div style={{
+            <div role="status" aria-live="polite" style={{
               background: "#fff", borderRadius: 16, padding: "48px 20px",
               textAlign: "center", color: "#94a3b8", fontSize: 14,
               border: "1px solid #e8eaed",
             }}>
               <Loader2 size={28} style={{ animation: "spin 1s linear infinite", marginBottom: 8, opacity: 0.6 }} />
-              <p>読み込み中…</p>
+              <p>{getMaintenanceText("loading", staffLocale)}</p>
+            </div>
+          ) : loadFailed ? (
+            <div role="alert" style={{
+              background: "#fff", borderRadius: 16, padding: "48px 20px",
+              textAlign: "center", color: "#991b1b", border: "1px solid #fecaca",
+            }}>
+              <p>{getMaintenanceText("loadFailure", staffLocale)}</p>
+              <button type="button" onClick={() => void refetch()}>
+                {getMaintenanceText("retry", staffLocale)}
+              </button>
             </div>
           ) : tanks.length === 0 ? (
             <div style={{
@@ -257,9 +285,11 @@ export default function InspectionPage() {
               }}>
                 <Sparkles size={32} color={ACCENT} />
               </div>
-              <p style={{ color: "#0f172a", fontSize: 15, fontWeight: 700 }}>対象タンクはありません</p>
+              <p style={{ color: "#0f172a", fontSize: 15, fontWeight: 700 }}>
+                {getMaintenanceText("noInspectionTanks", staffLocale)}
+              </p>
               <p style={{ color: "#94a3b8", fontSize: 12, marginTop: 4 }}>
-                期限が迫ったタンクが出たらここに表示されます
+                {getMaintenanceText("noInspectionHelp", staffLocale)}
               </p>
             </div>
           ) : (
@@ -271,8 +301,12 @@ export default function InspectionPage() {
                 const statusColor = isExpired ? "#ef4444" : "#f59e0b";
                 const statusBg = isExpired ? "#fef2f2" : "#fffbeb";
                 return (
-                  <div
+                  <button
+                    type="button"
+                    className="maintenance-select-card"
                     key={t.id}
+                    aria-label={`${formatSelectTankLabel(t.id, t.selected, staffLocale)}: ${formatInspectionRemaining(t.daysLeft, staffLocale)}, ${formatInspectionDate(t.nextDate, staffLocale)}${t.note ? `, ${t.note}` : ""}`}
+                    aria-pressed={t.selected}
                     onClick={() => toggleSelect(t.id)}
                     style={{
                       position: "relative",
@@ -288,6 +322,8 @@ export default function InspectionPage() {
                         : "0 1px 2px rgba(15,23,42,0.04)",
                       transform: t.selected ? "translateY(-1px)" : "none",
                       transition: "all 0.18s cubic-bezier(0.4,0,0.2,1)",
+                      textAlign: "left",
+                      font: "inherit",
                     }}
                   >
                     {/* check mark */}
@@ -310,7 +346,7 @@ export default function InspectionPage() {
                       fontSize: 10, fontWeight: 800, letterSpacing: "0.02em",
                     }}>
                       {isExpired && <AlertTriangle size={10} strokeWidth={3} />}
-                      {formatDaysLeft(t.daysLeft)}
+                      {formatInspectionRemaining(t.daysLeft, staffLocale)}
                     </div>
 
                     {/* tank id */}
@@ -326,7 +362,7 @@ export default function InspectionPage() {
                     <div style={{
                       fontSize: 11, color: "#64748b", marginTop: 2,
                     }}>
-                      期限: {t.nextDate.toLocaleDateString("ja-JP", { year: "numeric", month: "2-digit", day: "2-digit" })}
+                      {formatInspectionDate(t.nextDate, staffLocale)}
                     </div>
 
                     {/* note */}
@@ -339,14 +375,14 @@ export default function InspectionPage() {
                         {t.note}
                       </div>
                     )}
-                  </div>
+                  </button>
                 );
               })}
             </div>
           )}
 
           {result && (
-            <div style={{
+            <div role={result.success ? "status" : "alert"} aria-live="polite" style={{
               marginTop: 16,
               padding: "14px 18px", borderRadius: 14,
               background: result.success ? "#ecfdf5" : "#fef2f2",
@@ -390,17 +426,18 @@ export default function InspectionPage() {
               {submitting
                 ? <Loader2 size={20} style={{ animation: "spin 1s linear infinite" }} />
                 : <Send size={18} />}
-              {submitting ? "処理中…" : `耐圧検査完了（${selectedCount}本）`}
+              {submitting
+                ? getMaintenanceText("processing", staffLocale)
+                : formatInspectionSubmit(selectedCount, staffLocale)}
             </button>
           </div>
         </div>
       )}
 
-      <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .maintenance-select-card:focus-visible { outline: 3px solid ${ACCENT}; outline-offset: 2px; }
+      `}</style>
     </div>
   );
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

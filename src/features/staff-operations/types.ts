@@ -51,6 +51,11 @@ export interface BulkTankDoc {
   status: string;
   customerId?: string | null;
   customerName?: string | null;
+  latestLogId?: string | null;
+  rawCycleMarkers?: Readonly<{
+    customerId: unknown;
+    latestLogId: unknown;
+  }>;
   location: string;
   staff: string;
   updatedAt: unknown;

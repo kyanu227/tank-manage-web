@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 
 const BOTTOM_INSET = 16;
 const SIDE_INSET = 6;
@@ -52,6 +53,7 @@ export type DrumRollProps<T extends string> = {
   width?: number;
   /** アクセシビリティラベル */
   ariaLabel?: string;
+  locale?: Locale;
 };
 
 export default function DrumRoll<T extends string>({
@@ -64,8 +66,10 @@ export default function DrumRoll<T extends string>({
   inactiveColor = "#94a3b8",
   width = 70,
   ariaLabel,
+  locale = DEFAULT_LOCALE,
 }: DrumRollProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null);
+  const optionIdPrefix = useId();
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollIgnoreTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ignoreScrollRef = useRef(false);
@@ -329,9 +333,9 @@ export default function DrumRoll<T extends string>({
             ref={containerRef}
             className="no-scrollbar"
             role="listbox"
-            aria-label={ariaLabel ?? "プレフィックス選択"}
+            aria-label={ariaLabel ?? (locale === "ja" ? "プレフィックス選択" : "Select a prefix")}
             aria-activedescendant={
-              value ? `drum-roll-option-${MIDDLE_CYCLE * items.length + selectedIndex}` : undefined
+              value ? `${optionIdPrefix}-option-${MIDDLE_CYCLE * items.length + selectedIndex}` : undefined
             }
             tabIndex={0}
             onScroll={handleScroll}
@@ -363,6 +367,7 @@ export default function DrumRoll<T extends string>({
             >
               {repeatedItems.map(({ item, itemIndex, globalIndex }) => {
                 const isActive = value === item;
+                const isAccessibleCycle = Math.floor(globalIndex / items.length) === MIDDLE_CYCLE;
                 return (
                   <div
                     key={`${item}-${globalIndex}`}
@@ -374,10 +379,12 @@ export default function DrumRoll<T extends string>({
                     }}
                   >
                     <button
-                      id={`drum-roll-option-${globalIndex}`}
+                      id={`${optionIdPrefix}-option-${globalIndex}`}
                       data-drum-roll-option="true"
                       role="option"
-                      aria-selected={isActive}
+                      aria-selected={isAccessibleCycle ? isActive : undefined}
+                      aria-hidden={!isAccessibleCycle || undefined}
+                      tabIndex={isAccessibleCycle ? 0 : -1}
                       type="button"
                       onPointerDown={(e) => {
                         if (e.pointerType === "mouse") e.stopPropagation();
