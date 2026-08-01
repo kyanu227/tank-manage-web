@@ -7,16 +7,14 @@ import type { Locale } from "@/lib/locale";
 
 type ProcurementHref = (typeof PROCUREMENT_TABS)[number]["href"];
 
-const ENGLISH_LABELS = {
-  "/staff/supply-order": "Supply order",
-  "/staff/tank-purchase": "Tank purchase",
-  "/staff/tank-register": "Tank registration",
-} satisfies Record<ProcurementHref, string>;
+const LABELS = {
+  "/staff/supply-order": { ja: "備品・資材発注", en: "Supply order" },
+  "/staff/tank-purchase": { ja: "タンク購入", en: "Tank purchase" },
+  "/staff/tank-register": { ja: "タンク登録", en: "Tank registration" },
+} satisfies Record<ProcurementHref, Record<Locale, string>>;
 
 export function getProcurementTabs(locale: Locale) {
-  return locale === "ja"
-    ? PROCUREMENT_TABS
-    : PROCUREMENT_TABS.map((tab) => ({ ...tab, label: ENGLISH_LABELS[tab.href] }));
+  return PROCUREMENT_TABS.map((tab) => ({ ...tab, label: LABELS[tab.href][locale] }));
 }
 
 interface ProcurementTabsProps {

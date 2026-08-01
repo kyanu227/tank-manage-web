@@ -270,10 +270,10 @@ describe("buildStaffDashboardReadModel todayStats", () => {
     expect(result.todayStats).toStrictEqual({
       total: 6,
       breakdown: [
-        { action: "Lend", count: 2 },
-        { action: "Zeta", count: 2 },
-        { action: "Alpha", count: 1 },
-        { action: "Beta", count: 1 },
+        { key: "lend", action: "Lend", count: 2 },
+        { key: "Zeta", action: "Unknown action", count: 2 },
+        { key: "Alpha", action: "Unknown action", count: 1 },
+        { key: "Beta", action: "Unknown action", count: 1 },
       ],
     });
     expect(logs.map((log) => log.id)).toStrictEqual([

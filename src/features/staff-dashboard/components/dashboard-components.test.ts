@@ -161,6 +161,7 @@ describe("summary components static render", () => {
         todayTotal: 4,
         todayOperations: [
           {
+            key: "lend",
             action: "貸出",
             count: 4,
           },
@@ -321,6 +322,9 @@ describe("DashboardLogsSection static render", () => {
     expect(html).toContain("ID変更");
     expect(html).toContain("取消");
     expect(html).toContain("履歴");
+    expect(html).toContain('aria-pressed="true"');
+    expect(html).toContain('aria-controls="dashboard-log-history-log-1"');
+    expect(html).toContain('id="dashboard-log-history-log-1"');
     expect(html).toContain("v1");
     expect(html).toContain("担当者A / 修正理由");
     expect(html).toContain("担当者B / 取消理由");
@@ -548,6 +552,20 @@ describe("DashboardCorrectionModals static render", () => {
     expect(html).toContain("取消中...");
     expect(html).toContain("disabled");
   });
+
+  it("modalの初期focus・focus trap・Escape close・focus復元を実装する", () => {
+    const source = readSource(
+      `${COMPONENT_DIRECTORY}/DashboardCorrectionModals.tsx`,
+    );
+
+    expect(source).toContain("(focusable[0] ?? dialog).focus()");
+    expect(source).toContain('event.key === "Escape"');
+    expect(source).toContain('event.key !== "Tab"');
+    expect(source).toContain("previousFocus.focus()");
+    expect(source).toContain("onKeyDown={handleKeyDown}");
+    expect(source).toContain("onFocusCapture={handleFocusCapture}");
+    expect(source).toContain("dialog.contains(event.target)");
+  });
 });
 
 describe("dashboard projection and component boundary contract", () => {
@@ -579,7 +597,7 @@ describe("dashboard projection and component boundary contract", () => {
       page,
       customerName,
       "report.customerName",
-      "\"顧客未設定\"",
+      "getDashboardText(\"customerNotSet\", staffLocale)",
     );
     expectLogicalOrExpression(
       page,
@@ -724,7 +742,8 @@ describe("dashboard projection and component boundary contract", () => {
     expectExportedTypeMembers(
       `${COMPONENT_DIRECTORY}/StaffDashboardView.tsx`,
       "StaffDashboardViewProps",
-      ["staffName", "loading", "children", "overlays"],
+      ["staffName", "loading", "children", "overlays", "locale", "loadFailed", "showLoadWarning", "onRetry"],
+      ["locale", "loadFailed", "showLoadWarning", "onRetry"],
     );
     expectExportedTypeMembers(
       `${COMPONENT_DIRECTORY}/DashboardSectionLabel.tsx`,
@@ -735,7 +754,8 @@ describe("dashboard projection and component boundary contract", () => {
     expectExportedTypeMembers(
       `${COMPONENT_DIRECTORY}/DashboardStatusSummary.tsx`,
       "DashboardStatusSummaryProps",
-      ["totalTanks", "items"],
+      ["totalTanks", "items", "locale"],
+      ["locale"],
     );
     expectExportedTypeMembers(
       `${COMPONENT_DIRECTORY}/DashboardOperationsSummary.tsx`,
@@ -746,7 +766,9 @@ describe("dashboard projection and component boundary contract", () => {
         "todayOperations",
         "unfilledReportCount",
         "recentUnfilledReports",
+        "locale",
       ],
+      ["locale"],
     );
     expectReadonlyStringTypeMembers(
       `${COMPONENT_DIRECTORY}/DashboardOperationsSummary.tsx`,
@@ -783,12 +805,15 @@ describe("dashboard projection and component boundary contract", () => {
         "onOpenEdit",
         "onOpenVoid",
         "onToggleHistory",
+        "locale",
       ],
+      ["locale"],
     );
     expectExportedTypeMembers(
       `${COMPONENT_DIRECTORY}/DashboardCorrectionModals.tsx`,
       "DashboardCorrectionModalsProps",
-      ["idCorrection", "singleVoid", "bulkLocation", "bulkVoid"],
+      ["idCorrection", "singleVoid", "bulkLocation", "bulkVoid", "locale"],
+      ["locale"],
     );
   });
 });
