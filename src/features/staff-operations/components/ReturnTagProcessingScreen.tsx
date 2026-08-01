@@ -7,7 +7,6 @@ import { getReturnTagLabel, getReturnTagLabelOrNull } from "@/lib/return-tag-lab
 import { formatStaffCount } from "@/lib/staff-display";
 import { getStaffOperationText } from "../i18n";
 import type { UseReturnTagProcessingResult } from "../hooks/useReturnTagProcessing";
-import { countProcessableReturnTags } from "../return-tag-selection";
 import type { Condition, ReturnGroup } from "../types";
 
 interface ReturnTagProcessingScreenProps {
@@ -29,7 +28,7 @@ export default function ReturnTagProcessingScreen({
     confirmSelectedReturnRequests,
   } = returnTagProcessing;
 
-  const selectedCount = countProcessableReturnTags(selectedReturnGroup, returnTagSelections);
+  const selectedCount = Object.values(returnTagSelections).filter((selection) => selection.selected).length;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "#f8fafc" }}>
@@ -67,16 +66,13 @@ export default function ReturnTagProcessingScreen({
                   <button
                     type="button"
                     aria-label={getStaffOperationText(
-                      conditionLabel
-                        ? selection.selected ? "deselectTank" : "selectTank"
-                        : "chooseValidReturnTagForTank",
+                      selection.selected ? "deselectTank" : "selectTank",
                       locale,
                       { tankId: item.tankId },
                     )}
-                    aria-pressed={conditionLabel ? selection.selected : false}
-                    disabled={!conditionLabel}
+                    aria-pressed={selection.selected}
                     onClick={() => setReturnTagSelections((p) => ({ ...p, [item.id]: { ...p[item.id], selected: !p[item.id].selected } }))}
-                    style={{ width: 44, height: 44, borderRadius: 12, border: "none", background: selection.selected ? "#10b981" : "#f1f5f9", color: selection.selected ? "#fff" : "#cbd5e1", cursor: conditionLabel ? "pointer" : "not-allowed", opacity: conditionLabel ? 1 : 0.55, display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
+                    style={{ width: 44, height: 44, borderRadius: 12, border: "none", background: selection.selected ? "#10b981" : "#f1f5f9", color: selection.selected ? "#fff" : "#cbd5e1", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", transition: "all 0.15s" }}
                   >
                     <ThumbsUp size={20} />
                   </button>

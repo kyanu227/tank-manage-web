@@ -297,31 +297,59 @@ describe("core staff operation screens", () => {
     expectNoJapaneseChrome(processingHtml);
   });
 
-  it("renders a safe fallback for an unknown legacy return condition", () => {
+  it.each([
+    {
+      locale: "ja" as const,
+      processingTitle: "返却タグ処理",
+      unknownTag: "不明なタグ（既存の処理規則が適用されます） (legacy_condition)",
+      selectionLabel: "A-01を処理対象から外す",
+      processLabel: "1件の返却タグを処理する",
+    },
+    {
+      locale: "en" as const,
+      processingTitle: "Return tag processing",
+      unknownTag: "Unknown tag (the existing processing rule will be applied) (legacy_condition)",
+      selectionLabel: "Remove A-01 from processing",
+      processLabel: "Process 1 return tag",
+    },
+  ])("$locale keeps an unknown legacy return condition visible and processable", ({
+    locale,
+    processingTitle,
+    unknownTag,
+    selectionLabel,
+    processLabel,
+  }) => {
     const group = createReturnGroup();
     (group.items[0] as unknown as { condition: unknown }).condition = "legacy_condition";
-    const processing = createReturnProcessingResult(group, false);
+    const processing = createReturnProcessingResult(group, true);
     (processing.returnTagSelections["return-1"] as unknown as { condition: unknown }).condition = "legacy_condition";
 
     const html = renderToStaticMarkup(createElement(ReturnRequestList, {
       pendingReturnTagsLoading: false,
       returnGroups: [group],
       openReturnTagGroup: vi.fn(),
-      locale: "en",
+      locale,
     }));
     const processingHtml = renderToStaticMarkup(createElement(ReturnTagProcessingScreen, {
       selectedReturnGroup: group,
       returnTagProcessing: processing,
-      locale: "en",
+      locale,
     }));
 
-    expect(html).toContain("A-01 Unknown tag (legacy_condition)");
-    expect(processingHtml).toContain("Unknown tag (legacy_condition)");
-    expect(processingHtml).toContain('aria-label="Select a valid return tag for A-01 first"');
-    expect(processingHtml).toContain("disabled");
-    expect(processingHtml).not.toContain("Process 1 return tag");
-    expectNoJapaneseChrome(html);
-    expectNoJapaneseChrome(processingHtml);
+    expect(html).toContain(`A-01 ${unknownTag}`);
+    expect(processingHtml).toContain(unknownTag);
+    expect(processingHtml).toContain(`${processingTitle} — 1/1`);
+    expect(processingHtml).toContain(`aria-label="${selectionLabel}"`);
+    expect(processingHtml).toContain('aria-pressed="true"');
+    expect(processingHtml).toContain(processLabel);
+    expect(processingHtml).toContain("cursor:pointer");
+    expect(processingHtml).not.toContain("cursor:not-allowed");
+    expect(processingHtml).not.toContain("opacity:0.55");
+    expect(processingHtml).not.toContain("disabled");
+    if (locale === "en") {
+      expectNoJapaneseChrome(html);
+      expectNoJapaneseChrome(processingHtml);
+    }
   });
 
   it("preserves the existing Japanese operation copy", () => {
