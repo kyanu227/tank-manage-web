@@ -22,6 +22,7 @@ import {
   validateTransitionCode,
 } from "@/lib/tank-rules";
 import { submitManualTankOperation } from "../services/manual-operation-workflow";
+import { getStaffOperationText } from "../i18n";
 import type { ModeConfigItem, OpMode, QueueItem, TagType, TankMap } from "../types";
 
 interface UseManualTankOperationParams {
@@ -98,19 +99,23 @@ export function useManualTankOperation({
     const tank = tankIdResult.ok ? allTanks[tankId] : undefined;
     const currentStatus = tank?.status || "";
     let valid = tankIdResult.ok;
-    let error = tankIdResult.ok ? "" : tankIdResult.reason;
+    let error = tankIdResult.ok
+      ? ""
+      : locale === "ja"
+        ? tankIdResult.reason
+        : getStaffOperationText("invalidTankId", locale);
     let recoveryCandidate = false;
 
     if (!tankIdResult.ok) {
       valid = false;
     } else if (!tank) {
       valid = false;
-      error = "未登録タンク";
+      error = getStaffOperationText("unregisteredTank", locale);
     } else {
       const statusCode = coerceTankStatusCode(currentStatus);
       if (!statusCode) {
         valid = false;
-        error = "タンク状態が不正です";
+        error = getStaffOperationText("invalidTankStatus", locale);
       } else {
         const actionToValidate = mode === "return"
           ? resolveReturnActionCode(tag as ReturnTag, statusCode)
@@ -118,7 +123,7 @@ export function useManualTankOperation({
         if (!validateTransitionCode(statusCode, actionToValidate)) {
           if (policyLoading) {
             valid = false;
-            error = "操作方針を確認中です";
+            error = getStaffOperationText("policyLoading", locale);
           } else {
             const previewTargetCustomer = mode === "lend"
               ? selectedCustomer ?? {
@@ -147,7 +152,9 @@ export function useManualTankOperation({
               error = "";
             } else {
               valid = false;
-              error = `${getTankStatusLabel(statusCode, locale)} は不可`;
+              error = getStaffOperationText("operationNotAllowed", locale, {
+                status: getTankStatusLabel(statusCode, locale),
+              });
             }
           }
         }
@@ -253,7 +260,7 @@ export function useManualTankOperation({
     const effectiveCustomer = customerOverride ?? selectedCustomer ?? null;
 
     if (mode === "lend" && !effectiveCustomer) {
-      alert("貸出先を選択してください。");
+      alert(getStaffOperationText("customerRequired", locale));
       return;
     }
 
@@ -297,10 +304,11 @@ export function useManualTankOperation({
       setOpQueue([]);
       fetchData();
     } catch (e: unknown) {
-      const errorMessage = e && typeof e === "object" && "message" in e
+      const rawMessage = e && typeof e === "object" && "message" in e
         ? String((e as { message: unknown }).message)
         : undefined;
-      alert("エラー: " + errorMessage);
+      if (locale === "en") console.error("Manual staff operation failed", e);
+      alert(locale === "ja" ? `エラー: ${rawMessage}` : getStaffOperationText("operationFailure", locale));
     } finally {
       setSubmitting(false);
     }

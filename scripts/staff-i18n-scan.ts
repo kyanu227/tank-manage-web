@@ -35,6 +35,7 @@ export const STAFF_I18N_SHARED_FILES = [
   "src/lib/operation-messages.ts",
   "src/lib/return-tag-labels.ts",
   "src/lib/tank-action-status-labels.ts",
+  "src/lib/tank-recovery-confirmation-message.ts",
 ] as const;
 
 const JAPANESE_TEXT_PATTERN = /[\u3040-\u30ff\u3400-\u9fff々〆〤ヶ]/u;

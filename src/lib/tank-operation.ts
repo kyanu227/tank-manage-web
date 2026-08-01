@@ -54,12 +54,16 @@ import {
   planTankTransition,
   resolvePlannerPolicyMode,
   type RecoveryEvidence,
-  type RecoveryEvidenceKey,
   type AffectedCustomers,
   type InitialTransitionReviewStatus,
   type TransitionEnforcementMode,
   type TransitionPlan,
 } from "./tank-transition-policy";
+import { getStaffLocale } from "@/hooks/useStaffSession";
+import {
+  buildTankRecoveryConfirmationMessage,
+  getTankRecoveryText,
+} from "./tank-recovery-confirmation-message";
 import {
   assertAtomicTankOperationCount,
 } from "./tank-operation-limits";
@@ -760,29 +764,25 @@ function asRecoveryConfirmationRequiredError(
 function requestRecoveryConfirmation(
   error: TankRecoveryConfirmationRequiredError,
 ): TankRecoveryConfirmation {
+  const locale = getStaffLocale();
   if (typeof window === "undefined") {
-    throw new Error(
-      "自動補完には画面上での現物確認が必要です。ブラウザから操作してください。",
-    );
+    throw new Error(getTankRecoveryText("browserRequired", locale));
   }
 
-  error.requirements.forEach(assertRecoveryRequirementCanBeConfirmed);
+  error.requirements.forEach((requirement) => {
+    assertRecoveryRequirementCanBeConfirmed(requirement, locale);
+  });
 
   // 一括操作でもタンクごとに全stepと確認対象を読めるよう、1本ずつ確認する。
   for (const [index, requirement] of error.requirements.entries()) {
-    const aggregationNotice = requirement.transitionReviewStatus === "pending"
-      ? "外部顧客の貸出サイクルに影響するため、管理者レビュー完了まで請求・売上・スタッフ実績へ算入されません。"
-      : "外部顧客の貸出サイクルを変更しない内部補完のため、確定後すぐに正式操作として扱われます。";
-    const accepted = window.confirm([
-      `状態遷移の自動補完を実行します（${index + 1}/${error.requirements.length}）。`,
-      "画面上は指定操作として確定しますが、内部では下記の正規手順を一括記録します。",
-      aggregationNotice,
-      "表示された現物・貸出先・充填状態等をすべて確認した場合だけ［OK］を押してください。",
-      "",
-      buildRecoveryRequirementDetails(requirement),
-    ].join("\n"));
+    const accepted = window.confirm(buildTankRecoveryConfirmationMessage(
+      requirement,
+      index,
+      error.requirements.length,
+      locale,
+    ));
     if (!accepted) {
-      throw new Error("自動補完操作をキャンセルしました。");
+      throw new Error(getTankRecoveryText("cancelled", locale));
     }
   }
 
@@ -799,78 +799,19 @@ function requestRecoveryConfirmation(
   };
 }
 
-const RECOVERY_EVIDENCE_LABELS: Record<RecoveryEvidenceKey, string> = {
-  physicalTankConfirmed: "目の前の現物と、表示されたタンクID/番号が一致する",
-  possessionConfirmed: "現物を回収済みで、表示された現在holderが実際に占有していない",
-  previousCustomerConfirmed: "表示された旧貸出先が、このタンクの直前の貸出先である",
-  fillStateConfirmed: "現物のガス充填状態が、表示された充填stepの実行内容と一致する",
-  damageStateConfirmed: "現物の破損・故障・不良状態を目視し、表示状態と一致する",
-};
-
 function assertRecoveryRequirementCanBeConfirmed(
   requirement: TankRecoveryRequirement,
+  locale: "ja" | "en",
 ): void {
   if (!requirement.plan.requiredEvidence.includes("previousCustomerConfirmed")) return;
   const previousCustomerStep = requirement.plan.steps.find(
     (step) => step.businessEffect === "rental_close",
   );
   if (!previousCustomerStep?.customerId?.trim() || !previousCustomerStep.customerName?.trim()) {
-    throw new Error(
-      `[${requirement.tankId}] 旧貸出先customerId/customerNameを表示できないため、自動補完を確認完了にできません。`,
-    );
+    throw new Error(getTankRecoveryText("missingPreviousCustomer", locale, {
+      tankId: requirement.tankId,
+    }));
   }
-}
-
-function buildRecoveryRequirementDetails(
-  requirement: TankRecoveryRequirement,
-): string {
-  const finalStep = requirement.plan.steps.at(-1)!;
-  const previousCustomerStep = requirement.plan.steps.find(
-    (step) => step.businessEffect === "rental_close",
-  );
-  const newCustomerStep = [...requirement.plan.steps].reverse().find(
-    (step) => step.businessEffect === "rental_open",
-  );
-  const stepDetails = requirement.plan.steps.flatMap((step, index) => [
-    `step ${index + 1}: ${tankActionCodeToLegacyAction(step.action)} (${step.action})`,
-    `  状態: ${tankStatusCodeToLegacyStatus(step.fromStatus)} (${step.fromStatus}) → ${tankStatusCodeToLegacyStatus(step.toStatus)} (${step.toStatus})`,
-    `  実行者: ${step.actorType === "system" ? "システム補完" : "担当者操作"} (${step.actorType})`,
-    `  顧客: ${formatCustomer(step.customerId, step.customerName, "該当なし")}`,
-    `  場所: ${step.location?.trim() || "未設定"}`,
-  ]);
-  const evidence = requirement.plan.requiredEvidence.map(
-    (key) => `・${RECOVERY_EVIDENCE_LABELS[key]} [${key}]`,
-  );
-
-  return [
-    `タンクID/番号: ${requirement.tankId}`,
-    `表示操作: ${tankActionCodeToLegacyAction(requirement.requestedAction)} (${requirement.requestedAction})`,
-    `現在status: ${tankStatusCodeToLegacyStatus(requirement.currentStatus)} (${requirement.currentStatus})`,
-    `現在location: ${requirement.currentLocation?.trim() || "未設定"}`,
-    `現在holder customer: ${formatCustomer(requirement.currentCustomerId, requirement.currentCustomerName, "なし")}`,
-    `旧貸出先customer: ${formatCustomer(previousCustomerStep?.customerId, previousCustomerStep?.customerName, "該当なし")}`,
-    `新貸出先customer: ${formatCustomer(newCustomerStep?.customerId, newCustomerStep?.customerName, "該当なし")}`,
-    `最終状態: ${tankStatusCodeToLegacyStatus(finalStep.toStatus)} (${finalStep.toStatus})`,
-    "",
-    "内部で記録するtransition steps:",
-    ...stepDetails,
-    "",
-    "plannerが要求した確認項目:",
-    ...evidence,
-  ].join("\n");
-}
-
-function formatCustomer(
-  customerId: string | null | undefined,
-  customerName: string | null | undefined,
-  emptyLabel: string,
-): string {
-  const id = customerId?.trim();
-  const name = customerName?.trim();
-  if (id && name) return `${name} (customerId: ${id})`;
-  if (id) return `名称不明 (customerId: ${id})`;
-  if (name) return `${name} (customerId不明)`;
-  return emptyLabel;
 }
 
 /* ════════════════════════════════════════════

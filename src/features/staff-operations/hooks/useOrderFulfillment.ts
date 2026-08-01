@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 import {
   approveOrder as approveOrderTransaction,
   fulfillOrder as fulfillOrderTransaction,
@@ -20,14 +21,17 @@ import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
 import { validateTransitionCode } from "@/lib/tank-rules";
 import type { ScannedTank, TankMap } from "../types";
+import { getStaffOperationText } from "../i18n";
 
 interface UseOrderFulfillmentParams {
   allTanks: TankMap;
   fetchData: () => Promise<void>;
+  locale?: Locale;
 }
 
 export interface UseOrderFulfillmentResult {
   ordersLoading: boolean;
+  ordersLoadFailed: boolean;
   pendingOrders: PendingOrder[];
   selectedOrder: PendingOrder | null;
   scannedTanks: ScannedTank[];
@@ -52,8 +56,10 @@ export interface UseOrderFulfillmentResult {
 export function useOrderFulfillment({
   allTanks,
   fetchData,
+  locale = DEFAULT_LOCALE,
 }: UseOrderFulfillmentParams): UseOrderFulfillmentResult {
   const [ordersLoading, setOrdersLoading] = useState(true);
+  const [ordersLoadFailed, setOrdersLoadFailed] = useState(false);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
   const [selectedOrder, setSelectedOrder] = useState<PendingOrder | null>(null);
   const [scannedTanks, setScannedTanks] = useState<ScannedTank[]>([]);
@@ -67,6 +73,7 @@ export function useOrderFulfillment({
 
   const fetchOrders = useCallback(async () => {
     setOrdersLoading(true);
+    setOrdersLoadFailed(false);
     try {
       // 既存挙動を維持: 3 status を並列取得し、呼び出し側でソートする。
       // 正規化（旧スキーマ tankType/quantity 吸収）は repository 境界で行うため、
@@ -80,6 +87,7 @@ export function useOrderFulfillment({
       setPendingOrders(ordersData);
     } catch (err) {
       console.error(err);
+      setOrdersLoadFailed(true);
     } finally {
       setOrdersLoading(false);
     }
@@ -102,10 +110,12 @@ export function useOrderFulfillment({
   const approveOrder = useCallback(async (order: PendingOrder) => {
     const validationError = getOrderApprovalValidationError(order);
     if (validationError) {
-      alert(validationError);
+      alert(getStaffOperationText("customerLinkRequired", locale));
       return;
     }
-    if (!confirm(`${order.customerName} の受注を承認しますか？`)) return;
+    if (!confirm(getStaffOperationText("approveConfirm", locale, {
+      customerName: order.customerName,
+    }))) return;
 
     setApprovingOrderId(order.id);
     try {
@@ -113,11 +123,12 @@ export function useOrderFulfillment({
       await approveOrderTransaction(order.id, actor);
       await fetchOrders();
     } catch (err: unknown) {
-      alert("承認エラー: " + errorMessage(err));
+      if (locale === "en") console.error("Order approval failed", err);
+      alert(locale === "ja" ? `承認エラー: ${errorMessage(err)}` : getStaffOperationText("approvalFailure", locale));
     } finally {
       setApprovingOrderId(null);
     }
-  }, [fetchOrders]);
+  }, [fetchOrders, locale]);
 
   const orderFocusInput = useCallback((prefix: string) => {
     setOrderActivePrefix(prefix);
@@ -139,35 +150,41 @@ export function useOrderFulfillment({
     const totalRequired = totalOrderQuantity(selectedOrder.items);
     const validCount = scannedTanks.filter((t) => t.valid).length;
     if (validCount >= totalRequired) {
-      alert("発注数に達しています");
+      alert(getStaffOperationText("requiredQuantityReached", locale));
       return;
     }
 
     const tank = tankIdResult.ok ? allTanks[tankId] : undefined;
     let valid = tankIdResult.ok;
-    let error = tankIdResult.ok ? "" : tankIdResult.reason;
+    let error = tankIdResult.ok
+      ? ""
+      : locale === "ja"
+        ? tankIdResult.reason
+        : getStaffOperationText("invalidTankId", locale);
     if (!tankIdResult.ok) {
       valid = false;
     } else if (!tank) {
       valid = false;
-      error = "未登録タンク";
+      error = getStaffOperationText("unregisteredTank", locale);
     } else {
       const statusCode = coerceTankStatusCode(tank.status);
       if (!statusCode) {
         valid = false;
-        error = "タンク状態が不正です";
+        error = getStaffOperationText("invalidTankStatus", locale);
       } else if (!validateTransitionCode(statusCode, "lend")) {
         valid = false;
-        error = `[${getTankStatusLabel(statusCode)}] は貸出不可`;
+        error = getStaffOperationText("statusNotLendable", locale, {
+          status: getTankStatusLabel(statusCode, locale),
+        });
       } else if (tank.location !== "倉庫") {
         valid = false;
-        error = "倉庫にありません";
+        error = getStaffOperationText("notInWarehouse", locale);
       } else {
         // items 配列（種別ごとの要求本数）との突合
         const matched = findMatchingItem(tank.type ?? "", selectedOrder.items);
         if (!matched) {
           valid = false;
-          error = "この受注に含まれない種別です";
+          error = getStaffOperationText("typeNotInOrder", locale);
         } else {
           // すでに該当種別を必要数スキャン済みか？
           const scannedSameType = scannedTanks.filter((t) => {
@@ -177,7 +194,7 @@ export function useOrderFulfillment({
           }).length;
           if (scannedSameType >= matched.quantity) {
             valid = false;
-            error = "この種別は必要数スキャン済みです";
+            error = getStaffOperationText("typeQuantityReached", locale);
           }
         }
       }
@@ -187,7 +204,7 @@ export function useOrderFulfillment({
     setOrderLastAdded(tankId);
     if (orderSuccessTimeoutRef.current) clearTimeout(orderSuccessTimeoutRef.current);
     orderSuccessTimeoutRef.current = setTimeout(() => setOrderLastAdded(null), 1500);
-  }, [allTanks, scannedTanks, selectedOrder]);
+  }, [allTanks, locale, scannedTanks, selectedOrder]);
 
   const handleOrderInputChange = useCallback((e: ChangeEvent<HTMLInputElement>) => {
     const val = e.target.value.replace(/[^0-9]/g, "");
@@ -227,7 +244,10 @@ export function useOrderFulfillment({
       allTanks,
     });
     if (!validation.ok) {
-      alert(validation.message);
+      alert(getStaffOperationText("quantityMismatch", locale, {
+        scanned: scannedTanks.filter((tank) => tank.valid).length,
+        required: totalOrderQuantity(selectedOrder.items),
+      }));
       return;
     }
     const { validTanks } = validation;
@@ -241,19 +261,21 @@ export function useOrderFulfillment({
         actor,
       });
 
-      alert("受注したタンクを貸し出しました");
+      alert(getStaffOperationText("fulfillmentSuccess", locale));
       closeFulfillment();
       fetchOrders();
       fetchData();
     } catch (err: unknown) {
-      alert("エラー: " + errorMessage(err));
+      if (locale === "en") console.error("Order fulfillment failed", err);
+      alert(locale === "ja" ? `エラー: ${errorMessage(err)}` : getStaffOperationText("fulfillmentFailure", locale));
     } finally {
       setOrderSubmitting(false);
     }
-  }, [allTanks, closeFulfillment, fetchData, fetchOrders, scannedTanks, selectedOrder]);
+  }, [allTanks, closeFulfillment, fetchData, fetchOrders, locale, scannedTanks, selectedOrder]);
 
   return {
     ordersLoading,
+    ordersLoadFailed,
     pendingOrders,
     selectedOrder,
     scannedTanks,

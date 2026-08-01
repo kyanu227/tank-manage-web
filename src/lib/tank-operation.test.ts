@@ -49,6 +49,7 @@ const mocks = vi.hoisted(() => ({
   actualResolvePlannerPolicyMode: null as (
     typeof import("@/lib/tank-transition-policy")
   )["resolvePlannerPolicyMode"] | null,
+  staffLocale: "ja" as "ja" | "en",
   aggregationReference: {
     id: "tankAggregationRevision",
     path: "settings/tankAggregationRevision",
@@ -82,6 +83,10 @@ vi.mock("@/lib/firebase/tank-aggregation-revision-service", () => ({
     tankDataRevision: 1,
     officialAggregationRevision: 1,
   }),
+}));
+
+vi.mock("@/hooks/useStaffSession", () => ({
+  getStaffLocale: () => mocks.staffLocale,
 }));
 
 vi.mock("@/lib/tank-transition-policy", async (importOriginal) => {
@@ -250,6 +255,7 @@ beforeEach(() => {
   recordedTransactions = [];
   transactionCallbackCount = 0;
   logSequence = 0;
+  mocks.staffLocale = "ja";
 
   mocks.collection.mockReset();
   mocks.collection.mockImplementation(
@@ -624,7 +630,7 @@ describe("tank cycle guard", () => {
   });
 
   it("#12 stale errorはrecovery retry loopへ入らない", async () => {
-    const confirm = vi.fn(() => true);
+    const confirm = vi.fn<(message: string) => boolean>(() => true);
     vi.stubGlobal("window", { confirm });
     setTankAttempts({
       T001: tankData({ latestLogId: "log-new" }),
@@ -690,6 +696,94 @@ describe("tank cycle guard", () => {
     expect(mocks.planTankTransition).toHaveBeenCalledTimes(1);
     expect(confirm).toHaveBeenCalledTimes(1);
     recordedTransactions.forEach(expectNoWrites);
+  });
+
+  it.each(["ja", "en"] as const)("recovery確認は%s表示でもretry・write契約を維持する", async (locale) => {
+    mocks.staffLocale = locale;
+    const confirm = vi.fn<(message: string) => boolean>(() => true);
+    vi.stubGlobal("window", { confirm });
+    mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
+    const current = tankData({
+      status: "empty",
+      customerId: "customer-001",
+      customerName: "Customer A",
+      location: "Customer A",
+    });
+    setTankAttempts({ T001: current }, { T001: current });
+
+    const result = await applyTankOperation(operationInput({
+      transitionAction: "lend",
+      context: {
+        actor: ACTOR,
+        customer: {
+          customerId: "customer-002",
+          customerName: "Customer B",
+        },
+        source: "manual",
+        workflow: "tank_operation",
+      },
+      location: "Customer B",
+    }));
+
+    expect(result.nextStatus).toBe("lent");
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(mocks.runTransaction).toHaveBeenCalledTimes(2);
+    expect(transactionCallbackCount).toBe(2);
+    expectNoWrites(recordedTransactions[0]!);
+    expect(recordedTransactions[1]?.set).toHaveBeenCalledTimes(2);
+    expect(recordedTransactions[1]?.update).toHaveBeenCalledTimes(1);
+    const prompt = String(confirm.mock.calls[0]?.[0]);
+    if (locale === "en") {
+      expect(prompt).toContain("Run state-transition recovery (1/1).");
+      expect(prompt).not.toMatch(/[\u3040-\u30ff\u3400-\u9fff々〆〤ヶ]/u);
+    } else {
+      expect(prompt).toContain("状態遷移の自動補完を実行します（1/1）。");
+    }
+    const logWrite = recordedTransactions[1]?.set.mock.calls.find(
+      ([reference]) => referencePath(reference).startsWith("logs/"),
+    );
+    const logData = logWrite?.[1] as Record<string, unknown> | undefined;
+    expect(logData?.recoveryConfirmationFingerprint).toBe("a".repeat(64));
+    expect(logData?.recoveryEvidence).toEqual({
+      physicalTankConfirmed: true,
+      fillStateConfirmed: true,
+    });
+  });
+
+  it.each(["ja", "en"] as const)("recovery確認を%s表示でcancelするとwriteせずretryしない", async (locale) => {
+    mocks.staffLocale = locale;
+    const confirm = vi.fn<(message: string) => boolean>(() => false);
+    vi.stubGlobal("window", { confirm });
+    mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
+    setTankAttempts({
+      T001: tankData({
+        status: "empty",
+        customerId: "customer-001",
+        customerName: "Customer A",
+        location: "Customer A",
+      }),
+    });
+
+    const error = await captureError(applyTankOperation(operationInput({
+      transitionAction: "lend",
+      context: {
+        actor: ACTOR,
+        customer: {
+          customerId: "customer-002",
+          customerName: "Customer B",
+        },
+        source: "manual",
+        workflow: "tank_operation",
+      },
+      location: "Customer B",
+    })));
+
+    expect(error).toEqual(new Error(locale === "ja"
+      ? "自動補完操作をキャンセルしました。"
+      : "The recovery operation was cancelled."));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
+    expectNoWrites(recordedTransactions[0]!);
   });
 
   it("#19 valid先頭・stale後続でも全cycle検査前にplannerを呼ばない", async () => {

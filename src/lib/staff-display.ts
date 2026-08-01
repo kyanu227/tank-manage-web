@@ -12,6 +12,7 @@ export function getLocalizedText(
 const SYSTEM_LOCATION_LABELS = {
   "倉庫": { ja: "倉庫", en: "Warehouse" },
   "自社": { ja: "自社", en: "In-house" },
+  "不明": { ja: "不明", en: "Unknown" },
 } satisfies Record<string, LocalizedText>;
 
 export function getStaffLocationLabel(
@@ -36,12 +37,30 @@ export function formatStaffTankCount(
   return `${new Intl.NumberFormat("en-US").format(count)} ${count === 1 ? "tank" : "tanks"}`;
 }
 
+export function getStaffTankUnit(
+  count: number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  if (locale === "ja") return "本";
+  return count === 1 ? "tank" : "tanks";
+}
+
 export function formatStaffItemCount(
   count: number,
   locale: Locale = DEFAULT_LOCALE,
 ): string {
   if (locale === "ja") return `${count}件`;
   return `${new Intl.NumberFormat("en-US").format(count)} ${count === 1 ? "item" : "items"}`;
+}
+
+export function formatStaffCount(
+  count: number,
+  locale: Locale,
+  units: Readonly<{ ja: string; enSingular: string; enPlural: string }>,
+): string {
+  const formatted = new Intl.NumberFormat(locale === "ja" ? "ja-JP" : "en-US").format(count);
+  if (locale === "ja") return `${formatted}${units.ja}`;
+  return `${formatted} ${count === 1 ? units.enSingular : units.enPlural}`;
 }
 
 export function formatStaffDate(
@@ -63,6 +82,20 @@ export function formatStaffDateTime(
   return new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : "en-US", {
     year: "numeric",
     month: locale === "ja" ? "numeric" : "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+    timeZone: "Asia/Tokyo",
+  }).format(value);
+}
+
+export function formatStaffShortDateTime(
+  value: Date | number,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  return new Intl.DateTimeFormat(locale === "ja" ? "ja-JP" : "en-US", {
+    month: "short",
     day: "numeric",
     hour: "2-digit",
     minute: "2-digit",

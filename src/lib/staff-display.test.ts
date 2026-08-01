@@ -4,10 +4,12 @@ import {
   formatStaffDateTime,
   formatStaffItemCount,
   formatStaffJpy,
+  formatStaffShortDateTime,
   formatStaffTankCount,
   getLocalizedText,
   getStaffGenericErrorMessage,
   getStaffLocationLabel,
+  getStaffTankUnit,
 } from "./staff-display";
 
 describe("staff display mapping", () => {
@@ -20,6 +22,7 @@ describe("staff display mapping", () => {
   it.each([
     ["倉庫", "倉庫", "Warehouse"],
     ["自社", "自社", "In-house"],
+    ["不明", "不明", "Unknown"],
     ["株式会社 海", "株式会社 海", "株式会社 海"],
   ])("maps only known system locations: %s", (value, ja, en) => {
     expect(getStaffLocationLabel(value, "ja")).toBe(ja);
@@ -41,6 +44,8 @@ describe("staff display mapping", () => {
   ])("formats tank counts: %i", (count, ja, en) => {
     expect(formatStaffTankCount(count, "ja")).toBe(ja);
     expect(formatStaffTankCount(count, "en")).toBe(en);
+    expect(getStaffTankUnit(count, "ja")).toBe("本");
+    expect(getStaffTankUnit(count, "en")).toBe(count === 1 ? "tank" : "tanks");
   });
 
   it.each([
@@ -60,6 +65,8 @@ describe("staff display mapping", () => {
     expect(formatStaffDateTime(instant, "ja")).toContain("1:00");
     expect(formatStaffDateTime(instant, "en")).toContain("Jan 2, 2026");
     expect(formatStaffDateTime(instant, "en")).toContain("01:00");
+    expect(formatStaffShortDateTime(instant, "ja")).toContain("1月2日");
+    expect(formatStaffShortDateTime(instant, "en")).toContain("Jan 2");
   });
 
   it("localizes JPY display without changing the amount", () => {

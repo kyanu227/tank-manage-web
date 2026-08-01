@@ -2,6 +2,7 @@
 
 import type { Locale } from "@/lib/locale";
 import { getOperationModeLabel, MODE_CONFIG, MODES } from "../constants";
+import { getStaffOperationText } from "../i18n";
 import type { OpMode } from "../types";
 import StaffSectionTabs, { type StaffSectionTabItem } from "@/components/StaffSectionTabs";
 
@@ -21,5 +22,15 @@ export default function OperationModeTabs({ mode, locale }: OperationModeTabsPro
     };
   });
 
-  return <StaffSectionTabs tabs={tabs} activeHref={`/staff/${mode}`} fontSize={13} iconSize={16} replace animationKey="operations" />;
+  return (
+    <StaffSectionTabs
+      tabs={tabs}
+      activeHref={`/staff/${mode}`}
+      ariaLabel={getStaffOperationText("operationMode", locale)}
+      fontSize={13}
+      iconSize={16}
+      replace
+      animationKey="operations"
+    />
+  );
 }

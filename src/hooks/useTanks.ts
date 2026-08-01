@@ -9,6 +9,7 @@ export interface UseTanksResult {
   tankMap: Record<string, TankDoc>;
   prefixes: string[];
   loading: boolean;
+  loadFailed: boolean;
   refetch: () => Promise<void>;
 }
 
@@ -27,9 +28,11 @@ export function useTanks(): UseTanksResult {
   const [tankMap, setTankMap] = useState<Record<string, TankDoc>>({});
   const [prefixes, setPrefixes] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadFailed, setLoadFailed] = useState(false);
 
   const refetch = useCallback(async () => {
     setLoading(true);
+    setLoadFailed(false);
     try {
       // ソート・正規化済みの一覧を取得
       const list = await tanksRepository.getTanks();
@@ -46,6 +49,7 @@ export function useTanks(): UseTanksResult {
       setPrefixes(Array.from(pSet).sort());
     } catch (e) {
       console.error("useTanks refetch failed", e);
+      setLoadFailed(true);
     } finally {
       setLoading(false);
     }
@@ -53,5 +57,5 @@ export function useTanks(): UseTanksResult {
 
   useEffect(() => { refetch(); }, [refetch]);
 
-  return { tanks, tankMap, prefixes, loading, refetch };
+  return { tanks, tankMap, prefixes, loading, loadFailed, refetch };
 }

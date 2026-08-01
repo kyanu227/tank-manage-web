@@ -137,7 +137,13 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   useOperationSwipe(mode);
 
   // マスターデータ
-  const { tankMap: allTanks, prefixes, refetch: refetchTanks } = useTanks();
+  const {
+    tankMap: allTanks,
+    prefixes,
+    loading: tanksLoading,
+    loadFailed: tanksLoadFailed,
+    refetch: refetchTanks,
+  } = useTanks();
   const destinations = useDestinations();
 
   // 返却モード: 手動返却画面の表示フラグ
@@ -152,10 +158,14 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
   // 各業務フックの組み立て
   const bulk = useBulkReturnByLocation();
-  const returnTagProcessing = useReturnTagProcessing({ fetchBulkTanks: bulk.fetchBulkTanks });
+  const returnTagProcessing = useReturnTagProcessing({
+    fetchBulkTanks: bulk.fetchBulkTanks,
+    locale: staffLocale,
+  });
   const orders = useOrderFulfillment({
     allTanks,
     fetchData,
+    locale: staffLocale,
   });
   const manual = useManualTankOperation({
     mode,
@@ -231,6 +241,10 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           prefixes={prefixes}
           allTanks={allTanks}
           fulfillment={orders}
+          locale={staffLocale}
+          dataLoading={tanksLoading}
+          dataLoadFailed={tanksLoadFailed}
+          retryData={refetchTanks}
         />
         <GlobalAnimations />
       </div>
@@ -245,6 +259,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
         <ReturnTagProcessingScreen
           selectedReturnGroup={returnTagProcessing.selectedReturnGroup}
           returnTagProcessing={returnTagProcessing}
+          locale={staffLocale}
         />
         <GlobalAnimations />
       </div>
@@ -273,6 +288,9 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           selectedCustomerId={destinations.selectedCustomerId}
           setSelectedCustomerId={destinations.setSelectedCustomerId}
           manual={manual}
+          dataLoading={tanksLoading || destinations.loading}
+          dataLoadFailed={tanksLoadFailed || destinations.loadFailed}
+          retryData={fetchData}
         />
       )}
 
@@ -280,10 +298,13 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
       {mode === "lend" && opStyle === "order" && !orders.selectedOrder && (
         <OrderListPanel
           ordersLoading={orders.ordersLoading}
+          ordersLoadFailed={orders.ordersLoadFailed}
           pendingOrders={orders.pendingOrders}
           approveOrder={orders.approveOrder}
           approvingOrderId={orders.approvingOrderId}
           openFulfillment={orders.openFulfillment}
+          retryOrders={orders.fetchOrders}
+          locale={staffLocale}
         />
       )}
 
@@ -302,6 +323,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
           <div style={{ height: "100%", overflowY: "auto", padding: 16 }}>
             <button
+              type="button"
               onClick={openManualReturn}
               style={{
                 width: "100%", padding: "10px", borderRadius: 12, border: "1.5px solid #e2e8f0",
@@ -322,6 +344,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
                   <button
                     key={segment.key}
                     type="button"
+                    aria-pressed={isActive}
                     onClick={() => setActiveReturnSegment(isActive ? null : segment.key)}
                     style={{
                       border: `1.5px solid ${isActive ? segment.color : hasItems ? `${segment.color}66` : "#e2e8f0"}`,
@@ -362,8 +385,11 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
             {(activeReturnSegment === null || activeReturnSegment === "customer_requests") && (
               <ReturnRequestList
                 pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
+                loadFailed={returnTagProcessing.pendingReturnTagsLoadFailed}
                 returnGroups={returnTagProcessing.returnGroups}
                 openReturnTagGroup={returnTagProcessing.openReturnTagGroup}
+                locale={staffLocale}
+                retry={returnTagProcessing.fetchPendingReturnTags}
               />
             )}
 
@@ -394,6 +420,9 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           prefixes={prefixes}
           manual={manual}
           onBack={() => setShowManualReturn(false)}
+          dataLoading={tanksLoading}
+          dataLoadFailed={tanksLoadFailed}
+          retryData={refetchTanks}
         />
       )}
 
@@ -406,6 +435,9 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           locale={staffLocale}
           prefixes={prefixes}
           manual={manual}
+          dataLoading={tanksLoading}
+          dataLoadFailed={tanksLoadFailed}
+          retryData={refetchTanks}
         />
       )}
 

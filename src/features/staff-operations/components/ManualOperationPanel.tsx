@@ -9,7 +9,9 @@ import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
 import { getTankStatusLabel } from "@/lib/tank-action-status-labels";
 import type { Locale } from "@/lib/locale";
 import type { CustomerSnapshot } from "@/lib/operation-context";
+import { formatStaffCount } from "@/lib/staff-display";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
+import { getStaffOperationText } from "../i18n";
 import type { ModeConfigItem, OpMode, TagType } from "../types";
 
 interface ManualOperationPanelProps {
@@ -23,6 +25,9 @@ interface ManualOperationPanelProps {
   setSelectedCustomerId?: (customerId: string) => void;
   manual: UseManualTankOperationResult;
   onBack?: () => void;
+  dataLoading?: boolean;
+  dataLoadFailed?: boolean;
+  retryData?: () => void | Promise<void>;
 }
 
 export default function ManualOperationPanel({
@@ -36,6 +41,9 @@ export default function ManualOperationPanel({
   setSelectedCustomerId,
   manual,
   onBack,
+  dataLoading = false,
+  dataLoadFailed = false,
+  retryData,
 }: ManualOperationPanelProps) {
   const {
     returnTag,
@@ -61,7 +69,7 @@ export default function ManualOperationPanel({
   const formatStatusLabel = (status?: string): string => {
     const code = coerceTankStatusCode(status);
     if (code) return getTankStatusLabel(code, locale);
-    return status || "不明";
+    return status || getStaffOperationText("unknownStatus", locale);
   };
 
   const customerSnapshotFromOption = (customerId: string): CustomerSnapshot | null => {
@@ -73,7 +81,7 @@ export default function ManualOperationPanel({
   const handleCustomerConfirm = (customerId: string) => {
     const customer = customerSnapshotFromOption(customerId);
     if (!customer) {
-      alert("貸出先を取得できませんでした。貸出先を選び直してください。");
+      alert(getStaffOperationText("destinationLookupFailure", locale));
       return;
     }
     void handleSubmit(true, customer);
@@ -90,13 +98,31 @@ export default function ManualOperationPanel({
           pattern="[0-9]*"
           value={inputValue}
           onChange={handleInputChange}
+          aria-label={getStaffOperationText("tankNumberInput", locale)}
           style={{ position: "absolute", opacity: 0, width: 1, height: 1, overflow: "hidden", pointerEvents: "none", caretColor: "transparent" }}
         />
+        {dataLoading && (
+          <div role="status" aria-label={getStaffOperationText("operationDataLoading", locale)} style={{ margin: "8px 16px 0", padding: "8px 12px", borderRadius: 10, background: "#eff6ff", color: "#1d4ed8", fontSize: 12, fontWeight: 800 }}>
+            {getStaffOperationText("operationDataLoading", locale)}
+          </div>
+        )}
+        {!dataLoading && dataLoadFailed && (
+          <div role="alert" style={{ margin: "8px 16px 0", padding: "10px 12px", borderRadius: 10, background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <span>{getStaffOperationText("operationDataLoadFailure", locale)}</span>
+            {retryData && (
+              <button type="button" onClick={() => void retryData()} style={{ flexShrink: 0, border: "none", borderRadius: 8, padding: "6px 10px", background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+                {getStaffOperationText("retry", locale)}
+              </button>
+            )}
+          </div>
+        )}
         {/* Top OK Button Area */}
         <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
           {isReturn && onBack ? (
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <button
+                type="button"
+                aria-label={getStaffOperationText("back", locale)}
                 onClick={onBack}
                 style={{
                   width: 36, height: 36, borderRadius: 8, border: "none",
@@ -112,6 +138,7 @@ export default function ManualOperationPanel({
                 lastAdded={lastAdded}
                 color={config.color}
                 onClick={handleManualOkTrigger}
+                locale={locale}
                 compact
               />
             </div>
@@ -122,6 +149,7 @@ export default function ManualOperationPanel({
               lastAdded={lastAdded}
               color={config.color}
               onClick={handleManualOkTrigger}
+              locale={locale}
             />
           )}
         </div>
@@ -129,7 +157,7 @@ export default function ManualOperationPanel({
         {/* Queue List */}
         <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>送信リスト</span>
+            <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>{getStaffOperationText("queue", locale)}</span>
             {opQueue.length > 0 && (
               <span style={{ background: config.color, color: "#fff", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 800 }}>
                 {opQueue.length}
@@ -139,8 +167,8 @@ export default function ManualOperationPanel({
 
           {opQueue.length === 0 ? (
             <div style={{ textAlign: "center", padding: "40px 20px", color: "#cbd5e1", marginTop: 20 }}>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>右側のリストからアルファベットを選び、</p>
-              <p style={{ margin: "4px 0", fontSize: 14, fontWeight: 600 }}>タンクの数字を入力してください</p>
+              <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{getStaffOperationText("choosePrefix", locale)}</p>
+              <p style={{ margin: "4px 0", fontSize: 14, fontWeight: 600 }}>{getStaffOperationText("enterTankNumber", locale)}</p>
             </div>
           ) : (
             <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
@@ -176,11 +204,13 @@ export default function ManualOperationPanel({
                     </div>
                     <div style={{ fontSize: 11, color: item.recoveryCandidate ? "#b45309" : item.valid ? "#64748b" : "#ef4444", fontWeight: 600, marginTop: 4 }}>
                       {item.recoveryCandidate
-                        ? `現在: ${formatStatusLabel(item.status)} ・自動補完確認が必要`
-                        : item.valid ? `現在: ${formatStatusLabel(item.status)} ` : item.error}
+                        ? `${getStaffOperationText("currentStatus", locale, { status: formatStatusLabel(item.status) })}${locale === "ja" ? " ・" : " · "}${getStaffOperationText("recoveryRequired", locale)}`
+                        : item.valid
+                          ? getStaffOperationText("currentStatus", locale, { status: formatStatusLabel(item.status) })
+                          : item.error}
                     </div>
                   </div>
-                  <button onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer", marginRight: isReturn ? undefined : -8 }}>
+                  <button type="button" aria-label={getStaffOperationText("removeTank", locale, { tankId: item.tankId })} onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer", marginRight: isReturn ? undefined : -8 }}>
                     <X size={18} />
                   </button>
                 </div>
@@ -189,7 +219,13 @@ export default function ManualOperationPanel({
           )}
         </div>
 
-        {isLend && setSelectedCustomerId && (
+        {isLend && setSelectedCustomerId && !dataLoading && !dataLoadFailed && customerOptions.length === 0 && (
+          <div role="status" style={{ padding: "10px 16px", background: "#fff", borderTop: "1px solid #e2e8f0", color: "#64748b", fontSize: 12, fontWeight: 800, textAlign: "center", flexShrink: 0 }}>
+            {getStaffOperationText("noActiveCustomers", locale)}
+          </div>
+        )}
+
+        {isLend && setSelectedCustomerId && customerOptions.length > 0 && (
           <div style={{
             padding: "8px 16px", background: "#fff", borderTop: "1px solid #e2e8f0",
             flexShrink: 0, zIndex: 20,
@@ -200,7 +236,8 @@ export default function ManualOperationPanel({
               onChange={setSelectedCustomerId}
               onConfirm={handleCustomerConfirm}
               color={config.color}
-              placeholder="貸出先を選択して実行..."
+              locale={locale}
+              placeholder={getStaffOperationText("selectCustomerAndRun", locale)}
             />
           </div>
         )}
@@ -214,9 +251,9 @@ export default function ManualOperationPanel({
               value={returnTag}
               onChange={setReturnTag}
               options={[
-                { value: "uncharged", label: "未充填" },
-                { value: "unused", label: "未使用" },
-                { value: "keep", label: "持ち越し" },
+                { value: "uncharged", label: getReturnTagLabel("uncharged", locale) },
+                { value: "unused", label: getReturnTagLabel("unused", locale) },
+                { value: "keep", label: getReturnTagLabel("keep", locale) },
               ]}
               locale={locale}
               compact
@@ -231,6 +268,7 @@ export default function ManualOperationPanel({
             operationLabel={operationLabel}
             validCount={validCount}
             submitting={submitting}
+            locale={locale}
             onClick={() => handleSubmit(!isReturn)}
           />
         )}
@@ -243,6 +281,7 @@ export default function ManualOperationPanel({
         onChange={(p) => setActivePrefix(p)}
         onSelect={(p) => focusInput(p)}
         accentColor={config.color}
+        locale={locale}
       />
     </div>
   );
@@ -255,11 +294,13 @@ interface OkButtonProps {
   color: string;
   onClick: () => void;
   compact?: boolean;
+  locale: Locale;
 }
 
-function OkButton({ activePrefix, inputValue, lastAdded, color, onClick, compact = false }: OkButtonProps) {
+function OkButton({ activePrefix, inputValue, lastAdded, color, onClick, compact = false, locale }: OkButtonProps) {
   return (
     <button
+      type="button"
       onClick={onClick}
       disabled={!activePrefix}
       style={{
@@ -275,7 +316,7 @@ function OkButton({ activePrefix, inputValue, lastAdded, color, onClick, compact
     >
       {lastAdded
         ? lastAdded
-        : (!activePrefix ? "OK入力" : inputValue ? `${activePrefix} - ${inputValue}` : `${activePrefix} - OK`)}
+        : (!activePrefix ? getStaffOperationText("okInput", locale) : inputValue ? `${activePrefix} - ${inputValue}` : `${activePrefix} - OK`)}
     </button>
   );
 }
@@ -287,9 +328,10 @@ interface FloatingSubmitButtonProps {
   validCount: number;
   submitting: boolean;
   onClick: () => void;
+  locale: Locale;
 }
 
-function FloatingSubmitButton({ mode, config, operationLabel, validCount, submitting, onClick }: FloatingSubmitButtonProps) {
+function FloatingSubmitButton({ mode, config, operationLabel, validCount, submitting, onClick, locale }: FloatingSubmitButtonProps) {
   const isLend = mode === "lend";
   const isReturn = mode === "return";
   const wrapperStyle = isLend
@@ -312,6 +354,8 @@ function FloatingSubmitButton({ mode, config, operationLabel, validCount, submit
   return (
     <div style={wrapperStyle}>
       <button
+        type="button"
+        aria-busy={submitting}
         onClick={onClick}
         disabled={submitting}
         style={{
@@ -325,7 +369,12 @@ function FloatingSubmitButton({ mode, config, operationLabel, validCount, submit
         }}
       >
         {submitting ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={16} />}
-        <span>{validCount}件の{operationLabel}を実行</span>
+        <span>{getStaffOperationText("executeOperation", locale, {
+          countLabel: formatStaffCount(validCount, locale, {
+            ja: "件", enSingular: "tank", enPlural: "tanks",
+          }),
+          operation: operationLabel,
+        })}</span>
       </button>
     </div>
   );

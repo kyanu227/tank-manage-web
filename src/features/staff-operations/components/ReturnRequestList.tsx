@@ -2,21 +2,29 @@
 
 import { CheckCircle2, ChevronRight, Loader2 } from "lucide-react";
 import { useStaffLocale } from "@/hooks/useStaffSession";
+import type { Locale } from "@/lib/locale";
 import { getOperationMessage } from "@/lib/operation-messages";
+import { getReturnTagLabelOrNull } from "@/lib/return-tag-labels";
+import { formatStaffCount, formatStaffShortDateTime, formatStaffTankCount } from "@/lib/staff-display";
+import { getStaffOperationText } from "../i18n";
 import type { Condition, ReturnGroup } from "../types";
 
 interface ReturnRequestListProps {
   pendingReturnTagsLoading: boolean;
   returnGroups: ReturnGroup[];
   openReturnTagGroup: (group: ReturnGroup) => void;
+  locale?: Locale;
+  loadFailed?: boolean;
+  retry?: () => void | Promise<void>;
 }
 
-const CONDITION_STYLE: Record<Condition, { label: string; color: string; background: string }> = {
-  normal: { label: "通常", color: "#2563eb", background: "#eff6ff" },
-  unused: { label: "未使用", color: "#059669", background: "#ecfdf5" },
-  uncharged: { label: "未充填", color: "#dc2626", background: "#fef2f2" },
-  keep: { label: "持ち越し", color: "#d97706", background: "#fffbeb" },
+const CONDITION_STYLE: Record<Condition, { color: string; background: string }> = {
+  normal: { color: "#2563eb", background: "#eff6ff" },
+  unused: { color: "#059669", background: "#ecfdf5" },
+  uncharged: { color: "#dc2626", background: "#fef2f2" },
+  keep: { color: "#d97706", background: "#fffbeb" },
 };
+const UNKNOWN_CONDITION_STYLE = { color: "#475569", background: "#f1f5f9" } as const;
 
 function toMillis(value: unknown): number | null {
   if (!value) return null;
@@ -31,19 +39,26 @@ function toMillis(value: unknown): number | null {
   return null;
 }
 
-function formatRequestedAt(value: number | null): string | null {
+function formatRequestedAt(value: number | null, locale: "ja" | "en"): string | null {
   if (value === null) return null;
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return null;
-  return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  if (locale === "ja") {
+    return `${date.getMonth() + 1}/${date.getDate()} ${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
+  }
+  return formatStaffShortDateTime(date, locale);
 }
 
 export default function ReturnRequestList({
   pendingReturnTagsLoading,
   returnGroups,
   openReturnTagGroup,
+  locale,
+  loadFailed = false,
+  retry,
 }: ReturnRequestListProps) {
-  const staffLocale = useStaffLocale();
+  const sessionLocale = useStaffLocale();
+  const staffLocale = locale ?? sessionLocale;
   const totalTankCount = returnGroups.reduce((sum, group) => sum + group.items.length, 0);
 
   return (
@@ -51,16 +66,32 @@ export default function ReturnRequestList({
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
         <h3 style={{ fontSize: 14, fontWeight: 800, color: "#475569", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ width: 4, height: 16, borderRadius: 2, background: "#10b981", display: "inline-block" }} />
-          返却タグ処理待ち
+          {getStaffOperationText("pendingReturnTags", staffLocale)}
         </h3>
         <span style={{ fontSize: 11, color: totalTankCount > 0 ? "#059669" : "#94a3b8", fontWeight: 900, border: "1px solid #e2e8f0", borderRadius: 999, padding: "3px 8px", background: "#fff" }}>
-          {returnGroups.length}顧客 / {totalTankCount}本
+          {getStaffOperationText("returnGroupSummary", staffLocale, {
+            customerCountLabel: formatStaffCount(returnGroups.length, staffLocale, {
+              ja: "顧客", enSingular: "customer", enPlural: "customers",
+            }),
+            tankCountLabel: formatStaffTankCount(totalTankCount, staffLocale),
+          })}
         </span>
       </div>
 
       {pendingReturnTagsLoading ? (
-        <div style={{ display: "flex", justifyContent: "center", padding: 40, background: "#fff", border: "1px solid #e8eaed", borderRadius: 16 }}>
+        <div role="status" aria-label={getStaffOperationText("loadingReturnRequests", staffLocale)} style={{ display: "flex", justifyContent: "center", padding: 40, background: "#fff", border: "1px solid #e8eaed", borderRadius: 16 }}>
           <Loader2 size={20} color="#94a3b8" style={{ animation: "spin 1s linear infinite" }} />
+        </div>
+      ) : loadFailed ? (
+        <div role="alert" style={{ background: "#fff", border: "1px solid #fecaca", borderRadius: 16, padding: "24px 16px", textAlign: "center" }}>
+          <p style={{ fontSize: 13, fontWeight: 800, color: "#b91c1c", margin: "0 0 12px" }}>
+            {getStaffOperationText("returnRequestsLoadFailure", staffLocale)}
+          </p>
+          {retry && (
+            <button type="button" onClick={() => void retry()} style={{ border: "none", borderRadius: 10, padding: "8px 14px", background: "#059669", color: "#fff", fontSize: 12, fontWeight: 800, cursor: "pointer" }}>
+              {getStaffOperationText("retry", staffLocale)}
+            </button>
+          )}
         </div>
       ) : returnGroups.length === 0 ? (
         <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: "24px 16px", textAlign: "center" }}>
@@ -80,10 +111,14 @@ export default function ReturnRequestList({
                 .filter((value): value is number => value !== null),
               0,
             );
-            const requestedAtLabel = formatRequestedAt(latestRequestedAt || null);
+            const requestedAtLabel = formatRequestedAt(latestRequestedAt || null, staffLocale);
 
             return (
               <button
+                type="button"
+                aria-label={getStaffOperationText("selectReturnGroup", staffLocale, {
+                  customerName: group.customerName,
+                })}
                 key={group.customerId}
                 onClick={() => openReturnTagGroup(group)}
                 style={{
@@ -112,7 +147,7 @@ export default function ReturnRequestList({
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                         <h3 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", margin: 0 }}>{group.customerName}</h3>
                         <span style={{ padding: "2px 7px", borderRadius: 999, background: "#ecfdf5", color: "#059669", fontSize: 10, fontWeight: 900 }}>
-                          {group.items.length}本
+                          {formatStaffTankCount(group.items.length, staffLocale)}
                         </span>
                       </div>
                       <p style={{ fontSize: 13, color: "#64748b", margin: "2px 0 0 0", fontWeight: 600 }}>
@@ -126,7 +161,10 @@ export default function ReturnRequestList({
                       </p>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginTop: 8 }}>
                         {previewItems.map((item) => {
-                          const style = CONDITION_STYLE[item.condition] ?? CONDITION_STYLE.normal;
+                          const label = getReturnTagLabelOrNull(item.condition, staffLocale);
+                          const style = label
+                            ? CONDITION_STYLE[item.condition] ?? UNKNOWN_CONDITION_STYLE
+                            : UNKNOWN_CONDITION_STYLE;
                           return (
                             <span
                               key={item.id}
@@ -140,13 +178,17 @@ export default function ReturnRequestList({
                                 whiteSpace: "nowrap",
                               }}
                             >
-                              {item.tankId} {style.label}
+                              {item.tankId} {label ?? getStaffOperationText("unknownReturnTag", staffLocale, {
+                                value: String(item.condition ?? ""),
+                              })}
                             </span>
                           );
                         })}
                         {hiddenCount > 0 && (
                           <span style={{ padding: "3px 6px", borderRadius: 999, background: "#f1f5f9", color: "#64748b", fontSize: 10, fontWeight: 900 }}>
-                            +{hiddenCount}件
+                            {getStaffOperationText("hiddenItems", staffLocale, {
+                              count: hiddenCount,
+                            })}
                           </span>
                         )}
                       </div>
@@ -155,10 +197,10 @@ export default function ReturnRequestList({
 
                   <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6, flexShrink: 0 }}>
                     <span style={{ fontSize: 11, fontWeight: 900, color: "#059669", background: "#ecfdf5", borderRadius: 999, padding: "4px 8px", whiteSpace: "nowrap" }}>
-                      確認
+                      {getStaffOperationText("review", staffLocale)}
                     </span>
                     <span style={{ fontSize: 10, fontWeight: 800, color: "#94a3b8", whiteSpace: "nowrap" }}>
-                      タップ
+                      {getStaffOperationText("tap", staffLocale)}
                     </span>
                   </div>
                 </div>
