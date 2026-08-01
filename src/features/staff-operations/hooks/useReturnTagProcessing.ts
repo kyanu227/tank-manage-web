@@ -8,7 +8,6 @@ import { confirmPendingReturnRequests } from "@/lib/firebase/return-tag-processi
 import { transactionsRepository } from "@/lib/firebase/repositories";
 import type { PendingReturn, ReturnConfirmationSelectionMap, ReturnGroup } from "../types";
 import { getStaffOperationText } from "../i18n";
-import { getReturnTagSelectionIssue } from "../return-tag-selection";
 
 interface UseReturnTagProcessingParams {
   fetchBulkTanks: () => Promise<void>;
@@ -74,13 +73,9 @@ export function useReturnTagProcessing({
 
   const confirmSelectedReturnRequests = useCallback(async () => {
     if (!selectedReturnGroup) return;
-    const selectionIssue = getReturnTagSelectionIssue(selectedReturnGroup, returnTagSelections);
-    if (selectionIssue === "none_selected") {
+    const selectedCount = selectedReturnGroup.items.filter((i) => returnTagSelections[i.id]?.selected).length;
+    if (selectedCount === 0) {
       alert(getStaffOperationText("selectTanks", locale));
-      return;
-    }
-    if (selectionIssue === "invalid_condition") {
-      alert(getStaffOperationText("chooseValidReturnTag", locale));
       return;
     }
     setReturnConfirmationSubmitting(true);
