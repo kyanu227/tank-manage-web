@@ -1,6 +1,13 @@
-import { describe, expect, it } from "vitest";
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { describe, expect, it, vi } from "vitest";
+import {
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { OPERATION_MESSAGES } from "../src/lib/operation-messages";
 import { RETURN_TAG_LABELS } from "../src/lib/return-tag-labels";
 import {
@@ -15,6 +22,7 @@ import {
   listStaffI18nSourceFiles,
   readStaffI18nBaseline,
   scanStaffJapanese,
+  writeCurrentBaseline,
 } from "./staff-i18n-scan";
 
 const repositoryRoot = resolve(import.meta.dirname, "..");
@@ -70,16 +78,39 @@ describe("staff Japanese residual enforcement", () => {
 
   it("rejects Japanese occurrences outside the exact fingerprint baseline", () => {
     const baseline = readStaffI18nBaseline(repositoryRoot);
+    expect(baseline.strict).toBe(true);
     const occurrences = scanStaffJapanese(repositoryRoot);
     const unmanaged = findUnmanagedJapanese(occurrences, baseline);
     expect(
       unmanaged.map(({ path, line, text }) => `${path}:${line} ${text}`),
     ).toEqual([]);
 
-    if (baseline.strict) {
-      expect(findStaleBaselineFingerprints(occurrences, baseline)).toEqual([]);
-    }
+    expect(findStaleBaselineFingerprints(occurrences, baseline)).toEqual([]);
   });
+
+  it.each([true, false])(
+    "preserves strict=%s when regenerating the baseline",
+    (strict) => {
+      const temporaryRoot = mkdtempSync(join(tmpdir(), "staff-i18n-baseline-"));
+      const stdoutWrite = vi
+        .spyOn(process.stdout, "write")
+        .mockImplementation(() => true);
+      try {
+        mkdirSync(resolve(temporaryRoot, "scripts"));
+        writeFileSync(
+          resolve(temporaryRoot, "scripts/staff-i18n-baseline.json"),
+          `${JSON.stringify({ version: 1, strict, fingerprints: ["old"] })}\n`,
+        );
+
+        writeCurrentBaseline(temporaryRoot);
+
+        expect(readStaffI18nBaseline(temporaryRoot).strict).toBe(strict);
+      } finally {
+        stdoutWrite.mockRestore();
+        rmSync(temporaryRoot, { recursive: true, force: true });
+      }
+    },
+  );
 
   it("recognizes only explicit ja dictionary and locale branches as managed copy", () => {
     expect(isLocaleManagedLine('title: { ja: "見出し", en: "Heading" }')).toBe(true);

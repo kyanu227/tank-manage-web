@@ -28,6 +28,8 @@ import {
   formatMyPageLocation,
   formatProfileDescription,
   formatRecentWorkTitle,
+  formatStaffProfileName,
+  formatStaffProfileRank,
   getLocaleOptionLabel,
   getMyPageText,
 } from "@/features/staff-dashboard/mypage-i18n";
@@ -131,11 +133,23 @@ export default function MyPage() {
     { label: getMyPageText("other", currentLocale), value: stats.other, color: "#f59e0b", bg: "#fffbeb" },
   ];
 
-  const displayName = profile?.name || session?.name || getMyPageText("staff", currentLocale);
+  const displayName = profile
+    ? formatStaffProfileName(
+        profile.name,
+        currentLocale,
+        profile.generatedFallbacks?.name === true,
+      )
+    : getMyPageText("staff", currentLocale);
   const displayRole = profile?.role || session?.role || "";
-  const displayRank = profile?.rank || session?.rank || "";
+  const displayRank = profile
+    ? formatStaffProfileRank(
+        profile.rank,
+        currentLocale,
+        profile.generatedFallbacks?.rank === true,
+      )
+    : "";
   const displayEmail = profile?.email || session?.email || "";
-  const profileTitle = profileLoading && !profile && !session ? getMyPageText("loading", currentLocale) : displayName;
+  const profileTitle = profileLoading && !profile ? getMyPageText("loading", currentLocale) : displayName;
   const profileDescription = profileLoading && !profile
     ? getMyPageText("profileChecking", currentLocale)
     : formatProfileDescription(displayRole, displayRank, currentLocale);

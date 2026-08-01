@@ -46,6 +46,8 @@ export type LegacyTankAction =
 
 export type LegacyTankStatus = TankStatus;
 
+export const LEGACY_UNKNOWN_TANK_STATUS_KEY = "不明";
+
 export const TANK_ACTION_CODE_TO_LEGACY_ACTION = {
   lend: ACTION.LEND,
   order_lend: "受注貸出",

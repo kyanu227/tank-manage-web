@@ -16,7 +16,7 @@ import StaffJoinRequestPanel from "@/components/StaffJoinRequestPanel";
 import { DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
 import { normalizeLocale, type Locale } from "@/lib/locale";
-import { getStaffLocale } from "@/hooks/useStaffSession";
+import { useStaffLocale } from "@/hooks/useStaffSession";
 import type { LocalizedText } from "@/lib/staff-display";
 import {
   createOrUpdateOwnStaffJoinRequest,
@@ -102,8 +102,8 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   const passcodeLoginEnabled = process.env.NEXT_PUBLIC_ENABLE_STAFF_PASSCODE_LOGIN === "true";
   const staffJoinRequestsEnabled = process.env.NEXT_PUBLIC_ENABLE_STAFF_JOIN_REQUESTS === "true";
   const authScreenRef = useRef<HTMLDivElement>(null);
-  const initialLocaleRef = useRef<Locale>(getStaffLocale());
-  const [displayLocale, setDisplayLocale] = useState<Locale>(initialLocaleRef.current);
+  const displayLocale = useStaffLocale();
+  const initialLocaleRef = useRef<Locale>(displayLocale);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -123,6 +123,10 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
   // Firebase Auth state
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
   const [firebaseAuthChecked, setFirebaseAuthChecked] = useState(false);
+
+  useEffect(() => {
+    initialLocaleRef.current = displayLocale;
+  }, [displayLocale]);
 
   const resetViewportAfterInput = useCallback(() => {
     (document.activeElement as HTMLElement | null)?.blur?.();
@@ -181,7 +185,6 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
     localStorage.setItem("staffSession", JSON.stringify(DEV_STAFF_SESSION));
     window.dispatchEvent(new Event("staffLogin"));
     initialLocaleRef.current = normalizeLocale(DEV_STAFF_SESSION.locale);
-    setDisplayLocale(initialLocaleRef.current);
     setIsAuthenticated(true);
     setLoading(false);
   }, [devAuthBypassEnabled]);
@@ -229,7 +232,6 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       };
 
       initialLocaleRef.current = profile.locale;
-      setDisplayLocale(profile.locale);
 
       clearJoinRequestState();
       localStorage.setItem("staffSession", JSON.stringify(userSession));
@@ -340,7 +342,6 @@ export default function StaffAuthGuard({ children, allowedRoles }: StaffAuthGuar
       };
 
       initialLocaleRef.current = userSession.locale;
-      setDisplayLocale(userSession.locale);
 
       localStorage.setItem("staffSession", JSON.stringify(userSession));
       window.dispatchEvent(new Event("staffLogin"));

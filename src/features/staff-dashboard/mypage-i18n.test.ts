@@ -5,6 +5,8 @@ import {
   formatMyPageTime,
   formatProfileDescription,
   formatRecentWorkTitle,
+  formatStaffProfileName,
+  formatStaffProfileRank,
   getLocaleOptionLabel,
   getStaffRoleDisplayLabel,
 } from "./mypage-i18n";
@@ -32,6 +34,15 @@ describe("staff my-page i18n", () => {
     expect(getStaffRoleDisplayLabel("admin", "ja")).toBe("admin");
     expect(getStaffRoleDisplayLabel("worker", "ja")).toBe("worker");
     expect(formatProfileDescription("admin", "Gold", "en")).toBe("Administrator / Rank: Gold");
+  });
+
+  it("localizes only generated staff profile fallbacks", () => {
+    expect(formatStaffProfileName("スタッフ", "en", true)).toBe("Staff member");
+    expect(formatStaffProfileRank("レギュラー", "en", true)).toBe("Regular");
+    expect(formatStaffProfileName("スタッフ", "en", false)).toBe("スタッフ");
+    expect(formatStaffProfileRank("レギュラー", "en", false)).toBe("レギュラー");
+    expect(formatStaffProfileName("スタッフ", "ja", true)).toBe("スタッフ");
+    expect(formatStaffProfileRank("レギュラー", "ja", true)).toBe("レギュラー");
   });
 
   it("distinguishes customer names from system locations without changing Japanese output", () => {

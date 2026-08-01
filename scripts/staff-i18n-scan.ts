@@ -171,11 +171,12 @@ function isStaffI18nBaseline(value: unknown): value is StaffI18nBaseline {
     && candidate.fingerprints.every((fingerprint) => typeof fingerprint === "string");
 }
 
-function writeCurrentBaseline(repositoryRoot: string): void {
+export function writeCurrentBaseline(repositoryRoot: string): void {
+  const { strict } = readStaffI18nBaseline(repositoryRoot);
   const occurrences = scanStaffJapanese(repositoryRoot);
   const baseline: StaffI18nBaseline = {
     version: 1,
-    strict: false,
+    strict,
     fingerprints: occurrences
       .filter((occurrence) => !isLocaleManagedLine(occurrence.text))
       .map((occurrence) => occurrence.fingerprint)

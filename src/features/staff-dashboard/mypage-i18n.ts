@@ -11,6 +11,7 @@ export const MYPAGE_TEXT = {
   profileChecking: { ja: "プロフィール確認中…", en: "Checking profile…" },
   roleNotSet: { ja: "権限未設定", en: "Role not set" },
   rank: { ja: "ランク", en: "Rank" },
+  regularRank: { ja: "レギュラー", en: "Regular" },
   rankNotSet: { ja: "ランク未設定", en: "Rank not set" },
   monthlyScore: { ja: "今月のスコア", en: "Monthly score" },
   estimatedReward: { ja: "報酬見込み", en: "Estimated reward" },
@@ -56,6 +57,22 @@ export function getStaffRoleDisplayLabel(value: string, locale: Locale): string 
   if (value === "準管理者") return getMyPageText("assistantAdministrator", locale);
   if (value === "worker" || value === "一般") return getMyPageText("staffRole", locale);
   return getMyPageText("unknownRole", locale);
+}
+
+export function formatStaffProfileName(
+  value: string,
+  locale: Locale,
+  generatedFallback: boolean,
+): string {
+  return generatedFallback ? getMyPageText("staff", locale) : value;
+}
+
+export function formatStaffProfileRank(
+  value: string,
+  locale: Locale,
+  generatedFallback: boolean,
+): string {
+  return generatedFallback ? getMyPageText("regularRank", locale) : value;
 }
 
 export function formatProfileDescription(role: string, rank: string, locale: Locale): string {
