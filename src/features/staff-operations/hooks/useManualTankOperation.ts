@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { useTankOperationPolicy } from "@/hooks/useTankOperationPolicy";
+import { useTankRecoveryConfirmationResolver } from "@/hooks/useTankRecoveryConfirmationResolver";
 import type { Locale } from "@/lib/locale";
 import {
   getManualOperationConfirmMessage,
@@ -68,6 +69,7 @@ export function useManualTankOperation({
     runtimeTransitionEnforcement,
     loading: policyLoading,
   } = useTankOperationPolicy();
+  const recoveryConfirmationResolver = useTankRecoveryConfirmationResolver();
   const [returnTag, setReturnTag] = useState<TagType>("normal");
   const [opQueue, setOpQueue] = useState<QueueItem[]>([]);
   const [activePrefix, setActivePrefix] = useState<string | null>(null);
@@ -293,6 +295,7 @@ export function useManualTankOperation({
         items: validItems,
         customer: effectiveCustomer,
         tanks: allTanks,
+        recoveryConfirmationResolver,
       });
 
       const successMessage = mode === "return"
@@ -316,7 +319,15 @@ export function useManualTankOperation({
     } finally {
       setSubmitting(false);
     }
-  }, [allTanks, fetchData, locale, mode, opQueue, selectedCustomer]);
+  }, [
+    allTanks,
+    fetchData,
+    locale,
+    mode,
+    opQueue,
+    recoveryConfirmationResolver,
+    selectedCustomer,
+  ]);
 
   const validCount = useMemo(() => opQueue.filter(q => q.valid).length, [opQueue]);
 

@@ -1,5 +1,4 @@
 import {
-  afterEach,
   beforeEach,
   describe,
   expect,
@@ -16,12 +15,18 @@ import {
   applyBulkTankOperations,
   applyTankOperation,
   StaleTankCycleError,
+  TankRecoveryConfirmationRequiredError,
   voidLog,
   type ExpectedTankCycle,
   type StaleTankCycleIssue,
   type TankOperationInput,
+  type TankRecoveryConfirmationRequest,
+  type TankRecoveryConfirmationResolver,
 } from "@/lib/tank-operation";
-import { StaffOperationError } from "@/lib/staff-operation-error";
+import {
+  getStaffOperationErrorMessage,
+  StaffOperationError,
+} from "@/lib/staff-operation-error";
 
 type PlanTankTransition = (
   request: TransitionPlanRequest,
@@ -52,7 +57,6 @@ const mocks = vi.hoisted(() => ({
   actualResolvePlannerPolicyMode: null as (
     typeof import("@/lib/tank-transition-policy")
   )["resolvePlannerPolicyMode"] | null,
-  staffLocale: "ja" as "ja" | "en",
   aggregationReference: {
     id: "tankAggregationRevision",
     path: "settings/tankAggregationRevision",
@@ -86,10 +90,6 @@ vi.mock("@/lib/firebase/tank-aggregation-revision-service", () => ({
     tankDataRevision: 1,
     officialAggregationRevision: 1,
   }),
-}));
-
-vi.mock("@/hooks/useStaffSession", () => ({
-  getStaffLocale: () => mocks.staffLocale,
 }));
 
 vi.mock("@/lib/tank-transition-policy", async (importOriginal) => {
@@ -165,6 +165,24 @@ function operationInput(
 
 function runtimeExpectedCycle(value: unknown): ExpectedTankCycle {
   return value as ExpectedTankCycle;
+}
+
+async function approveRecoveryConfirmation(
+  request: TankRecoveryConfirmationRequest,
+) {
+  const recoveryEvidence = request.requirements.reduce(
+    (evidence, requirement) => {
+      requirement.plan.requiredEvidence.forEach((key) => {
+        evidence[key] = true;
+      });
+      return evidence;
+    },
+    {} as Awaited<ReturnType<TankRecoveryConfirmationResolver>>["recoveryEvidence"],
+  );
+  return {
+    fingerprint: request.fingerprint,
+    recoveryEvidence,
+  };
 }
 
 function setTankAttempts(
@@ -270,7 +288,6 @@ beforeEach(() => {
   recordedTransactions = [];
   transactionCallbackCount = 0;
   logSequence = 0;
-  mocks.staffLocale = "ja";
 
   mocks.collection.mockReset();
   mocks.collection.mockImplementation(
@@ -340,13 +357,11 @@ beforeEach(() => {
   );
 });
 
-afterEach(() => {
-  vi.unstubAllGlobals();
-});
-
 describe("tank cycle guard", () => {
   it("#1 expectedCycle未指定の正常系は従来どおりwriteする", async () => {
-    const result = await applyTankOperation(operationInput());
+    const result = await applyTankOperation(operationInput(), {
+      recoveryConfirmationResolver: undefined,
+    });
 
     expect(result).toMatchObject({
       tankId: "T001",
@@ -645,15 +660,16 @@ describe("tank cycle guard", () => {
   });
 
   it("#12 stale errorはrecovery retry loopへ入らない", async () => {
-    const confirm = vi.fn<(message: string) => boolean>(() => true);
-    vi.stubGlobal("window", { confirm });
+    const recoveryConfirmationResolver = vi.fn(
+      approveRecoveryConfirmation,
+    );
     setTankAttempts({
       T001: tankData({ latestLogId: "log-new" }),
     });
 
     const error = await captureError(applyTankOperation(operationInput({
       expectedCycle: EXPECTED_CYCLE,
-    })));
+    }), { recoveryConfirmationResolver }));
 
     requireStaleError(error, [{
       tankId: "T001",
@@ -662,12 +678,13 @@ describe("tank cycle guard", () => {
     }]);
     expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
     expect(transactionCallbackCount).toBe(1);
-    expect(confirm).toHaveBeenCalledTimes(0);
+    expect(recoveryConfirmationResolver).toHaveBeenCalledTimes(0);
   });
 
   it("#13 recovery確認中にcycleが変化したら再確認せずstaleにする", async () => {
-    const confirm = vi.fn(() => true);
-    vi.stubGlobal("window", { confirm });
+    const recoveryConfirmationResolver = vi.fn(
+      approveRecoveryConfirmation,
+    );
     mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
     setTankAttempts(
       {
@@ -699,7 +716,7 @@ describe("tank cycle guard", () => {
       },
       location: "顧客B",
       expectedCycle: EXPECTED_CYCLE,
-    })));
+    }), { recoveryConfirmationResolver }));
 
     requireStaleError(error, [{
       tankId: "T001",
@@ -709,14 +726,14 @@ describe("tank cycle guard", () => {
     expect(mocks.runTransaction).toHaveBeenCalledTimes(2);
     expect(transactionCallbackCount).toBe(2);
     expect(mocks.planTankTransition).toHaveBeenCalledTimes(1);
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(recoveryConfirmationResolver).toHaveBeenCalledTimes(1);
     recordedTransactions.forEach(expectNoWrites);
   });
 
-  it.each(["ja", "en"] as const)("recovery確認は%s表示でもretry・write契約を維持する", async (locale) => {
-    mocks.staffLocale = locale;
-    const confirm = vi.fn<(message: string) => boolean>(() => true);
-    vi.stubGlobal("window", { confirm });
+  it("resolver承認はfingerprintを保持してretry・write契約を維持する", async () => {
+    const recoveryConfirmationResolver = vi.fn(
+      approveRecoveryConfirmation,
+    );
     mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
     const current = tankData({
       status: "empty",
@@ -738,22 +755,18 @@ describe("tank cycle guard", () => {
         workflow: "tank_operation",
       },
       location: "Customer B",
-    }));
+    }), { recoveryConfirmationResolver });
 
     expect(result.nextStatus).toBe("lent");
-    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(recoveryConfirmationResolver).toHaveBeenCalledTimes(1);
+    expect(recoveryConfirmationResolver.mock.calls[0]?.[0]).toMatchObject({
+      fingerprint: "a".repeat(64),
+    });
     expect(mocks.runTransaction).toHaveBeenCalledTimes(2);
     expect(transactionCallbackCount).toBe(2);
     expectNoWrites(recordedTransactions[0]!);
     expect(recordedTransactions[1]?.set).toHaveBeenCalledTimes(2);
     expect(recordedTransactions[1]?.update).toHaveBeenCalledTimes(1);
-    const prompt = String(confirm.mock.calls[0]?.[0]);
-    if (locale === "en") {
-      expect(prompt).toContain("Run state-transition recovery (1/1).");
-      expect(prompt).not.toMatch(/[\u3040-\u30ff\u3400-\u9fff々〆〤ヶ]/u);
-    } else {
-      expect(prompt).toContain("状態遷移の自動補完を実行します（1/1）。");
-    }
     const logWrite = recordedTransactions[1]?.set.mock.calls.find(
       ([reference]) => referencePath(reference).startsWith("logs/"),
     );
@@ -765,10 +778,66 @@ describe("tank cycle guard", () => {
     });
   });
 
-  it.each(["ja", "en"] as const)("recovery確認を%s表示でcancelするとwriteせずretryしない", async (locale) => {
-    mocks.staffLocale = locale;
-    const confirm = vi.fn<(message: string) => boolean>(() => false);
-    vi.stubGlobal("window", { confirm });
+  it("bulk resolver承認も全件を同じfingerprintで一括retryする", async () => {
+    const recoveryConfirmationResolver = vi.fn(
+      approveRecoveryConfirmation,
+    );
+    const extraOps = vi.fn();
+    mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
+    const current = tankData({
+      status: "empty",
+      customerId: null,
+      customerName: null,
+      location: "倉庫",
+    });
+    setTankAttempts(
+      { T001: current, T002: current },
+      { T001: current, T002: current },
+    );
+    const lendContext = {
+      actor: ACTOR,
+      customer: {
+        customerId: "customer-002",
+        customerName: "Customer B",
+      },
+      source: "manual" as const,
+      workflow: "tank_operation" as const,
+    };
+
+    await applyBulkTankOperations([
+      operationInput({
+        tankId: "T001",
+        transitionAction: "lend",
+        context: lendContext,
+        location: "Customer B",
+      }),
+      operationInput({
+        tankId: "T002",
+        transitionAction: "lend",
+        context: lendContext,
+        location: "Customer B",
+      }),
+    ], extraOps, { recoveryConfirmationResolver });
+
+    expect(recoveryConfirmationResolver).toHaveBeenCalledTimes(1);
+    expect(recoveryConfirmationResolver.mock.calls[0]?.[0]).toMatchObject({
+      fingerprint: "a".repeat(64),
+      requirements: [
+        { tankId: "T001" },
+        { tankId: "T002" },
+      ],
+    });
+    expect(mocks.runTransaction).toHaveBeenCalledTimes(2);
+    expectNoWrites(recordedTransactions[0]!);
+    expect(recordedTransactions[1]?.set).toHaveBeenCalledTimes(3);
+    expect(recordedTransactions[1]?.update).toHaveBeenCalledTimes(2);
+    expect(extraOps).toHaveBeenCalledTimes(1);
+  });
+
+  it("resolver拒否はrecovery_cancelledでwriteせずretryしない", async () => {
+    const recoveryConfirmationResolver = vi.fn(async () => {
+      throw new StaffOperationError("recovery_cancelled");
+    });
     mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
     setTankAttempts({
       T001: tankData({
@@ -791,19 +860,15 @@ describe("tank cycle guard", () => {
         workflow: "tank_operation",
       },
       location: "Customer B",
-    })));
+    }), { recoveryConfirmationResolver }));
 
-    const operationError = requireStaffOperationError(error, "recovery_cancelled");
-    expect(operationError.message).toBe(locale === "ja"
-      ? "自動補完操作をキャンセルしました。"
-      : "The recovery operation was cancelled.");
-    expect(confirm).toHaveBeenCalledTimes(1);
+    requireStaffOperationError(error, "recovery_cancelled");
+    expect(recoveryConfirmationResolver).toHaveBeenCalledTimes(1);
     expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
     expectNoWrites(recordedTransactions[0]!);
   });
 
-  it.each(["ja", "en"] as const)("browser外のrecovery確認は%sのtyped messageを返しwriteしない", async (locale) => {
-    mocks.staffLocale = locale;
+  it("resolver未注入のrecoveryはfail-closedでwriteしない", async () => {
     mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
     setTankAttempts({
       T001: tankData({
@@ -828,21 +893,19 @@ describe("tank cycle guard", () => {
       location: "Customer B",
     })));
 
-    const operationError = requireStaffOperationError(
+    requireStaffOperationError(
       error,
       "recovery_browser_required",
     );
-    expect(operationError.message).toBe(locale === "ja"
-      ? "自動補完には画面上での現物確認が必要です。ブラウザから操作してください。"
-      : "Physical verification on screen is required for recovery. Run this operation in a browser.");
     expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
     expect(transactionCallbackCount).toBe(1);
     expectNoWrites(recordedTransactions[0]!);
   });
 
-  it.each(["ja", "en"] as const)("旧貸出先を表示できないrecoveryは%sのtyped messageを返しwriteしない", async (locale) => {
-    mocks.staffLocale = locale;
-    vi.stubGlobal("window", { confirm: vi.fn() });
+  it("旧貸出先を表示できないrecoveryはresolver到達前に中断する", async () => {
+    const recoveryConfirmationResolver = vi.fn(
+      approveRecoveryConfirmation,
+    );
     const planned = mocks.actualPlanTankTransition?.({
       policyMode: "advisory",
       current: {
@@ -891,19 +954,114 @@ describe("tank cycle guard", () => {
         workflow: "tank_operation",
       },
       location: "Customer B",
-    })));
+    }), { recoveryConfirmationResolver }));
 
     const operationError = requireStaffOperationError(
       error,
       "recovery_previous_customer_missing",
     );
     expect(operationError.params).toEqual({ tankId: "T001" });
-    expect(operationError.message).toBe(locale === "ja"
-      ? "[T001] 旧貸出先customerId/customerNameを表示できないため、自動補完を確認完了にできません。"
-      : "[T001] Recovery cannot be confirmed because the previous customer ID and name cannot be displayed.");
-    expect(window.confirm).toHaveBeenCalledTimes(0);
+    expect(recoveryConfirmationResolver).toHaveBeenCalledTimes(0);
     expect(mocks.runTransaction).toHaveBeenCalledTimes(1);
     expect(transactionCallbackCount).toBe(1);
+    expectNoWrites(recordedTransactions[0]!);
+  });
+
+  it("confirmation required errorはcodeとstructural復元fieldを保持する", () => {
+    const error = new TankRecoveryConfirmationRequiredError(
+      "a".repeat(64),
+      [],
+    );
+
+    expect(error).toMatchObject({
+      name: "TankRecoveryConfirmationRequiredError",
+      code: "recovery_confirmation_required",
+      fingerprint: "a".repeat(64),
+      requirements: [],
+    });
+  });
+
+  it("confirmation required errorはdisplay boundaryでja/en文言へ解決する", () => {
+    const error = new TankRecoveryConfirmationRequiredError(
+      "a".repeat(64),
+      [],
+    );
+
+    expect(getStaffOperationErrorMessage(error, "ja")).toBe(
+      "正規の状態遷移へ自動補完するため、現物確認が必要です。",
+    );
+    expect(getStaffOperationErrorMessage(error, "en")).toBe(
+      "Physical verification is required before state-transition recovery can continue.",
+    );
+    expect(getStaffOperationErrorMessage(error, "ja")).not.toBe(
+      "recovery_confirmation_required",
+    );
+    expect(getStaffOperationErrorMessage(error, "en")).not.toBe(
+      "recovery_confirmation_required",
+    );
+  });
+
+  it("prototypeを失ったconfirmation required errorもstructural判定で復元する", async () => {
+    const recoveryConfirmationResolver = vi.fn(
+      approveRecoveryConfirmation,
+    );
+    mocks.resolvePlannerPolicyMode.mockReturnValue("advisory");
+    const current = tankData({
+      status: "empty",
+      customerId: null,
+      customerName: null,
+      location: "倉庫",
+    });
+    setTankAttempts({ T001: current }, { T001: current });
+    mocks.runTransaction.mockImplementation(
+      async (
+        _database: unknown,
+        callback: (
+          transaction: ReturnType<typeof createRecordedTransaction>,
+        ) => Promise<unknown>,
+      ) => {
+        const attemptIndex = transactionCallbackCount;
+        transactionCallbackCount += 1;
+        const attemptState = tankAttempts[attemptIndex]
+          ?? tankAttempts.at(-1)
+          ?? {};
+        const transaction = createRecordedTransaction(attemptState);
+        recordedTransactions.push(transaction);
+        try {
+          return await callback(transaction);
+        } catch (error) {
+          if (
+            attemptIndex === 0
+            && error instanceof TankRecoveryConfirmationRequiredError
+          ) {
+            throw {
+              name: error.name,
+              fingerprint: error.fingerprint,
+              requirements: error.requirements,
+            };
+          }
+          throw error;
+        }
+      },
+    );
+
+    const result = await applyTankOperation(operationInput({
+      transitionAction: "lend",
+      context: {
+        actor: ACTOR,
+        customer: {
+          customerId: "customer-002",
+          customerName: "Customer B",
+        },
+        source: "manual",
+        workflow: "tank_operation",
+      },
+      location: "Customer B",
+    }), { recoveryConfirmationResolver });
+
+    expect(result.nextStatus).toBe("lent");
+    expect(recoveryConfirmationResolver).toHaveBeenCalledTimes(1);
+    expect(mocks.runTransaction).toHaveBeenCalledTimes(2);
     expectNoWrites(recordedTransactions[0]!);
   });
 
@@ -1012,7 +1170,9 @@ describe("typed correction input validation", () => {
     const error = await captureError(run());
 
     const operationError = requireStaffOperationError(error, "reason_too_short");
-    expect(operationError.message).toBe("理由は5文字以上で入力してください");
+    expect(getStaffOperationErrorMessage(operationError, "ja")).toBe(
+      "理由は5文字以上で入力してください",
+    );
     expect(operationError.params).toEqual({ minLength: 5 });
     expect(mocks.runTransaction).toHaveBeenCalledTimes(0);
     expect(transactionCallbackCount).toBe(0);
@@ -1133,7 +1293,7 @@ describe("carry_over customer projection compatibility", () => {
         if (!(error instanceof Error)) {
           throw new Error("carry_over error が返りませんでした");
         }
-        expect(error.message).toBe(errorMessage);
+        expect(getStaffOperationErrorMessage(error, "ja")).toBe(errorMessage);
         expect(error).not.toBeInstanceOf(StaleTankCycleError);
         return;
       }

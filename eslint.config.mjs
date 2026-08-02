@@ -268,36 +268,6 @@ const eslintConfig = defineConfig([
     },
   },
   // Architecture allowlist: 1エントリを1ファイルに限定し、解消時はここから削除する。
-  // 暫定: P1-A で解消。@/hooks/useStaffSession・確認表示2 module・window のみ許可する。
-  {
-    files: ["src/lib/tank-operation.ts"],
-    rules: {
-      "no-restricted-imports": restrictedImports([
-        {
-          ...DOMAIN_UI_IMPORT_RESTRICTIONS[0],
-          group: [
-            ...DOMAIN_UI_IMPORT_RESTRICTIONS[0].group,
-            "!@/hooks/useStaffSession",
-          ],
-        },
-        {
-          ...DOMAIN_DISPLAY_IMPORT_RESTRICTIONS[0],
-          group: [
-            ...DOMAIN_DISPLAY_IMPORT_RESTRICTIONS[0].group,
-            "!./tank-recovery-confirmation-message",
-            "!./staff-operation-error",
-          ],
-        },
-        ...OPERATION_BILLING_IMPORT_RESTRICTIONS,
-      ]),
-      "no-restricted-globals": [
-        "error",
-        "document",
-        "localStorage",
-        "sessionStorage",
-      ],
-    },
-  },
   // 暫定: P1-A で解消。@/hooks/useStaffSession のみ許可する。
   {
     files: ["src/lib/firebase/staff-locale-service.ts"],

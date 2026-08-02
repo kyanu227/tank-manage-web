@@ -11,6 +11,7 @@ import { tryParseTankId } from "@/lib/tank-id";
 import { StaffOperationError } from "@/lib/staff-operation-error";
 import {
   applyBulkTankOperations,
+  type TankRecoveryConfirmationResolver,
   type TankOperationInput,
   type TankOperationWriter,
 } from "@/lib/tank-operation";
@@ -63,6 +64,7 @@ export type ConfirmPendingReturnRequestsInput = {
   group: PendingReturnRequestGroup;
   selections: ReturnConfirmationSelections;
   actor: OperationActor;
+  recoveryConfirmationResolver?: TankRecoveryConfirmationResolver;
 };
 
 export type ConfirmPendingReturnRequestsResult = {
@@ -72,7 +74,7 @@ export type ConfirmPendingReturnRequestsResult = {
 export async function confirmPendingReturnRequests(
   input: ConfirmPendingReturnRequestsInput,
 ): Promise<ConfirmPendingReturnRequestsResult> {
-  const { group, selections, actor } = input;
+  const { group, selections, actor, recoveryConfirmationResolver } = input;
   const selectedItems = selectPendingReturnRequestItems(group.items, selections);
   if (selectedItems.length === 0) {
     throw new StaffOperationError("selection_required");
@@ -82,10 +84,13 @@ export async function confirmPendingReturnRequests(
   const confirmations = await resolveReturnConfirmations(group, selectedItems, selections);
 
   // スタッフ確定時点で pending_return を実際の tanks/logs 更新に反映する。
-  await applyBulkTankOperations(
-    buildReturnConfirmationOperations(confirmations, baseContext),
-    (writer) => completePendingReturnRequests(writer, confirmations, actor),
-  );
+  const operations = buildReturnConfirmationOperations(confirmations, baseContext);
+  const completeRequests = (writer: TankOperationWriter) => {
+    completePendingReturnRequests(writer, confirmations, actor);
+  };
+  await applyBulkTankOperations(operations, completeRequests, {
+    recoveryConfirmationResolver,
+  });
 
   return { processedCount: selectedItems.length };
 }

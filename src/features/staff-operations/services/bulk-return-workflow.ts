@@ -9,6 +9,7 @@ import {
   StaleTankCycleError,
   type ExpectedTankCycle,
   type StaleTankCycleIssue,
+  type TankRecoveryConfirmationResolver,
 } from "@/lib/tank-operation";
 import {
   RETURN_TAG,
@@ -34,13 +35,19 @@ export type SubmitBulkReturnGroupInput = {
   tanks: readonly BulkReturnTargetInput[];
   fallbackLocation: string;
   actor: OperationActor;
+  recoveryConfirmationResolver?: TankRecoveryConfirmationResolver;
 };
 
 /** 貸出先別一括返却のpayloadを入力順で構築し、1回のbulk operationで送る。 */
 export async function submitBulkReturnGroup(
   input: SubmitBulkReturnGroupInput,
 ): Promise<void> {
-  const { tanks, fallbackLocation, actor } = input;
+  const {
+    tanks,
+    fallbackLocation,
+    actor,
+    recoveryConfirmationResolver,
+  } = input;
   const validatedTargets = requireBulkReturnExpectedCycles(tanks);
   const context = {
     actor,
@@ -48,27 +55,28 @@ export async function submitBulkReturnGroup(
     workflow: "tank_operation" as const,
   };
 
-  await applyBulkTankOperations(
-    validatedTargets.map(({ tank, expectedCycle }) => {
-      const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
-      const isKeep = tag === RETURN_TAG.KEEP;
-      return {
-        tankId: tank.id,
-        transitionAction: resolveReturnActionCode(
-          tag,
-          requireBulkTankStatusCode(tank.status, tank.id),
-        ),
-        currentStatus: tank.status,
-        context,
-        location: isKeep
-          ? tank.location || fallbackLocation || "不明"
-          : "倉庫",
-        tankNote: "",
-        logNote: isKeep ? "持ち越し" : "",
-        expectedCycle,
-      };
-    }),
-  );
+  const operations = validatedTargets.map(({ tank, expectedCycle }) => {
+    const tag = (tank.tag || RETURN_TAG.NORMAL) as ReturnTag;
+    const isKeep = tag === RETURN_TAG.KEEP;
+    return {
+      tankId: tank.id,
+      transitionAction: resolveReturnActionCode(
+        tag,
+        requireBulkTankStatusCode(tank.status, tank.id),
+      ),
+      currentStatus: tank.status,
+      context,
+      location: isKeep
+        ? tank.location || fallbackLocation || "不明"
+        : "倉庫",
+      tankNote: "",
+      logNote: isKeep ? "持ち越し" : "",
+      expectedCycle,
+    };
+  });
+  await applyBulkTankOperations(operations, undefined, {
+    recoveryConfirmationResolver,
+  });
 }
 
 /** 返却タグmarkerの単独writeを既存ownerへ委譲する。 */

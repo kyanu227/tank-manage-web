@@ -25,6 +25,10 @@ const ACTOR = {
   rank: "A",
 } satisfies OperationActor;
 
+const UNDEFINED_RECOVERY_OPTIONS = {
+  recoveryConfirmationResolver: undefined,
+};
+
 const CUSTOMER = {
   customerId: "customer-001",
   customerName: "テストダイビング",
@@ -119,6 +123,8 @@ describe("submitManualTankOperation", () => {
           logNote: "",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
 
     expectPayloadShape(
@@ -155,6 +161,8 @@ describe("submitManualTankOperation", () => {
           logNote: "",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
 
     expectPayloadShape(
@@ -305,6 +313,8 @@ describe("submitManualTankOperation", () => {
           logNote: "",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
 
     expectPayloadShape(
@@ -385,6 +395,8 @@ describe("submitManualTankOperation", () => {
           logNote: "持ち越し",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
 
     expectPayloadShape(
@@ -441,6 +453,8 @@ describe("submitManualTankOperation", () => {
           logNote: "",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
 
     expectPayloadShape(

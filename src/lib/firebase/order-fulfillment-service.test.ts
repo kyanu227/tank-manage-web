@@ -284,7 +284,8 @@ describe("order fulfillment write contract", () => {
     });
 
     expect(mocks.applyBulkTankOperations).toHaveBeenCalledTimes(1);
-    const [operations, extraOps] = mocks.applyBulkTankOperations.mock.calls[0];
+    const [operations, extraOps, options] =
+      mocks.applyBulkTankOperations.mock.calls[0];
     expect(operations).toEqual([
       {
         tankId: "A-01",
@@ -326,6 +327,7 @@ describe("order fulfillment write contract", () => {
       },
     ]);
     expect(extraOps).toEqual(expect.any(Function));
+    expect(options).toEqual({ recoveryConfirmationResolver: undefined });
 
     expect(mocks.doc).toHaveBeenCalledTimes(0);
     expect(mocks.serverTimestamp).toHaveBeenCalledTimes(0);

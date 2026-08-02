@@ -9,8 +9,19 @@ import {
   getLegacyTankStatusLabel,
 } from "./tank-action-status-labels";
 import { TANK_RECOVERY_CONFIRMATION_TEXT } from "./tank-recovery-confirmation-message";
+import {
+  isStaffOperationError,
+  type StaffOperationErrorCode,
+} from "./staff-operation-error-code";
 
-const STAFF_OPERATION_ERROR_BRAND = "StaffOperationError";
+export {
+  isStaffOperationError,
+  StaffOperationError,
+  type StaffOperationErrorCode,
+  type StaffOperationErrorLike,
+  type StaffOperationErrorOptions,
+  type StaffOperationErrorParams,
+} from "./staff-operation-error-code";
 
 export const STAFF_OPERATION_ERROR_TEXT = {
   reason_too_short: {
@@ -48,6 +59,10 @@ export const STAFF_OPERATION_ERROR_TEXT = {
   duplicate_tank: {
     ja: "[{tankId}] 同一タンクへの複数操作は一括処理できません",
     en: "Tank {tankId} is listed more than once. Remove the duplicate entry.",
+  },
+  recovery_confirmation_required: {
+    ja: "正規の状態遷移へ自動補完するため、現物確認が必要です。",
+    en: "Physical verification is required before state-transition recovery can continue.",
   },
   recovery_cancelled: TANK_RECOVERY_CONFIRMATION_TEXT.cancelled,
   recovery_browser_required: TANK_RECOVERY_CONFIRMATION_TEXT.browserRequired,
@@ -89,60 +104,11 @@ export const STAFF_OPERATION_ERROR_TEXT = {
     ja: "スタッフセッションを確認できません。再ログインしてください。",
     en: "Your staff session could not be verified. Sign in again.",
   },
-} satisfies Record<string, LocalizedText>;
-
-export type StaffOperationErrorCode = keyof typeof STAFF_OPERATION_ERROR_TEXT;
-
-type StaffOperationErrorOptions = Readonly<{
-  params?: MessageParams;
-  message?: string;
-  cause?: unknown;
-}>;
-
-type StaffOperationErrorLike = Readonly<{
-  name?: unknown;
-  staffOperationErrorBrand?: unknown;
-  code: StaffOperationErrorCode;
-  params?: unknown;
-  message?: unknown;
-  cause?: unknown;
-}>;
+} satisfies Record<StaffOperationErrorCode, LocalizedText>;
 
 type StaffOperationErrorMessageOptions = Readonly<{
   unknownMessage?: string;
 }>;
-
-export class StaffOperationError extends Error {
-  readonly staffOperationErrorBrand = STAFF_OPERATION_ERROR_BRAND;
-  readonly code: StaffOperationErrorCode;
-  readonly params: Readonly<MessageParams>;
-  override readonly cause?: unknown;
-
-  constructor(
-    code: StaffOperationErrorCode,
-    options: StaffOperationErrorOptions = {},
-  ) {
-    const params = Object.freeze({ ...(options.params ?? {}) });
-    super(options.message ?? formatCatalogMessage(code, params, "ja")
-      ?? getStaffGenericErrorMessage("ja"));
-    this.name = "StaffOperationError";
-    this.code = code;
-    this.params = params;
-    if (options.cause !== undefined) this.cause = options.cause;
-  }
-}
-
-export function isStaffOperationError(
-  error: unknown,
-): error is StaffOperationErrorLike {
-  if (error instanceof StaffOperationError) return true;
-  if (!error || typeof error !== "object") return false;
-  const candidate = error as Partial<StaffOperationErrorLike>;
-  if (!isStaffOperationErrorCode(candidate.code)) return false;
-  return candidate.staffOperationErrorBrand === STAFF_OPERATION_ERROR_BRAND
-    || candidate.name === "StaffOperationError"
-    || candidate.name === "StaleTankCycleError";
-}
 
 export function getStaffOperationErrorMessage(
   error: unknown,
@@ -226,10 +192,4 @@ function readErrorMessage(error: unknown): string | null {
   if (!error || typeof error !== "object" || !("message" in error)) return null;
   const message = (error as { message?: unknown }).message;
   return typeof message === "string" && message.trim() ? message : null;
-}
-
-function isStaffOperationErrorCode(
-  code: unknown,
-): code is StaffOperationErrorCode {
-  return typeof code === "string" && code in STAFF_OPERATION_ERROR_TEXT;
 }

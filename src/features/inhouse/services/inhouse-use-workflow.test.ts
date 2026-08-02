@@ -15,6 +15,10 @@ const ACTOR = {
   rank: "A",
 } satisfies OperationActor;
 
+const UNDEFINED_RECOVERY_OPTIONS = {
+  recoveryConfirmationResolver: undefined,
+};
+
 const applyTankOperationMock = vi.mocked(applyTankOperation);
 
 describe("submitInHouseUseReport", () => {
@@ -41,9 +45,10 @@ describe("submitInHouseUseReport", () => {
           workflow: "tank_operation",
         },
         location: "自社",
-        logNote: "事後報告",
-      },
-    ]);
+      logNote: "事後報告",
+    },
+    UNDEFINED_RECOVERY_OPTIONS,
+  ]);
 
     const [operation] = applyTankOperationMock.mock.calls[0];
     expect(Object.keys(operation).sort()).toEqual([
@@ -101,9 +106,10 @@ describe("submitInHouseUseReport", () => {
           workflow: "tank_operation",
         },
         location: "自社",
-        logNote: "事後報告",
-      },
-    ]);
+      logNote: "事後報告",
+    },
+    UNDEFINED_RECOVERY_OPTIONS,
+  ]);
 
     const [operation] = applyTankOperationMock.mock.calls[0];
     expect(Object.keys(operation).sort()).toEqual([

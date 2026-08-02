@@ -125,6 +125,7 @@ describe("staff operation error localization", () => {
     };
     const staleSubclass = {
       name: "StaleTankCycleError",
+      staffOperationErrorBrand: "StaffOperationError",
       code: "stale_tank_cycle",
       message: "タンクの貸出cycleが操作候補の作成後に変更されています。",
     };

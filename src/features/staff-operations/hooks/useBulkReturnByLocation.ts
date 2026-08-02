@@ -2,6 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
+import { useTankRecoveryConfirmationResolver } from "@/hooks/useTankRecoveryConfirmationResolver";
 import type { Locale } from "@/lib/locale";
 import { formatStaffTankCount } from "@/lib/staff-display";
 import {
@@ -54,6 +55,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
   const [returning, setReturning] = useState<Record<string, boolean>>({});
   const [bulkLoadFailed, setBulkLoadFailed] = useState(false);
   const staffLocale = useStaffLocale();
+  const recoveryConfirmationResolver = useTankRecoveryConfirmationResolver();
 
   const fetchBulkTanks = useCallback(async () => {
     setBulkLoading(true);
@@ -138,6 +140,7 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
         tanks: tanksToReturn,
         fallbackLocation,
         actor,
+        recoveryConfirmationResolver,
       });
 
       const completeMessage = formatBulkReturnCompleteMessage({
@@ -161,7 +164,13 @@ export function useBulkReturnByLocation(): UseBulkReturnByLocationResult {
     } finally {
       setReturning(prev => ({ ...prev, [groupKey]: false }));
     }
-  }, [fetchBulkTanks, groupMeta, groupedTanks, staffLocale]);
+  }, [
+    fetchBulkTanks,
+    groupMeta,
+    groupedTanks,
+    recoveryConfirmationResolver,
+    staffLocale,
+  ]);
 
   const groupKeys = useMemo(
     () => getBulkReturnGroupKeys(groupedTanks, groupMeta),

@@ -15,6 +15,10 @@ const ACTOR = {
   rank: "A",
 } satisfies OperationActor;
 
+const UNDEFINED_RECOVERY_OPTIONS = {
+  recoveryConfirmationResolver: undefined,
+};
+
 const applyBulkTankOperationsMock = vi.mocked(applyBulkTankOperations);
 
 describe("submitRepairCompletion", () => {
@@ -58,6 +62,8 @@ describe("submitRepairCompletion", () => {
           location: "倉庫",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
 
     const operations = applyBulkTankOperationsMock.mock.calls[0][0];
@@ -85,6 +91,8 @@ describe("submitRepairCompletion", () => {
           location: "倉庫",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
   });
 });

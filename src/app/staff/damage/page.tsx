@@ -14,6 +14,7 @@ import {
 } from "@/features/maintenance/i18n";
 import { submitDamageReport } from "@/features/maintenance/services/damage-workflow";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
+import { useTankRecoveryConfirmationResolver } from "@/hooks/useTankRecoveryConfirmationResolver";
 import { useTanks } from "@/hooks/useTanks";
 import {
   getStaffOperationErrorMessage,
@@ -26,6 +27,7 @@ const ACCENT = "#ef4444";
 export default function DamageReportPage() {
   useMaintenanceSwipe("damage");
   const staffLocale = useStaffLocale();
+  const recoveryConfirmationResolver = useTankRecoveryConfirmationResolver();
   const { prefixes, loading, loadFailed, refetch } = useTanks();
   const [activePrefix, setActivePrefix] = useState<string | null>(null);
   const [numberValue, setNumberValue] = useState("");
@@ -80,6 +82,7 @@ export default function DamageReportPage() {
         tankIds: queue.map((item) => item.tankId),
         note,
         actor: requireStaffIdentity(),
+        recoveryConfirmationResolver,
       });
       setResult({ success: true, message: formatDamageSuccess(queue.length, staffLocale) });
       setQueue([]);

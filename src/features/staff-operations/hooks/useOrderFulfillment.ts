@@ -3,6 +3,7 @@
 import { useCallback, useRef, useState } from "react";
 import type { ChangeEvent, RefObject } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { useTankRecoveryConfirmationResolver } from "@/hooks/useTankRecoveryConfirmationResolver";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 import {
   approveOrder as approveOrderTransaction,
@@ -62,6 +63,7 @@ export function useOrderFulfillment({
   fetchData,
   locale = DEFAULT_LOCALE,
 }: UseOrderFulfillmentParams): UseOrderFulfillmentResult {
+  const recoveryConfirmationResolver = useTankRecoveryConfirmationResolver();
   const [ordersLoading, setOrdersLoading] = useState(true);
   const [ordersLoadFailed, setOrdersLoadFailed] = useState(false);
   const [pendingOrders, setPendingOrders] = useState<PendingOrder[]>([]);
@@ -266,6 +268,7 @@ export function useOrderFulfillment({
         validTanks,
         allTanks,
         actor,
+        recoveryConfirmationResolver,
       });
 
       alert(getStaffOperationText("fulfillmentSuccess", locale));
@@ -281,7 +284,16 @@ export function useOrderFulfillment({
     } finally {
       setOrderSubmitting(false);
     }
-  }, [allTanks, closeFulfillment, fetchData, fetchOrders, locale, scannedTanks, selectedOrder]);
+  }, [
+    allTanks,
+    closeFulfillment,
+    fetchData,
+    fetchOrders,
+    locale,
+    recoveryConfirmationResolver,
+    scannedTanks,
+    selectedOrder,
+  ]);
 
   return {
     ordersLoading,

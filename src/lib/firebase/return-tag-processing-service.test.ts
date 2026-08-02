@@ -88,6 +88,9 @@ async function captureOperations(
 ): Promise<TankOperationInput[]> {
   await confirmPendingReturnRequests(createInput(items));
   expect(mocks.applyBulkTankOperations).toHaveBeenCalledTimes(1);
+  expect(mocks.applyBulkTankOperations.mock.calls[0][2]).toEqual({
+    recoveryConfirmationResolver: undefined,
+  });
   return mocks.applyBulkTankOperations.mock.calls[0][0] as TankOperationInput[];
 }
 
@@ -216,6 +219,9 @@ describe("return tag cycle marker consumption", () => {
     const extraOps = mocks.applyBulkTankOperations.mock.calls[0][1] as (
       writer: TankOperationWriter,
     ) => void;
+    expect(mocks.applyBulkTankOperations.mock.calls[0][2]).toEqual({
+      recoveryConfirmationResolver: undefined,
+    });
     const writer = {
       set: vi.fn(),
       update: vi.fn(),

@@ -24,6 +24,10 @@ const ACTOR = {
   rank: "A",
 } satisfies OperationActor;
 
+const UNDEFINED_RECOVERY_OPTIONS = {
+  recoveryConfirmationResolver: undefined,
+};
+
 const applyBulkTankOperationsMock = vi.mocked(applyBulkTankOperations);
 const updateTankReturnTagMarkerMock = vi.mocked(updateTankReturnTagMarker);
 
@@ -82,6 +86,8 @@ describe("inhouse-return-workflow", () => {
           location: "倉庫",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
 
     const operations = applyBulkTankOperationsMock.mock.calls[0][0];
@@ -131,6 +137,8 @@ describe("inhouse-return-workflow", () => {
           location: "倉庫",
         },
       ],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
     ]);
     expect(updateTankReturnTagMarkerMock).toHaveBeenCalledTimes(0);
   });
@@ -142,7 +150,11 @@ describe("inhouse-return-workflow", () => {
     });
 
     expect(applyBulkTankOperationsMock).toHaveBeenCalledTimes(1);
-    expect(applyBulkTankOperationsMock.mock.calls[0]).toEqual([[]]);
+    expect(applyBulkTankOperationsMock.mock.calls[0]).toEqual([
+      [],
+      undefined,
+      UNDEFINED_RECOVERY_OPTIONS,
+    ]);
     expect(updateTankReturnTagMarkerMock).toHaveBeenCalledTimes(0);
   });
 
