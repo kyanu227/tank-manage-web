@@ -1,5 +1,7 @@
 # Strict Vs Memo-Only Operation Mode Design
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 > Superseded on 2026-07-12. The implemented source of truth is
 > [strict-vs-assisted-transition-mode.md](./strict-vs-assisted-transition-mode.md).
 > Memo-only remains a possible separate feature, but it is not the implemented

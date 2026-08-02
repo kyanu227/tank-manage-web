@@ -1,5 +1,7 @@
 # 階層構造リファクタ ロードマップ
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 調査日: 2026-05-02
 前提: 旧 schema 互換、legacy fallback、backfill は **考慮しない**。既存コードに残る fallback は撤去対象であり、移行後の前提にしない。
 依拠ドキュメント:

@@ -1333,6 +1333,24 @@ service cloud.firestore {
         && request.resource.data.items is list;
     }
 
+    function isValidPortalCycleMarkerText(value) {
+      return value is string
+        && value.trim().size() > 0
+        && value.size() <= 128;
+    }
+
+    function isValidPortalReturnCycleMarker() {
+      let data = request.resource.data;
+      return isValidPortalCycleMarkerText(data.tankId)
+        && !data.tankId.matches(".*[/].*")
+        && isValidPortalCycleMarkerText(data.expectedLatestLogId)
+        && exists(/databases/$(database)/documents/tanks/$(data.tankId))
+        && data.customerId
+          == get(/databases/$(database)/documents/tanks/$(data.tankId)).data.get("customerId", null)
+        && data.expectedLatestLogId
+          == get(/databases/$(database)/documents/tanks/$(data.tankId)).data.get("latestLogId", null);
+    }
+
     function isPortalReturnCreate() {
       return isActiveCustomerUser()
         && request.resource.data.type == "return"
@@ -1346,6 +1364,7 @@ service cloud.firestore {
           "status",
           "tankId",
           "condition",
+          "expectedLatestLogId",
           "customerId",
           "customerName",
           "createdByUid",
@@ -1364,7 +1383,11 @@ service cloud.firestore {
           "createdAt",
           "updatedAt",
           "source"
-        ]);
+        ])
+        && (
+          !request.resource.data.keys().hasAny(["expectedLatestLogId"])
+          || isValidPortalReturnCycleMarker()
+        );
     }
 
     function isPortalUnchargedReportCreate() {

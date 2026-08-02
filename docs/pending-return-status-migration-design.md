@@ -1,5 +1,7 @@
 # pending return status migration design
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](architecture/README.md)。内容は当時の記録として残す。
+
 作成日: 2026-05-04
 
 この文書は、`transactions.type = "return"` の処理待ち status を `pending_return` に固定するための設計書である。

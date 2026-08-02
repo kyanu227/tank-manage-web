@@ -1,5 +1,7 @@
 # 残存構造課題のread-only差分監査
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 ## 1. 監査情報
 
 - 対象commit: 7a118a4c1bce2b12bd272a6de8a69291e9d8d2ef

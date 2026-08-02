@@ -1,5 +1,7 @@
 # Action / Status Code Pivot Design
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](architecture/README.md)。内容は当時の記録として残す。
+
 ## 1. Purpose
 
 この文書は、Firestore に日本語値として保存されている ACTION / STATUS を、将来的に `TankActionCode` / `TankStatusCode` へ移行するための設計方針を固定する。

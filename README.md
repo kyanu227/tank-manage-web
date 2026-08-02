@@ -1,36 +1,60 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# タンク管理 Web
 
-## Getting Started
+ダイビングタンクのレンタル管理システム（Web版）。Next.js（静的エクスポート）+ Firebase Auth + Firestore。
 
-First, run the development server:
+**現在は実運用開始前。**
 
-```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+## どこから読むか
+
+| 知りたいこと | 見る場所 |
+|---|---|
+| **画面がどのファイルから来ているか** | [SITEMAP.md](./SITEMAP.md) |
+| **設計判断のしかた（なぜこう作るか）** | [docs/architecture/README.md](./docs/architecture/README.md) |
+| **作業ルール・禁止事項・deploy手順** | [AGENTS.md](./AGENTS.md) / [CLAUDE.md](./CLAUDE.md) |
+| 確定した設計判断の理由 | [docs/architecture/adr/](./docs/architecture/adr/) |
+
+## 現状と target 設計の区別
+
+```text
+Architecture design:          approved
+Clean-break implementation:   not started
+Firestore reset:              not executed
+Rules cutover:                not executed
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+`docs/architecture/` の設計は**承認済みの target** であり、現在のコードがそのとおりになっているとは限らない。
+現在のコードとの差分は [docs/architecture/domain-map.md](./docs/architecture/domain-map.md) §8 の gap 表を見ること。
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Local development
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+npm install
+npm run dev          # http://localhost:3000
+```
 
-## Learn More
+`.env.local` に Firebase の設定が必要。**dev は現在 本番 Firestore へ直結している**（環境分離は clean-break の P0-C で実施予定）。書き込みを伴う動作確認は [docs/verification/full-app-flow-verification-plan.md](./docs/verification/full-app-flow-verification-plan.md) の検証 level に従うこと。
 
-To learn more about Next.js, take a look at the following resources:
+## Validation
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npx tsc --noEmit --pretty false
+npm run lint
+npm run build
+npm test
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+遷移まわりを触った場合は追加で:
 
-## Deploy on Vercel
+```bash
+npm run test:rules:transition
+npm run test:transition-policy
+npm run test:transition-projections
+```
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Production safety
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- 通常 deploy は `firebase deploy --only hosting` のみ
+- **Firestore Rules の deploy は通常 deploy に含めない。** Rules-only の専用レビュー・operation で行う
+- Hosting と Rules を同じ deploy コマンドへ混ぜない
+- data reset / migration はユーザーの明示承認が必要
+- 詳細は [AGENTS.md](./AGENTS.md) の deploy / commit 分離ルールと [docs/cutover/transition-plan-v1-runbook.md](./docs/cutover/transition-plan-v1-runbook.md)

@@ -1,5 +1,7 @@
 # logs / tanks / transactions とコード構造の横断監査
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 ## 1. 目的
 
 このドキュメントは、現行のタンク管理 Web アプリにおけるコード構造、業務責務、`logs` / `tanks` / `transactions` のデータ構造を横断的に棚卸しし、次フェーズの再設計に必要な判断材料を整理するための監査メモである。

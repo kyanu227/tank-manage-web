@@ -136,7 +136,6 @@ Claude must not edit unless the task explicitly says otherwise:
 - `src/lib/tank-operation.ts`
 - `src/lib/firebase/repositories/**`
 - `firestore.rules`
-- `firestore.indexes.json`
 - `firebase.json`
 - `package.json`
 - `package-lock.json`
@@ -280,45 +279,16 @@ Firestore composite index は Firebase Console で手動管理しているもの
 
 長期目的は、コード構造化、Firestore保持データの簡素化、状態遷移の一貫化、返却フローの安定化によって、バグが入りにくく影響範囲を追いやすいタンク管理システムにすること。
 
-詳細方針は以下を正本として読む。
+**architecture の設計原則は本文書では規定しない。** 次を正本として読む。
 
-- `docs/project-direction.md`
-- `docs/firestore-data-model-policy.md`
-- `docs/return-flow-policy.md`
-- `docs/implementation-roadmap.md`
+- [docs/architecture/README.md](docs/architecture/README.md) — 入口
+- [docs/architecture/design-principles.md](docs/architecture/design-principles.md) — 設計原則の正本
+- [docs/architecture/domain-map.md](docs/architecture/domain-map.md) — domain境界と source of truth
+- [docs/architecture/document-authority.md](docs/architecture/document-authority.md) — 正本順位
+- [docs/architecture/adr/](docs/architecture/adr/) — 確定した設計判断
 
-Core principles:
-
-- `tanks` は現在状態のスナップショットを持つ
-- `logs` は操作履歴の正本を持つ
-- `transactions` は顧客起点の注文・返却申請・未充填報告などの業務フローを持つ
-- 顧客名、スタッフ名、日本語ラベル、`location` 文字列を業務ロジックの正本にしない
-- 将来的には `staffId` / `customerId` / action code / status code を正本にする
-- `staffName` / `customerName` は表示用 snapshot として扱う
-- 返却申請と返却確定を混同しない
-- 多言語対応は、画面ラベル翻訳の前に業務ロジックから日本語文字列依存を外す
-- 共同作業者・報酬分割は、actor / customer / action / status が安定してから実装する
-
-Architecture direction:
-
-- page: 表示とイベントハンドリング
-- hook: session / identity / UI state の取得
-- workflow / use-case: 貸出、返却確定、受注貸出などの業務手順
-- domain service: tank / log / transaction を一貫して更新する業務ロジック
-- repository: Firestore query / add / update helper のみ
-
-repository に業務判断を入れない。page や hook から Firestore へ直接書き込む経路は、段階的に減らす。
-
-Forbidden patterns:
-
-- `action === "貸出"` や `action.includes("返却")` のような日本語文字列判定を増やさない
-- `staffName` / `customerName` だけを正本として新規設計しない
-- `tanks` に履歴や申請情報を詰め込まない
-- `logs` と `transactions` の責務を混ぜない
-- 返却申請の時点で、確認済み返却として `tanks` / `logs` を動かさない
-- 多言語対応を単なる画面ラベル置換として実装しない
-- 共同作業者・報酬分割を `tanks` に直接混ぜない
-- すべての Firestore 書き込みを巨大な1つの service にまとめない
+本文書（AGENTS.md / CLAUDE.md）は **workflow / safety authority** であり、「誰がどの手順で作業してよいか」を規定する。
+architecture 文書は **architecture normative authority** であり、「何をどう設計するか」を規定する。両者は競合しない。同一事項で矛盾した場合は本文書を優先し、その矛盾を document-authority §4 へ記録する。
 
 ## 現在のアーキテクチャ状態
 
@@ -391,7 +361,7 @@ Firestore 直接アクセスが残っているという理由だけで、勝手�
 
 ## 現在の優先順位
 
-現在の優先順位は repository 化の継続ではない。まず方針を docs に固定し、その後 `docs/implementation-roadmap.md` の順序で小さく進める。
+現在の優先順位は repository 化の継続ではない。architecture 設計は確定済み。実装順序は [docs/architecture/clean-break-cutover-plan.md](docs/architecture/clean-break-cutover-plan.md) に従う（**実装は未着手**）。
 
 直近の優先順位:
 
@@ -402,7 +372,9 @@ Firestore 直接アクセスが残っているという理由だけで、勝手�
 5. 日本語文字列判定を増やさず、action code / status code 化へ段階的に寄せる
 6. `customers` / `customerId` 整理、請求・売上・報酬計算の設計へ進む
 
-ただし、`tanks.customerId` の追加や `tanks.location` の意味変更は最初の実装で行わない。現行ポータルが `tanks.location == customerName` に依存しているため、返却・顧客画面・請求系の読み込みを壊しやすい。
+`tanks.customerId` は**現在貸出の projection として実装済み**（`src/lib/tank-types.ts`）。顧客 identity の正本ではない（正本は `customers` / `logs`）。
+
+`tanks.location` は **clean-break で廃止予定**（custody model へ置換）。詳細は [ADR-002](docs/architecture/adr/ADR-002-custody-model.md)。
 
 ## customers / customerId の方針
 
@@ -419,7 +391,7 @@ Firestore 直接アクセスが残っているという理由だけで、勝手�
 - 既存 `logs` を一括で書き換えない
 - 顧客名変更時に過去ログを書き換えない
 - 新規データでは `customerId` + `location` の併用を検討する
-- `tanks.customerId` の追加は未決事項として扱い、勝手に実装しない
+- `tanks.customerId` は projection として実装済み。顧客identityの正本にはしない（[ADR-002](docs/architecture/adr/ADR-002-custody-model.md)）
 
 ## 管理画面接続の方針
 
@@ -502,13 +474,18 @@ npx tsc --noEmit --pretty false
 
 ## 次に進めるべき作業
 
-AGENTS.md 更新後、次に進める候補:
+architecture 設計は確定済み（PR #183）。次は [clean-break-cutover-plan.md](docs/architecture/clean-break-cutover-plan.md) の Phase 0 から。
+
+- P0-B: architecture enforcement（ESLint `no-restricted-imports`）
+- P0-C: dev / production Firebase 分離
+- P0-D: supersede 注記の付与
+- P1-A〜D: 依存是正（domain の `window`/locale 排除、表示文言の移動、role code 化、`inspection.allowedPrev` 制限）
+
+**実装は明示指示があるまで行わない。** Firestore reset / Rules cutover / deploy はいずれも未実施。
+
+完了済み（再着手不要）:
 
 - 返却タグ・`condition` 変換の純粋関数化
-- 返却処理 service 境界の確認と最小整理
-- action / status code 化に向けた日本語文字列判定の追加禁止・既存箇所の棚卸し
-- `customers` / `customerId` 整理の実装ステップ分解
-- `edit_history` / `delete_history` 共通フォーマットの設計
-- `staff` / `staffByEmail` 更新 service の設計
-
-ただし、これらの実装は明示指示があるまで行わない。
+- 業務別 workflow service の分離（PR-01〜12）
+- action / status の code 化（日本語文字列判定 0件）
+- staff 画面の ja/en 対応（PR #176〜#182）

@@ -1,5 +1,7 @@
 # Firestore Data Model Policy
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](architecture/README.md)。内容は当時の記録として残す。
+
 ## Purpose
 
 この文書は、主要 Firestore collection の責務と、今後の整理方針を固定する入口文書である。

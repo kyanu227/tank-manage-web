@@ -1,5 +1,7 @@
 # customer identity / location normalization design
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 ## 1. Purpose
 
 この文書は、`customers/{customerId}` を貸出先・請求単位の正本として扱い、`tanks.location` や `logs.location` の顧客名文字列依存を段階的に外すための設計方針である。
