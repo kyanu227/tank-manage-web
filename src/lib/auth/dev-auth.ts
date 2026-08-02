@@ -1,4 +1,4 @@
-import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
+import { ALL_ADMIN_CAPABILITIES } from "@/lib/admin/adminCapabilities";
 
 export function isDevAuthBypassEnabled(): boolean {
   return process.env.NODE_ENV !== "production"
@@ -14,6 +14,4 @@ export const DEV_STAFF_SESSION = {
   locale: "ja",
 } as const;
 
-export const DEV_ADMIN_ALLOWED_PATHS = ADMIN_PAGES
-  .filter((page) => !page.hidden)
-  .map((page) => page.path);
+export const DEV_ADMIN_CAPABILITIES = [...ALL_ADMIN_CAPABILITIES];

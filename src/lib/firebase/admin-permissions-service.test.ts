@@ -11,12 +11,14 @@ vi.mock("firebase/firestore", () => ({
   getDoc: mocks.getDoc,
   setDoc: mocks.setDoc,
 }));
-
 vi.mock("@/lib/firebase/config", () => ({ db: {} }));
 
-import { getAdminPermissions } from "@/lib/firebase/admin-permissions-service";
+import {
+  getAdminPermissions,
+  saveAdminPermissions,
+} from "@/lib/firebase/admin-permissions-service";
 
-describe("getAdminPermissions", () => {
+describe("admin-permissions-service", () => {
   beforeEach(() => {
     mocks.doc.mockReset();
     mocks.doc.mockReturnValue({ path: "settings/adminPermissions" });
@@ -24,39 +26,41 @@ describe("getAdminPermissions", () => {
     mocks.setDoc.mockReset();
   });
 
-  it("正常な document は decoder 済みの pages を返す", async () => {
+  it("capability documentを返す", async () => {
     mocks.getDoc.mockResolvedValue({
       exists: () => true,
-      data: () => ({ pages: { "/admin/sales": ["管理者", "準管理者"] } }),
+      data: () => ({ capabilities: { "analytics.sales.view": ["準管理者"] } }),
     });
 
-    await expect(getAdminPermissions(["/admin", "/admin/sales"])).resolves.toEqual({
+    await expect(getAdminPermissions()).resolves.toMatchObject({
       kind: "valid",
-      pages: { "/admin/sales": ["管理者", "準管理者"] },
+      source: "capabilities",
+      capabilities: { "analytics.sales.view": ["準管理者"] },
     });
   });
 
-  it("document 不在は従来の default pages を伴う missing として返す", async () => {
+  it("document不在は空のcapabilityを伴うmissingにする", async () => {
     mocks.getDoc.mockResolvedValue({ exists: () => false });
-
-    await expect(getAdminPermissions(["/admin", "/admin/sales"])).resolves.toEqual({
-      kind: "missing",
-      pages: {
-        "/admin": ["管理者", "準管理者"],
-        "/admin/sales": ["管理者"],
-      },
-    });
+    await expect(getAdminPermissions()).resolves.toEqual({ kind: "missing", capabilities: {} });
   });
 
-  it("malformed document に default pages を返さない", async () => {
-    mocks.getDoc.mockResolvedValue({
-      exists: () => true,
-      data: () => ({ pages: { "/admin/sales": "準管理者" } }),
+  it("新規保存はpagesを二重writeせずcapabilitiesだけを保存する", async () => {
+    await saveAdminPermissions({
+      capabilities: { "dashboard.view": ["準管理者"] },
+      actorRole: "管理者",
     });
+    const payload = mocks.setDoc.mock.calls[0][1];
 
-    const result = await getAdminPermissions(["/admin", "/admin/sales"]);
+    expect(payload).toHaveProperty("capabilities");
+    expect(payload).not.toHaveProperty("pages");
+    expect(payload.capabilities["dashboard.view"]).toEqual(["管理者", "準管理者"]);
+  });
 
-    expect(result).toMatchObject({ kind: "malformed" });
-    expect(result).not.toHaveProperty("pages");
+  it("準管理者からのwriteを処理側でも拒否する", async () => {
+    await expect(saveAdminPermissions({
+      capabilities: { "dashboard.view": ["準管理者"] },
+      actorRole: "準管理者",
+    })).rejects.toThrow("管理者だけ");
+    expect(mocks.setDoc).not.toHaveBeenCalled();
   });
 });

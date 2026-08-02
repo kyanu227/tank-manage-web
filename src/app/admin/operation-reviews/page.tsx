@@ -26,6 +26,7 @@ import {
   getTankActionLabel,
   getTankStatusLabel,
 } from "@/lib/tank-action-status-labels";
+import { useAdminCapabilities } from "@/hooks/useAdminCapabilities";
 
 type RecoveryEvidenceKey = NonNullable<
   OperationReviewItem["transitionPlan"]
@@ -53,6 +54,8 @@ const cardStyle: React.CSSProperties = {
 };
 
 export default function OperationReviewsPage() {
+  const { can } = useAdminCapabilities();
+  const canApprove = can("reviews.approve");
   const [mode, setMode] = useState<OperationReviewListMode>("pending");
   const [items, setItems] = useState<OperationReviewItem[]>([]);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -129,6 +132,10 @@ export default function OperationReviewsPage() {
   const submitDecision = async (decision: OperationReviewDecision) => {
     setError("");
     setMessage("");
+    if (!canApprove) {
+      setError("レビュー結果を確定する権限がありません。");
+      return;
+    }
     if (selectedIds.size === 0) {
       setError("レビュー対象を選択してください。");
       return;
@@ -215,7 +222,7 @@ export default function OperationReviewsPage() {
       {error && <MessageBanner tone="error">{error}</MessageBanner>}
       {message && <MessageBanner tone="success">{message}</MessageBanner>}
 
-      {mode === "pending" && !loading && items.length > 0 && (
+      {mode === "pending" && !loading && items.length > 0 && canApprove && (
         <section style={{ ...cardStyle, padding: 18, marginBottom: 18 }}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
             <div>
@@ -307,6 +314,7 @@ export default function OperationReviewsPage() {
               selected={selectedIds.has(item.id)}
               expanded={expandedIds.has(item.id)}
               disabled={submitting}
+              allowSelection={canApprove}
               onToggleSelected={() => toggleSelected(item.id)}
               onToggleExpanded={() => toggleExpanded(item.id)}
             />
@@ -324,6 +332,7 @@ function ReviewCard({
   selected,
   expanded,
   disabled,
+  allowSelection,
   onToggleSelected,
   onToggleExpanded,
 }: {
@@ -331,6 +340,7 @@ function ReviewCard({
   selected: boolean;
   expanded: boolean;
   disabled: boolean;
+  allowSelection: boolean;
   onToggleSelected: () => void;
   onToggleExpanded: () => void;
 }) {
@@ -346,7 +356,7 @@ function ReviewCard({
       boxShadow: selected ? "0 0 0 2px #e0e7ff" : "none",
     }}>
       <div style={{ display: "flex", alignItems: "center", gap: 14, padding: "16px 18px" }}>
-        {pending && (
+        {pending && allowSelection && (
           <input
             type="checkbox"
             checked={selected}

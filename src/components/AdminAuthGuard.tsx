@@ -5,7 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   Lock, AlertCircle, LogIn, Mail, KeyRound,
 } from "lucide-react";
-import { auth, db } from "@/lib/firebase/config";
+import { auth } from "@/lib/firebase/config";
 import {
   onAuthStateChanged,
   signInWithPopup,
@@ -14,15 +14,20 @@ import {
   User,
 } from "firebase/auth";
 import {
-  doc, getDoc,
-} from "firebase/firestore";
-import {
-  decodeAdminPermissions,
-  isRoleAllowed,
   type AdminPermissionsDecodeResult,
 } from "@/lib/admin/admin-permissions";
-import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
-import { DEV_ADMIN_ALLOWED_PATHS, DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
+import {
+  getAdminCapabilitiesForRole,
+  hasAdminCapability,
+  type AdminCapability,
+} from "@/lib/admin/adminCapabilities";
+import {
+  findAdminPage,
+  getFirstAccessibleAdminHref,
+} from "@/lib/admin/adminPagesRegistry";
+import { AdminCapabilitiesProvider } from "@/hooks/useAdminCapabilities";
+import { DEV_ADMIN_CAPABILITIES, DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
+import { getAdminPermissions } from "@/lib/firebase/admin-permissions-service";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
 import type { Locale } from "@/lib/locale";
 
@@ -39,37 +44,13 @@ interface AdminAuthGuardProps {
   children: React.ReactNode;
   /** Callback to pass staff info up to the layout */
   onStaffLoaded?: (staff: StaffUser) => void;
-  /** Callback to pass allowed paths for the current user's role */
-  onPermissionsLoaded?: (allowedPaths: string[]) => void;
-}
-
-function matchesAdminPath(pathname: string, path: string) {
-  return pathname === path
-    || (path !== "/admin" && pathname.startsWith(path + "/"))
-    || (pathname === "/admin/settings" && path === "/admin/settings/portal");
-}
-
-function findAdminPage(pathname: string) {
-  return ADMIN_PAGES
-    .filter((page) => matchesAdminPath(pathname, page.path))
-    .sort((a, b) => b.path.length - a.path.length)[0] ?? null;
-}
-
-function canSubAdminUseRegisteredPage(pathname: string) {
-  const page = findAdminPage(pathname);
-  return !page?.adminOnly && !page?.devOnly;
-}
-
-function filterSubAdminAllowedPaths(paths: string[]) {
-  return paths.filter((path) => {
-    const page = ADMIN_PAGES.find((entry) => entry.path === path);
-    return !page?.adminOnly && !page?.devOnly;
-  });
+  /** Callback to pass resolved capabilities up to the layout */
+  onCapabilitiesLoaded?: (capabilities: readonly AdminCapability[]) => void;
 }
 
 type AdminPermissionAccess = {
   hasAccess: boolean;
-  allowedPaths: string[];
+  capabilities: AdminCapability[];
 };
 
 export function resolveAdminPermissionAccess(
@@ -77,35 +58,22 @@ export function resolveAdminPermissionAccess(
   pathname: string,
   permissions: AdminPermissionsDecodeResult,
 ): AdminPermissionAccess {
-  if (role === "管理者") {
-    return {
-      hasAccess: true,
-      allowedPaths: ADMIN_PAGES
-        .filter((page) => !page.devOnly && !page.hidden)
-        .map((page) => page.path),
-    };
-  }
-
-  if (role !== "準管理者" || permissions.kind !== "valid") {
-    return { hasAccess: false, allowedPaths: [] };
-  }
-
-  const allowedPaths = Object.entries(permissions.pages)
-    .filter(([, roles]) => isRoleAllowed(roles, "準管理者"))
-    .map(([path]) => path);
-  const visibleAllowedPaths = filterSubAdminAllowedPaths(allowedPaths);
+  const capabilities = getAdminCapabilitiesForRole(
+    role,
+    permissions.kind === "valid" ? permissions.capabilities : {},
+  );
+  const page = findAdminPage(pathname);
 
   return {
-    hasAccess: canSubAdminUseRegisteredPage(pathname)
-      && visibleAllowedPaths.some((path) => matchesAdminPath(pathname, path)),
-    allowedPaths: visibleAllowedPaths,
+    hasAccess: page !== null && hasAdminCapability(capabilities, page.capability),
+    capabilities,
   };
 }
 
 export default function AdminAuthGuard({
   children,
   onStaffLoaded,
-  onPermissionsLoaded,
+  onCapabilitiesLoaded,
 }: AdminAuthGuardProps) {
   const pathname = usePathname();
   const devAuthBypassEnabled = isDevAuthBypassEnabled();
@@ -121,6 +89,7 @@ export default function AdminAuthGuard({
   // Permission check
   const [hasAccess, setHasAccess] = useState(false);
   const [permChecked, setPermChecked] = useState(false);
+  const [capabilities, setCapabilities] = useState<AdminCapability[]>([]);
 
   // Login form
   const [loginMethod, setLoginMethod] = useState<"google" | "email">("google");
@@ -139,10 +108,11 @@ export default function AdminAuthGuard({
     setStaffUser(devStaff);
     setStaffChecked(true);
     onStaffLoaded?.(devStaff);
-    onPermissionsLoaded?.(DEV_ADMIN_ALLOWED_PATHS);
+    setCapabilities([...DEV_ADMIN_CAPABILITIES]);
+    onCapabilitiesLoaded?.(DEV_ADMIN_CAPABILITIES);
     setHasAccess(true);
     setPermChecked(true);
-  }, [devAuthBypassEnabled, onPermissionsLoaded, onStaffLoaded]);
+  }, [devAuthBypassEnabled, onCapabilitiesLoaded, onStaffLoaded]);
 
   // 1. Listen to Firebase Auth
   useEffect(() => {
@@ -220,6 +190,10 @@ export default function AdminAuthGuard({
       return;
     }
 
+    let active = true;
+    setPermChecked(false);
+    setHasAccess(false);
+
     const checkPermissions = async () => {
       try {
         // 管理者 always has full access
@@ -229,27 +203,28 @@ export default function AdminAuthGuard({
             pathname,
             { kind: "missing" },
           );
+          if (!active) return;
           setHasAccess(access.hasAccess);
-          onPermissionsLoaded?.(access.allowedPaths);
+          setCapabilities(access.capabilities);
+          onCapabilitiesLoaded?.(access.capabilities);
           setPermChecked(true);
           return;
         }
 
         // 準管理者 → check Firestore permissions
         if (staffUser.role === "準管理者") {
-          const permDoc = await getDoc(doc(db, "settings", "adminPermissions"));
-          const decoded = decodeAdminPermissions(
-            permDoc.exists() ? permDoc.data() : undefined,
-          );
-          if (decoded.kind === "malformed") {
-            console.error("Malformed admin permissions:", decoded.reason);
+          const permissions = await getAdminPermissions();
+          if (!active) return;
+          if (permissions.kind === "malformed") {
+            console.error("Malformed admin permissions:", permissions.reason);
           }
           const access = resolveAdminPermissionAccess(
             staffUser.role,
             pathname,
-            decoded,
+            permissions,
           );
-          onPermissionsLoaded?.(access.allowedPaths);
+          setCapabilities(access.capabilities);
+          onCapabilitiesLoaded?.(access.capabilities);
           setHasAccess(access.hasAccess);
           setPermChecked(true);
           return;
@@ -257,17 +232,22 @@ export default function AdminAuthGuard({
 
         // 一般 → no admin access
         setHasAccess(false);
-        onPermissionsLoaded?.([]);
+        setCapabilities([]);
+        onCapabilitiesLoaded?.([]);
         setPermChecked(true);
       } catch (e) {
+        if (!active) return;
         console.error("Permission check failed:", e);
         setHasAccess(false);
+        setCapabilities([]);
+        onCapabilitiesLoaded?.([]);
         setPermChecked(true);
       }
     };
 
-    checkPermissions();
-  }, [devAuthBypassEnabled, staffChecked, staffUser, pathname, onPermissionsLoaded]);
+    void checkPermissions();
+    return () => { active = false; };
+  }, [devAuthBypassEnabled, staffChecked, staffUser, pathname, onCapabilitiesLoaded]);
 
   // --- Login handlers ---
   const handleGoogleLogin = async () => {
@@ -466,6 +446,7 @@ export default function AdminAuthGuard({
 
   // --- Render: Logged in but no permission for this page ---
   if (!hasAccess) {
+    const safeHref = getFirstAccessibleAdminHref(capabilities) ?? "/staff";
     return (
       <div style={{ minHeight: "100dvh", display: "flex", alignItems: "center", justifyContent: "center", background: "#f8f9fb", padding: 20, paddingTop: "max(20px, env(safe-area-inset-top))", paddingBottom: "max(20px, env(safe-area-inset-bottom))", boxSizing: "border-box" }}>
         <div style={{
@@ -486,14 +467,14 @@ export default function AdminAuthGuard({
             管理者にお問い合わせください。
           </p>
           <button
-            onClick={() => window.history.back()}
+            onClick={() => { window.location.href = safeHref; }}
             style={{
               padding: "12px 24px", borderRadius: 12, border: "none",
               background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 700,
               cursor: "pointer",
             }}
           >
-            戻る
+            {safeHref === "/staff" ? "現場アプリへ" : "利用可能な画面へ"}
           </button>
         </div>
       </div>
@@ -508,7 +489,9 @@ export default function AdminAuthGuard({
           DEV AUTH BYPASS
         </div>
       )}
-      {children}
+      <AdminCapabilitiesProvider value={{ role: staffUser.role, capabilities }}>
+        {children}
+      </AdminCapabilitiesProvider>
     </>
   );
 }

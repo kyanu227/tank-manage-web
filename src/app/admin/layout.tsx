@@ -4,89 +4,22 @@ import { useState, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
-  LayoutDashboard,
-  Settings,
-  Bell,
-  BarChart3,
-  Users,
-  Wallet,
-  Package,
-  FileText,
   Menu,
   X,
   ChevronLeft,
-  Shield,
   LogOut,
   HardHat,
   Building2,
   ExternalLink,
-  Workflow,
-  ShieldCheck,
-  ClipboardCheck,
 } from "lucide-react";
 import AdminAuthGuard from "@/components/AdminAuthGuard";
 import { auth } from "@/lib/firebase/config";
-
-type AdminNavItem = {
-  href: string;
-  label: string;
-  icon: typeof LayoutDashboard;
-  adminOnly?: boolean;
-};
-
-type AdminNavGroup = {
-  label: string;
-  items: AdminNavItem[];
-};
-
-const ADMIN_NAV_GROUPS: AdminNavGroup[] = [
-  {
-    label: "確認・分析",
-    items: [
-      { href: "/admin", label: "ダッシュボード", icon: LayoutDashboard },
-      { href: "/admin/operation-reviews", label: "例外操作レビュー", icon: ClipboardCheck, adminOnly: true },
-      { href: "/admin/sales", label: "売上統計", icon: BarChart3 },
-      { href: "/admin/staff-analytics", label: "スタッフ実績", icon: Users },
-    ],
-  },
-  {
-    label: "顧客・請求",
-    items: [
-      { href: "/admin/customers", label: "顧客管理", icon: Building2 },
-      { href: "/admin/billing", label: "請求書発行", icon: FileText },
-    ],
-  },
-  {
-    label: "スタッフ・権限",
-    items: [
-      { href: "/admin/staff", label: "担当者", icon: Users },
-      { href: "/admin/permissions", label: "ページ権限", icon: Shield, adminOnly: true },
-    ],
-  },
-  {
-    label: "マスタ・料金",
-    items: [
-      { href: "/admin/money", label: "金銭・ランク", icon: Wallet },
-      { href: "/admin/order-master", label: "発注品目", icon: Package },
-    ],
-  },
-  {
-    label: "設定",
-    items: [
-      { href: "/admin/settings/tank-operations", label: "状態遷移モード", icon: Workflow, adminOnly: true },
-      { href: "/admin/settings/portal", label: "ポータル設定", icon: Settings },
-      { href: "/admin/settings/inspection", label: "耐圧検査設定", icon: ShieldCheck },
-      { href: "/admin/notifications", label: "通知設定", icon: Bell },
-    ],
-  },
-  {
-    label: "開発・確認",
-    items: [
-      { href: "/admin/state-diagram", label: "状態遷移図", icon: Workflow },
-      { href: "/admin/security-rules", label: "Security Rules", icon: ShieldCheck, adminOnly: true },
-    ],
-  },
-];
+import {
+  ADMIN_NAV_GROUPS,
+  getVisibleAdminSidebarPages,
+  matchesAdminPagePath,
+} from "@/lib/admin/adminPagesRegistry";
+import type { AdminCapability } from "@/lib/admin/adminCapabilities";
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
@@ -94,7 +27,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [collapsed, setCollapsed] = useState(false);
   const [staffName, setStaffName] = useState("管理者");
   const [staffRole, setStaffRole] = useState("");
-  const [allowedPaths, setAllowedPaths] = useState<string[]>([]);
+  const [capabilities, setCapabilities] = useState<readonly AdminCapability[]>([]);
   const staffInitial = staffName.trim().charAt(0) || "管";
   const staffRoleLabel = staffRole || "権限確認中";
 
@@ -103,27 +36,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     setStaffRole(staff.role);
   }, []);
 
-  const handlePermissionsLoaded = useCallback((paths: string[]) => {
-    setAllowedPaths(paths);
+  const handleCapabilitiesLoaded = useCallback((nextCapabilities: readonly AdminCapability[]) => {
+    setCapabilities(nextCapabilities);
   }, []);
 
-  const isActive = (href: string) => {
-    if (href === "/admin") return pathname === "/admin";
-    return pathname.startsWith(href);
-  };
-
-  // Filter nav items based on permissions, then drop empty groups
-  const visibleNavGroups: AdminNavGroup[] = ADMIN_NAV_GROUPS.map((group) => ({
-    label: group.label,
-    items: group.items.filter((item) => {
-      // adminOnly items only visible to 管理者
-      if (item.adminOnly && staffRole !== "管理者") return false;
-      // 管理者 sees everything
-      if (staffRole === "管理者") return true;
-      // 準管理者 sees only allowed paths
-      return allowedPaths.includes(item.href);
-    }),
-  })).filter((group) => group.items.length > 0);
+  const visiblePages = getVisibleAdminSidebarPages(capabilities);
+  const visibleNavGroups = [
+    { id: "dashboard", label: "", items: visiblePages.filter((page) => page.group === "dashboard") },
+    ...ADMIN_NAV_GROUPS.map((group) => ({
+      ...group,
+      items: visiblePages.filter((page) => page.group === group.id),
+    })),
+  ].filter((group) => group.items.length > 0);
 
   const handleLogout = async () => {
     if (!confirm("ログアウトしますか？")) return;
@@ -139,7 +63,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   return (
     <AdminAuthGuard
       onStaffLoaded={handleStaffLoaded}
-      onPermissionsLoaded={handlePermissionsLoaded}
+      onCapabilitiesLoaded={handleCapabilitiesLoaded}
     >
       <div style={{ display: "flex", minHeight: "100dvh", background: "#f8f9fb", paddingTop: "env(safe-area-inset-top)", paddingBottom: "env(safe-area-inset-bottom)" }}>
         {/* Sidebar - Desktop */}
@@ -255,7 +179,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {visibleNavGroups.map((group) => (
               <div key={group.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                {!collapsed && (
+                {!collapsed && group.label && (
                   <div
                     style={{
                       padding: "4px 16px 6px",
@@ -271,7 +195,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 )}
                 {group.items.map((item) => {
                   const Icon = item.icon;
-                  const active = isActive(item.href);
+                  const active = matchesAdminPagePath(item, pathname);
                   return (
                     <Link
                       key={item.href}
@@ -475,7 +399,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             {visibleNavGroups.map((group) => (
               <div key={group.label} style={{ display: "flex", flexDirection: "column", gap: 2 }}>
-                <div
+                {group.label && <div
                   style={{
                     padding: "4px 16px 6px",
                     fontSize: 10,
@@ -486,10 +410,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                   }}
                 >
                   {group.label}
-                </div>
+                </div>}
                 {group.items.map((item) => {
                   const Icon = item.icon;
-                  const active = isActive(item.href);
+                  const active = matchesAdminPagePath(item, pathname);
                   return (
                     <Link
                       key={item.href}

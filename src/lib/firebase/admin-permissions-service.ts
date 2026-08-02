@@ -1,47 +1,44 @@
 import { doc, getDoc, setDoc } from "firebase/firestore";
 import {
   decodeAdminPermissions,
-  type AdminPermissionPages,
+  normalizeAdminCapabilityGrantsForSave,
+  type AdminCapabilityGrants,
 } from "@/lib/admin/admin-permissions";
 import { db } from "@/lib/firebase/config";
 
 export type AdminPermissionsLoadResult =
-  | { kind: "valid"; pages: AdminPermissionPages }
-  | { kind: "missing"; pages: AdminPermissionPages }
+  | {
+      kind: "valid";
+      capabilities: AdminCapabilityGrants;
+      source: "capabilities" | "legacy-paths";
+      ignoredLegacyPaths: readonly string[];
+    }
+  | { kind: "missing"; capabilities: AdminCapabilityGrants }
   | { kind: "malformed"; reason: string };
 
-export async function getAdminPermissions(
-  controlledPagePaths: readonly string[],
-): Promise<AdminPermissionsLoadResult> {
+export async function getAdminPermissions(): Promise<AdminPermissionsLoadResult> {
   const snap = await getDoc(doc(db, "settings", "adminPermissions"));
   const decoded = decodeAdminPermissions(snap.exists() ? snap.data() : undefined);
 
   if (decoded.kind === "missing") {
-    return {
-      kind: "missing",
-      pages: buildDefaultAdminPermissions(controlledPagePaths),
-    };
+    return { kind: "missing", capabilities: {} };
   }
 
   return decoded;
 }
 
-export async function savePermissions(
-  pages: AdminPermissionPages,
-): Promise<void> {
+export async function saveAdminPermissions({
+  capabilities,
+  actorRole,
+}: {
+  capabilities: AdminCapabilityGrants;
+  actorRole: string;
+}): Promise<void> {
+  if (actorRole !== "管理者") {
+    throw new Error("権限設定は管理者だけが変更できます。");
+  }
   await setDoc(doc(db, "settings", "adminPermissions"), {
-    pages,
+    capabilities: normalizeAdminCapabilityGrantsForSave(capabilities),
     updatedAt: new Date().toISOString(),
   });
-}
-
-function buildDefaultAdminPermissions(
-  controlledPagePaths: readonly string[],
-): AdminPermissionPages {
-  const defaults: Record<string, readonly string[]> = {};
-  controlledPagePaths.forEach((path) => {
-    defaults[path] = ["管理者"];
-  });
-  defaults["/admin"] = ["管理者", "準管理者"];
-  return defaults;
 }

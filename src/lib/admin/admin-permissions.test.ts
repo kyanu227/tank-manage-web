@@ -1,75 +1,90 @@
 import { describe, expect, it } from "vitest";
 import {
+  convertLegacyAdminPathPermissions,
   decodeAdminPermissions,
-  isRoleAllowed,
+  normalizeAdminCapabilityGrantsForSave,
 } from "@/lib/admin/admin-permissions";
 
 describe("decodeAdminPermissions", () => {
-  it("正常な権限設定を valid として返す", () => {
+  it("capability正本をvalidとして返す", () => {
     expect(decodeAdminPermissions({
-      pages: { "/admin": ["管理者", "準管理者"] },
+      capabilities: { "analytics.sales.view": ["管理者", "準管理者"] },
     })).toEqual({
       kind: "valid",
-      pages: { "/admin": ["管理者", "準管理者"] },
+      capabilities: { "analytics.sales.view": ["管理者", "準管理者"] },
+      source: "capabilities",
+      ignoredLegacyPaths: [],
     });
   });
 
-  it("document 不在を missing として返す", () => {
+  it("document不在をmissingとして返す", () => {
     expect(decodeAdminPermissions(undefined)).toEqual({ kind: "missing" });
   });
 
-  it("pages field 不在を malformed として返す", () => {
-    expect(decodeAdminPermissions({})).toMatchObject({ kind: "malformed" });
+  it("旧path権限をcapabilityへ決定的に変換する", () => {
+    const decoded = decodeAdminPermissions({
+      pages: {
+        "/admin/sales": ["管理者", "準管理者"],
+        "/admin/order-master": ["管理者", "準管理者"],
+      },
+    });
+
+    expect(decoded).toMatchObject({
+      kind: "valid",
+      source: "legacy-paths",
+      capabilities: {
+        "analytics.sales.view": ["管理者", "準管理者"],
+        "orderMaster.view": ["管理者", "準管理者"],
+        "orderMaster.manage": ["管理者", "準管理者"],
+      },
+    });
   });
 
-  it("pages が null のとき malformed として返す", () => {
-    expect(decodeAdminPermissions({ pages: null })).toMatchObject({ kind: "malformed" });
+  it("旧adminOnly pathは準管理者capabilityへ変換しない", () => {
+    const converted = convertLegacyAdminPathPermissions({
+      "/admin/operation-reviews": ["管理者", "準管理者"],
+      "/admin/security-rules": ["管理者", "準管理者"],
+    });
+
+    expect(converted.capabilities).toEqual({});
+  });
+
+  it("旧customers pathは取引先の両read capabilityへ変換する", () => {
+    const converted = convertLegacyAdminPathPermissions({
+      "/admin/customers": ["準管理者"],
+    });
+
+    expect(converted.capabilities).toMatchObject({
+      "customers.view": ["準管理者"],
+      "customerPortalUsers.view": ["準管理者"],
+    });
+  });
+
+  it("未知の旧pathを権限へ変換しない", () => {
+    const converted = convertLegacyAdminPathPermissions({
+      "/admin/unknown": ["準管理者"],
+    });
+
+    expect(converted.capabilities).toEqual({});
+    expect(converted.ignoredLegacyPaths).toEqual(["/admin/unknown"]);
   });
 
   it.each([
-    ["string", "準管理者"],
-    ["number", 1],
-    ["array", []],
-  ])("pages が %s のとき malformed として返す", (_label, pages) => {
-    expect(decodeAdminPermissions({ pages })).toMatchObject({ kind: "malformed" });
+    [{ capabilities: null }],
+    [{ capabilities: { "analytics.sales.view": "準管理者" } }],
+    [{ capabilities: { "analytics.sales.view": ["準管理者", 1] } }],
+    [{ capabilities: { "unknown.view": ["準管理者"] } }],
+    [{ pages: null }],
+  ])("malformed documentはfail-closedにする", (raw) => {
+    expect(decodeAdminPermissions(raw)).toMatchObject({ kind: "malformed" });
   });
 
-  it("pages[path] が string のとき malformed として返す", () => {
-    expect(decodeAdminPermissions({
-      pages: { "/admin/xxx": "準管理者" },
-    })).toMatchObject({ kind: "malformed" });
-  });
-
-  it("pages[path] が null のとき malformed として返す", () => {
-    expect(decodeAdminPermissions({
-      pages: { "/admin/xxx": null },
-    })).toMatchObject({ kind: "malformed" });
-  });
-
-  it("role 配列に非 string 要素があれば silent に除去せず malformed として返す", () => {
-    expect(decodeAdminPermissions({
-      pages: { "/admin/xxx": ["準管理者", 1] },
-    })).toMatchObject({ kind: "malformed" });
-  });
-
-  it("空の pages object を valid として返す", () => {
-    expect(decodeAdminPermissions({ pages: {} })).toEqual({
-      kind: "valid",
-      pages: {},
+  it("新規保存ではcapabilityだけを正規化し管理者を必ず含める", () => {
+    const normalized = normalizeAdminCapabilityGrantsForSave({
+      "dashboard.view": ["準管理者"],
     });
-  });
-});
 
-describe("isRoleAllowed", () => {
-  it("strict 等価の role を許可する", () => {
-    expect(isRoleAllowed(["準管理者"], "準管理者")).toBe(true);
-  });
-
-  it("部分一致では許可しない", () => {
-    expect(isRoleAllowed(["準管理者だった人"], "準管理者")).toBe(false);
-  });
-
-  it("空配列では許可しない", () => {
-    expect(isRoleAllowed([], "準管理者")).toBe(false);
+    expect(normalized["dashboard.view"]).toEqual(["管理者", "準管理者"]);
+    expect(normalized["reviews.approve"]).toEqual(["管理者"]);
   });
 });
