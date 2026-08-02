@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from "node:fs";
+import { readdirSync } from "node:fs";
 import { resolve } from "node:path";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -22,6 +22,11 @@ import {
   StaffDashboardView,
   type StaffDashboardViewProps,
 } from "./StaffDashboardView";
+import {
+  readSource,
+  readTypeScriptSource,
+  visitTypeScriptNodes as visit,
+} from "@/features/staff-dashboard/testing/typescript-source";
 
 const PAGE_PATH = "src/app/staff/dashboard/page.tsx";
 const COMPONENT_DIRECTORY =
@@ -818,23 +823,6 @@ describe("dashboard projection and component boundary contract", () => {
   });
 });
 
-function readSource(relativePath: string): string {
-  return readFileSync(resolve(process.cwd(), relativePath), "utf8");
-}
-
-function readTypeScriptSource(relativePath: string): ts.SourceFile {
-  const source = readSource(relativePath);
-  return ts.createSourceFile(
-    relativePath,
-    source,
-    ts.ScriptTarget.Latest,
-    true,
-    relativePath.endsWith(".tsx")
-      ? ts.ScriptKind.TSX
-      : ts.ScriptKind.TS,
-  );
-}
-
 function compact(value: string): string {
   return value.replace(/\s+/g, "");
 }
@@ -856,14 +844,6 @@ function expectLogicalOrExpression(
   expect(compact(expression.right.getText(sourceFile))).toBe(
     compact(expectedRight),
   );
-}
-
-function visit(
-  node: ts.Node,
-  callback: (node: ts.Node) => void,
-): void {
-  callback(node);
-  ts.forEachChild(node, (child) => visit(child, callback));
 }
 
 function findVariableDeclaration(
