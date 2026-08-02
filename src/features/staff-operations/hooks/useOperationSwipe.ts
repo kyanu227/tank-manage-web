@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { MODES } from "../constants";
 import type { OpMode } from "../types";
@@ -10,14 +10,29 @@ import {
   dispatchStaffSectionSwipeProgress,
   shouldIgnoreSwipeStart,
 } from "@/components/staff-section-tabs-events";
+import {
+  reconcileStaffSectionSwipePendingTarget,
+  resolveStaffSectionSwipeBase,
+  selectNextStaffSectionSwipeMode,
+} from "@/lib/staff-section-swipe-selection";
 
 export function useOperationSwipe(mode: OpMode) {
   const router = useRouter();
+  const currentModeRef = useRef(mode);
+  const pendingTargetRef = useRef<OpMode | null>(null);
   const swipeRef = useRef<{
     startX: number;
     startY: number;
     horizontalSwipeStarted: boolean;
   } | null>(null);
+
+  useLayoutEffect(() => {
+    currentModeRef.current = mode;
+    pendingTargetRef.current = reconcileStaffSectionSwipePendingTarget(
+      mode,
+      pendingTargetRef.current,
+    );
+  }, [mode]);
 
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
@@ -47,7 +62,11 @@ export function useOperationSwipe(mode: OpMode) {
         swipe.horizontalSwipeStarted = true;
       }
 
-      const idx = MODES.indexOf(mode);
+      const { index: idx } = resolveStaffSectionSwipeBase(
+        MODES,
+        currentModeRef.current,
+        pendingTargetRef.current,
+      );
       const offsetTabs = Math.max(-1, Math.min(1, -dx / (window.innerWidth / MODES.length)));
       dispatchStaffSectionSwipeProgress({
         key: "operations",
@@ -71,17 +90,20 @@ export function useOperationSwipe(mode: OpMode) {
         return;
       }
 
-      const idx = MODES.indexOf(mode);
-      const next = dx < 0
-        ? MODES[(idx + 1) % MODES.length]
-        : MODES[(idx - 1 + MODES.length) % MODES.length];
+      const selection = selectNextStaffSectionSwipeMode(
+        MODES,
+        currentModeRef.current,
+        pendingTargetRef.current,
+        dx < 0 ? "left" : "right",
+      );
+      pendingTargetRef.current = selection.nextMode;
 
       dispatchStaffSectionSwipeEnd({
         key: "operations",
         committed: true,
-        settledIndex: MODES.indexOf(next),
+        settledIndex: selection.settledIndex,
       });
-      router.replace(`/staff/${next}`);
+      router.replace(`/staff/${selection.nextMode}`);
     };
 
     const onTouchCancel = () => {
@@ -98,10 +120,14 @@ export function useOperationSwipe(mode: OpMode) {
     document.addEventListener("touchend", onTouchEnd, { passive: true });
     document.addEventListener("touchcancel", onTouchCancel, { passive: true });
     return () => {
+      if (swipeRef.current?.horizontalSwipeStarted) {
+        dispatchStaffSectionSwipeEnd({ key: "operations", committed: false });
+      }
+      swipeRef.current = null;
       document.removeEventListener("touchstart", onTouchStart);
       document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onTouchEnd);
       document.removeEventListener("touchcancel", onTouchCancel);
     };
-  }, [mode, router]);
+  }, [router]);
 }
