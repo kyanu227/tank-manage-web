@@ -1,6 +1,7 @@
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 import {
   formatStaffCount,
+  getStaffRoleDisplayLabel,
   type LocalizedText,
 } from "@/lib/staff-display";
 import { formatDashboardLogLocation } from "@/features/staff-dashboard/i18n";
@@ -15,11 +16,6 @@ export const MYPAGE_TEXT = {
   rankNotSet: { ja: "ランク未設定", en: "Rank not set" },
   monthlyScore: { ja: "今月のスコア", en: "Monthly score" },
   estimatedReward: { ja: "報酬見込み", en: "Estimated reward" },
-  displaySettings: { ja: "表示設定", en: "Display settings" },
-  displaySettingsHelp: { ja: "このスタッフアカウントの表示言語を保存します。", en: "Save the display language for this staff account." },
-  displayLanguage: { ja: "表示言語", en: "Display language" },
-  saving: { ja: "保存中…", en: "Saving…" },
-  save: { ja: "保存", en: "Save" },
   lend: { ja: "貸出", en: "Lend" },
   return: { ja: "返却", en: "Return" },
   fill: { ja: "充填", en: "Fill" },
@@ -30,33 +26,12 @@ export const MYPAGE_TEXT = {
   profileLoadFailure: { ja: "スタッフ情報を読み込めませんでした。", en: "Staff profile could not be loaded." },
   retry: { ja: "再試行", en: "Retry" },
   unknownAction: { ja: "不明", en: "Unknown action" },
-  administrator: { ja: "管理者", en: "Administrator" },
-  assistantAdministrator: { ja: "準管理者", en: "Assistant administrator" },
-  staffRole: { ja: "一般", en: "Staff" },
-  unknownRole: { ja: "不明", en: "Unknown role" },
 } satisfies Record<string, LocalizedText>;
 
 export type MyPageTextKey = keyof typeof MYPAGE_TEXT;
 
 export function getMyPageText(key: MyPageTextKey, locale: Locale = DEFAULT_LOCALE): string {
   return MYPAGE_TEXT[key][locale];
-}
-
-const LOCALE_LABELS: Readonly<Record<Locale, Readonly<Record<Locale, string>>>> = {
-  ja: { ja: "日本語", en: "Japanese" },
-  en: { ja: "English", en: "English" },
-};
-
-export function getLocaleOptionLabel(value: Locale, uiLocale: Locale): string {
-  return LOCALE_LABELS[value][uiLocale];
-}
-
-export function getStaffRoleDisplayLabel(value: string, locale: Locale): string {
-  if (locale === "ja") return value;
-  if (value === "admin" || value === "管理者") return getMyPageText("administrator", locale);
-  if (value === "準管理者") return getMyPageText("assistantAdministrator", locale);
-  if (value === "worker" || value === "一般") return getMyPageText("staffRole", locale);
-  return getMyPageText("unknownRole", locale);
 }
 
 export function formatStaffProfileName(

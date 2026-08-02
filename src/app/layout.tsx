@@ -28,6 +28,9 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   viewportFit: "cover",
+  // ヘッダー背面と一致する不透明色。透明色にすると
+  // Safari の上下UIと safe-area の色が分断される
+  themeColor: "#fafbfd",
 };
 
 export default function RootLayout({

@@ -7,8 +7,6 @@ import { logsRepository } from "@/lib/firebase/repositories";
 import { useStaffProfile } from "@/hooks/useStaffProfile";
 import { useStaffLocale } from "@/hooks/useStaffSession";
 import { useTankDataRevision } from "@/hooks/useTankDataRevision";
-import { updateOwnStaffLocale } from "@/lib/firebase/staff-locale-service";
-import { normalizeLocale, SUPPORTED_LOCALES, type Locale } from "@/lib/locale";
 import {
   isFillActionCode,
   isLendActionCode,
@@ -20,20 +18,12 @@ import {
 } from "@/lib/tank-transition-projections";
 import { getLegacyTankActionLabel } from "@/lib/tank-action-status-labels";
 import {
-  getStaffLocaleSaveSuccessMessage,
-} from "@/lib/operation-messages";
-import {
-  getStaffOperationErrorMessage,
-  logStaffOperationError,
-} from "@/lib/staff-operation-error";
-import {
   formatMyPageTime,
   formatMyPageLocation,
   formatProfileDescription,
   formatRecentWorkTitle,
   formatStaffProfileName,
   formatStaffProfileRank,
-  getLocaleOptionLabel,
   getMyPageText,
 } from "@/features/staff-dashboard/mypage-i18n";
 
@@ -61,10 +51,6 @@ export default function MyPage() {
   const [loading, setLoading] = useState(true);
   const [logsLoadFailed, setLogsLoadFailed] = useState(false);
   const [logsLoadVersion, setLogsLoadVersion] = useState(0);
-  const [selectedLocale, setSelectedLocale] = useState<Locale>(currentLocale);
-  const [localeSaving, setLocaleSaving] = useState(false);
-  const [localeMessage, setLocaleMessage] = useState("");
-  const [localeError, setLocaleError] = useState("");
   const staffId = profile?.staffId || session?.id?.trim() || "";
 
   useEffect(() => {
@@ -156,23 +142,6 @@ export default function MyPage() {
   const profileDescription = profileLoading && !profile
     ? getMyPageText("profileChecking", currentLocale)
     : formatProfileDescription(displayRole, displayRank, currentLocale);
-  const localeChanged = selectedLocale !== currentLocale;
-
-  const handleSaveLocale = async () => {
-    setLocaleSaving(true);
-    setLocaleMessage("");
-    setLocaleError("");
-    try {
-      const result = await updateOwnStaffLocale(selectedLocale);
-      setSelectedLocale(result.locale);
-      setLocaleMessage(getStaffLocaleSaveSuccessMessage(result.locale));
-    } catch (e) {
-      logStaffOperationError("updateOwnStaffLocale failed", e);
-      setLocaleError(getStaffOperationErrorMessage(e, currentLocale));
-    } finally {
-      setLocaleSaving(false);
-    }
-  };
 
   return (
     <div style={{ maxWidth: 480, margin: "0 auto", padding: "16px 16px 24px" }}>
@@ -211,48 +180,6 @@ export default function MyPage() {
             <p style={{ fontSize: 24, fontWeight: 800 }}>—</p>
           </div>
         </div>
-      </div>
-
-      {/* Settings */}
-      <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 18, marginBottom: 20 }}>
-        <div style={{ marginBottom: 12 }}>
-          <p style={{ fontSize: 13, fontWeight: 800, color: "#0f172a" }}>{getMyPageText("displaySettings", currentLocale)}</p>
-          <p style={{ marginTop: 3, fontSize: 11, color: "#64748b" }}>{getMyPageText("displaySettingsHelp", currentLocale)}</p>
-        </div>
-        <label htmlFor="staff-display-language" style={{ display: "block", fontSize: 11, fontWeight: 700, color: "#475569", marginBottom: 6 }}>
-          {getMyPageText("displayLanguage", currentLocale)}
-        </label>
-        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-          <select
-            id="staff-display-language"
-            value={selectedLocale}
-            onChange={(e) => {
-              setSelectedLocale(normalizeLocale(e.target.value));
-              setLocaleMessage("");
-              setLocaleError("");
-            }}
-            disabled={localeSaving}
-            style={{ flex: 1, minWidth: 0, height: 40, border: "1px solid #cbd5e1", borderRadius: 10, padding: "0 12px", fontSize: 13, fontWeight: 700, color: "#0f172a", background: "#fff" }}
-          >
-            {SUPPORTED_LOCALES.map((locale) => (
-              <option key={locale} value={locale}>{getLocaleOptionLabel(locale, currentLocale)}</option>
-            ))}
-          </select>
-          <button
-            type="button"
-            onClick={handleSaveLocale}
-            disabled={localeSaving || !localeChanged}
-            style={{ height: 40, border: "none", borderRadius: 10, padding: "0 14px", fontSize: 12, fontWeight: 800, color: localeSaving || !localeChanged ? "#94a3b8" : "#fff", background: localeSaving || !localeChanged ? "#e2e8f0" : "#2563eb", cursor: localeSaving || !localeChanged ? "not-allowed" : "pointer" }}
-          >
-            {localeSaving ? getMyPageText("saving", currentLocale) : getMyPageText("save", currentLocale)}
-          </button>
-        </div>
-        {localeMessage && (
-          <p role="status" aria-live="polite" style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: "#047857" }}>{localeMessage}</p>
-        )}
-        {localeError && (
-          <p role="alert" style={{ marginTop: 8, fontSize: 11, fontWeight: 700, color: "#dc2626" }}>{localeError}</p>
-        )}
       </div>
 
       {/* Stats */}

@@ -1,0 +1,703 @@
+/*
+  Staff shell の視覚正本。
+  値の出典は Claude Design プロジェクト
+  "Staff Top Menu Visual Spec"（docs/design/staff-top-menu-and-viewport-policy.md §7）。
+  「不変」と書かれた項目（sheet の接続・角丸・Chevron の座標・階層の向き・
+  elevation の向き・motion の向き）は behavior 実装の都合で書き換えない。
+*/
+
+.shell {
+  /* ── surface ── */
+  --staff-base: #f4f6fa;
+  --staff-chrome: rgba(252, 253, 255, 0.78);
+  --staff-chrome-solid: #fafbfd;
+  --staff-sheet: rgba(255, 255, 255, 0.8);
+  --staff-sheet-solid: #fbfcfe;
+  --staff-backdrop: #0f172a;
+
+  /* ── text ── */
+  --staff-text: #0f172a;
+  --staff-text-body: #475569;
+  --staff-text-sub: #64748b;
+  --staff-text-muted: #94a3b8;
+  --staff-icon-idle: #9aa5b5;
+
+  /* ── accent ── */
+  --staff-accent: #4f46e5;
+  --staff-accent-bright: #6366f1;
+  --staff-accent-bg: #eef2ff;
+  --staff-accent-border: #c7cbf7;
+
+  /*
+    ── depth ──
+    blur 値は custom property にしない。Lightning CSS が
+    backdrop-filter / -webkit-backdrop-filter の var() 指定を落とすため、
+    使用箇所に literal で書く（chrome: blur(20px) saturate(180%) /
+    sheet: blur(32px) saturate(180%)）。
+  */
+  --staff-shadow-sheet:
+    0 26px 50px -22px rgba(15, 23, 42, 0.34),
+    0 2px 6px rgba(15, 23, 42, 0.05),
+    inset 1px 0 0 rgba(15, 23, 42, 0.05);
+
+  /* ── motion ── */
+  --staff-ease-open: cubic-bezier(0.22, 1, 0.36, 1);
+  --staff-ease-close: cubic-bezier(0.4, 0, 1, 1);
+
+  display: flex;
+  flex-direction: column;
+  background: var(--staff-base);
+  color: var(--staff-text);
+}
+
+/* viewport policy: locked = 画面内で完結し、shell が下端 safe-area を所有する */
+.shell[data-viewport="locked"] {
+  height: 100dvh;
+  overflow: hidden;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* viewport policy: allowed = 通常の document scroll。下端を予約しない */
+.shell[data-viewport="allowed"] {
+  min-height: 100dvh;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.main[data-viewport="locked"] {
+  overflow: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ============================================================
+   Header — 硬い 1px 線を持たない。上部 safe-area は同じ面で続ける
+   ============================================================ */
+
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  flex-wrap: nowrap;
+  gap: 8px;
+  /*
+    高さは 56px ちょうど（現行 main と同じ）。44px の hit area を保ったまま
+    56px に収めるため、上下 padding は 6px。ここを増やすと回帰になる。
+  */
+  min-height: 56px;
+  padding: 6px 4px 6px 16px;
+  padding-top: calc(6px + env(safe-area-inset-top, 0px));
+  background: var(--staff-chrome);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+}
+
+/* 下スワイプの起点になる非操作領域。ここに操作要素は置かない */
+.headerSpacer {
+  flex: 1;
+  min-width: 0;
+  height: 44px;
+}
+
+.headerChip {
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+  height: 44px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.headerChipBody {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-size: 12.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+/* 手動モード + 未処理受注あり → 受注モードへ誘導する */
+.headerChipOrder {
+  background: rgba(245, 158, 11, 0.15);
+  color: #b45309;
+}
+
+/* 受注モード中 → 手動へ戻す */
+.headerChipManual {
+  background: var(--staff-accent-bg);
+  color: var(--staff-accent);
+}
+
+/* Chevron: 枠なし / カード背景なし / 常時表示の円形背景なし */
+.menuTrigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--staff-text-sub);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.chevron {
+  display: inline-flex;
+  flex-shrink: 0;
+  transition: transform 200ms var(--staff-ease-open);
+}
+
+.chevronUp {
+  transform: rotate(180deg);
+}
+
+.menuTrigger:focus-visible,
+.headerChip:focus-visible,
+.sheetClose:focus-visible,
+.navItem:focus-visible,
+.primaryStrong:focus-visible,
+.primarySoft:focus-visible,
+.localeSelect:focus-visible {
+  outline: 2px solid var(--staff-accent-bright);
+  outline-offset: 2px;
+  border-radius: 12px;
+}
+
+/* ============================================================
+   Elevation — 線ではなく 10px の gradient fade 1枚だけ。
+   margin-bottom:-10px でレイアウト高さを 0 にする。
+   z-index 19 なので、直下に StaffSectionTabs（z-index 20）がある画面では
+   タブ面がこの fade を覆い、二重表現にならない。
+   ============================================================ */
+
+.headerFade {
+  height: 10px;
+  flex-shrink: 0;
+  margin-bottom: -10px;
+  position: relative;
+  z-index: 19;
+  pointer-events: none;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.055), rgba(15, 23, 42, 0));
+  opacity: 0.55;
+  transition: opacity 160ms linear;
+}
+
+.headerFade[data-scrolled="true"] {
+  opacity: 1;
+}
+
+/* ============================================================
+   Policy banner
+   ============================================================ */
+
+.banner {
+  position: relative;
+  z-index: 18;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 12px;
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.bannerAdvisory {
+  background: #fffbeb;
+  color: #92400e;
+}
+
+.bannerError {
+  background: #fef2f2;
+  color: #991b1b;
+}
+
+.bannerIcon {
+  flex-shrink: 0;
+}
+
+/* ============================================================
+   Backdrop
+   ============================================================ */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: none;
+  padding: 0;
+  background: var(--staff-backdrop);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 200ms linear;
+}
+
+.backdrop[data-open="true"] {
+  opacity: 0.32;
+  pointer-events: auto;
+}
+
+/* ============================================================
+   Menu sheet — ヘッダーがそのまま右上から下へ伸びた一枚の面
+   ============================================================ */
+
+.sheet {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  width: min(280px, calc(100% - 20px));
+  max-height: calc(100dvh - 24px);
+  /* 上端・右端に密着。角丸は下2辺のみ */
+  border-radius: 0 0 24px 24px;
+  background: var(--staff-sheet);
+  -webkit-backdrop-filter: blur(32px) saturate(180%);
+  backdrop-filter: blur(32px) saturate(180%);
+  box-shadow: var(--staff-shadow-sheet);
+  overflow: hidden;
+  transform-origin: right top;
+  transform: translateY(-14px) scale(0.985);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    transform 150ms var(--staff-ease-close),
+    opacity 150ms var(--staff-ease-close);
+}
+
+.sheet[data-open="true"] {
+  transform: translateY(0) scale(1);
+  opacity: 1;
+  pointer-events: auto;
+  transition:
+    transform 220ms var(--staff-ease-open),
+    opacity 220ms var(--staff-ease-open);
+}
+
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .header {
+    background: var(--staff-chrome-solid);
+  }
+
+  .sheet {
+    background: var(--staff-sheet-solid);
+  }
+}
+
+/* Chevron は開閉で位置が動かない。sheet 上部 56px 行に同座標で再出現する */
+.sheetTop {
+  flex-shrink: 0;
+  padding-top: env(safe-area-inset-top, 0px);
+}
+
+/* header と同じ寸法。Chevron が開閉で同座標に留まることを保証する */
+.sheetTopRow {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  min-height: 56px;
+  padding: 6px 4px 6px 16px;
+}
+
+.sheetTitle {
+  flex: 1;
+  min-width: 0;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: 0.13em;
+  color: #c3cad6;
+}
+
+.sheetClose {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: 12px;
+  background: transparent;
+  color: #334155;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* ── account: 枠もカードもアイコン枠も持たず、面に直接置く ── */
+
+.account {
+  flex-shrink: 0;
+  padding: 2px 16px 14px;
+}
+
+.accountRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.avatar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--staff-accent-bg);
+  color: var(--staff-accent);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.accountBody {
+  min-width: 0;
+  flex: 1;
+}
+
+/* globals.css の p { margin-bottom: 1em } を打ち消す。行間はここで決める */
+.accountName {
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+  color: var(--staff-text);
+}
+
+.accountEmail {
+  margin: 1px 0 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11.5px;
+  font-weight: 500;
+  color: var(--staff-text-muted);
+}
+
+.accountMeta {
+  margin: 8px 0 0;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--staff-text-sub);
+}
+
+.accountMetaDot {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+/* ── locale ── */
+
+.locale {
+  margin-top: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+}
+
+.localeLabel {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--staff-text-muted);
+}
+
+.localeControl {
+  position: relative;
+  width: 152px;
+  flex-shrink: 0;
+}
+
+.localeSelect {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 100%;
+  height: 36px;
+  padding: 0 26px 0 14px;
+  border: none;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: var(--staff-text);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  text-align: center;
+  cursor: pointer;
+}
+
+.localeSelect:disabled {
+  cursor: progress;
+  opacity: 0.65;
+}
+
+.localeChevron {
+  position: absolute;
+  right: 10px;
+  top: 11px;
+  color: var(--staff-text-muted);
+  pointer-events: none;
+}
+
+.localeStatus {
+  margin: 7px 0 0;
+  text-align: center;
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 1.5;
+  color: var(--staff-text-sub);
+}
+
+.localeStatusSaved {
+  color: #047857;
+}
+
+.localeStatusError {
+  color: #dc2626;
+}
+
+/* 区切りは全幅の線ではなく、右へ消える hairline */
+.divider {
+  height: 1px;
+  margin: 0 16px;
+  flex-shrink: 0;
+  background: linear-gradient(90deg, rgba(15, 23, 42, 0.1), rgba(15, 23, 42, 0));
+}
+
+/* ── navigation: 中間階層。行の塗り分けはしない ── */
+
+.nav {
+  padding: 8px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+.navItem {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 44px;
+  padding: 0 14px;
+  border-radius: 10px;
+  text-decoration: none;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--staff-text-body);
+}
+
+/*
+  中身は 138px の列として中央寄せ。日本語ではこれでラベル頭が縦に揃う。
+  英語など長いラベルは折り返さずに列だけ広げる（行高 44px を守る）。
+*/
+.navItemInner {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-width: 138px;
+  max-width: 100%;
+  white-space: nowrap;
+}
+
+.navItemIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--staff-icon-idle);
+}
+
+/* active は「右端＝現在地」を示す右向き gradient */
+.navItem[aria-current="page"] {
+  font-weight: 700;
+  color: var(--staff-accent);
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0) 0%, rgba(99, 102, 241, 0.11) 100%);
+}
+
+.navItem[aria-current="page"] .navItemIcon {
+  color: inherit;
+}
+
+/* ── primary actions: 親指ゾーン。僅かに沈んだ面に置く ── */
+
+.primary {
+  margin-top: auto;
+  flex-shrink: 0;
+  padding: 12px 14px 6px;
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.015), rgba(15, 23, 42, 0.05));
+}
+
+/*
+  基準幅は 196px。日本語フォントの実測幅で 1 行に収まらない場合だけ
+  内容ぶん広げる（折り返しは許さない）。
+*/
+.primaryStrong {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  height: 56px;
+  width: max-content;
+  min-width: 196px;
+  max-width: 100%;
+  margin: 0 auto;
+  padding: 0 14px;
+  white-space: nowrap;
+  border-radius: 14px;
+  background: var(--staff-accent-bright);
+  color: #fff;
+  text-decoration: none;
+  letter-spacing: -0.01em;
+  /* glow は使わない。影は 1 本だけ */
+  box-shadow: 0 8px 18px -10px rgba(79, 70, 229, 0.75);
+}
+
+.primaryStrongLabel {
+  font-size: 15px;
+  font-weight: 600;
+}
+
+/* 受注件数はここへ寄せ、ヘッダー通知との役割重複を作らない */
+.primaryCount {
+  display: inline-flex;
+  align-items: center;
+  height: 21px;
+  padding: 0 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
+  font-size: 11.5px;
+  font-weight: 800;
+}
+
+.primarySoft {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  height: 50px;
+  width: max-content;
+  min-width: 196px;
+  max-width: 100%;
+  margin: 8px auto 0;
+  padding: 0 16px;
+  white-space: nowrap;
+  border-radius: 14px;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  color: #334155;
+  text-decoration: none;
+  font-size: 14.5px;
+  font-weight: 600;
+}
+
+.primarySoftIcon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--staff-text-sub);
+}
+
+.primarySoft[aria-current="page"] {
+  background: var(--staff-accent-bg);
+  border-color: var(--staff-accent-border);
+  color: var(--staff-accent);
+  font-weight: 700;
+}
+
+.primarySoft[aria-current="page"] .primarySoftIcon {
+  color: inherit;
+}
+
+/* 上スワイプで閉じられることの手がかり */
+.grabber {
+  width: 36px;
+  height: 4px;
+  margin: 10px auto 8px;
+  border-radius: 2px;
+  background: rgba(15, 23, 42, 0.14);
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+
+@media (max-width: 359px) {
+  .header {
+    padding-left: 12px;
+  }
+
+  .sheetTopRow {
+    padding-left: 12px;
+  }
+
+  /* 受注 chip は件数だけにして header を 1 行に保つ（読み上げは aria-label が担保） */
+  .headerChipWord {
+    display: none;
+  }
+}
+
+@media (min-width: 430px) {
+  .sheet {
+    width: 260px;
+  }
+
+  .navItem {
+    height: 46px;
+  }
+}
+
+/* ============================================================
+   Reduced motion: transform を使わず opacity だけ
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet,
+  .sheet[data-open="true"] {
+    transform: none;
+    transition: opacity 100ms linear;
+  }
+
+  .backdrop {
+    transition: opacity 100ms linear;
+  }
+
+  .chevron,
+  .chevronUp {
+    transform: none;
+    transition: none;
+  }
+
+  .headerFade {
+    transition: none;
+  }
+}
