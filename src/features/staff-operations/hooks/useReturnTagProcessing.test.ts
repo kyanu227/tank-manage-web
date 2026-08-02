@@ -10,6 +10,10 @@ import {
 } from "vitest";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
 import { confirmPendingReturnRequests } from "@/lib/firebase/return-tag-processing-service";
+import {
+  transactionsRepository,
+  type TransactionDoc,
+} from "@/lib/firebase/repositories";
 import type { Locale } from "@/lib/locale";
 import type { OperationActor } from "@/lib/operation-context";
 import { StaffOperationError } from "@/lib/staff-operation-error";
@@ -47,6 +51,9 @@ const ACTOR = {
 const useStateMock = useState as unknown as Mock;
 const requireStaffIdentityMock = vi.mocked(requireStaffIdentity);
 const confirmPendingReturnRequestsMock = vi.mocked(confirmPendingReturnRequests);
+const getPendingReturnTagsMock = vi.mocked(
+  transactionsRepository.getPendingReturnTags,
+);
 
 function createReturnGroup(condition: unknown): ReturnGroup {
   const group: ReturnGroup = {
@@ -97,6 +104,24 @@ function HookHarness(
   };
 }
 
+function FetchHarness() {
+  const setReturnGroups = vi.fn();
+  const fetchBulkTanks = vi.fn(async () => undefined);
+
+  useStateMock
+    .mockImplementationOnce(() => [true, vi.fn()])
+    .mockImplementationOnce(() => [false, vi.fn()])
+    .mockImplementationOnce(() => [[], setReturnGroups])
+    .mockImplementationOnce(() => [null, vi.fn()])
+    .mockImplementationOnce(() => [{}, vi.fn()])
+    .mockImplementationOnce(() => [false, vi.fn()]);
+
+  return {
+    result: useReturnTagProcessing({ fetchBulkTanks, locale: "ja" }),
+    setReturnGroups,
+  };
+}
+
 describe("useReturnTagProcessing confirmation", () => {
   beforeEach(() => {
     useStateMock.mockReset();
@@ -104,6 +129,8 @@ describe("useReturnTagProcessing confirmation", () => {
     requireStaffIdentityMock.mockReturnValue(ACTOR);
     confirmPendingReturnRequestsMock.mockReset();
     confirmPendingReturnRequestsMock.mockResolvedValue({ processedCount: 1 });
+    getPendingReturnTagsMock.mockReset();
+    getPendingReturnTagsMock.mockResolvedValue([]);
     vi.stubGlobal("alert", vi.fn());
   });
 
@@ -123,6 +150,29 @@ describe("useReturnTagProcessing confirmation", () => {
       selections,
       actor: ACTOR,
     });
+  });
+
+  it("repository の cycle marker を加工せず PendingReturn へ保持する", async () => {
+    const marker = " log-001 ";
+    const transaction = {
+      id: "return-1",
+      type: "return",
+      status: "pending_return",
+      customerId: "customer-1",
+      customerName: "Ocean Shop",
+      tankId: "A-01",
+      condition: "unused",
+      expectedLatestLogId: marker,
+      createdAt: { toMillis: () => 1_000 },
+    } satisfies TransactionDoc & { condition: string };
+    getPendingReturnTagsMock.mockResolvedValueOnce([transaction]);
+    const { result, setReturnGroups } = FetchHarness();
+
+    await result.fetchPendingReturnTags();
+
+    expect(setReturnGroups).toHaveBeenCalledTimes(1);
+    const groups = setReturnGroups.mock.calls[0][0] as ReturnGroup[];
+    expect(groups[0].items[0].expectedLatestLogId).toBe(marker);
   });
 
   it.each(["ja", "en"] as const)(

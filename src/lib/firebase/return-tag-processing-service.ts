@@ -22,8 +22,10 @@ import {
 
 type PendingReturnRequestItem = {
   id: string;
+  customerId: string;
   tankId: string;
   condition: ReturnCondition;
+  expectedLatestLogId?: unknown;
 };
 
 type PendingReturnRequestGroup = {
@@ -170,19 +172,39 @@ function buildReturnConfirmationOperations(
   confirmations: ReturnConfirmation[],
   baseContext: OperationContext,
 ): TankOperationInput[] {
-  return confirmations.map(({ item, tankId, condition, note, currentStatus, transitionAction, location }) => ({
-    tankId,
-    transitionAction,
-    currentStatus,
-    context: {
-      ...baseContext,
-      transactionId: item.id,
-      returnCondition: condition,
-    },
-    location,
-    tankNote: note,
-    logNote: note,
-  }));
+  return confirmations.map(({ item, tankId, condition, note, currentStatus, transitionAction, location }) => {
+    const expectedCycle = buildExpectedCycle(item);
+    return {
+      tankId,
+      transitionAction,
+      currentStatus,
+      context: {
+        ...baseContext,
+        transactionId: item.id,
+        returnCondition: condition,
+      },
+      location,
+      tankNote: note,
+      logNote: note,
+      ...(expectedCycle ? { expectedCycle } : {}),
+    };
+  });
+}
+
+function buildExpectedCycle(
+  item: PendingReturnRequestItem,
+): TankOperationInput["expectedCycle"] {
+  if (!isNonEmptyString(item.customerId) || !isNonEmptyString(item.expectedLatestLogId)) {
+    return undefined;
+  }
+  return {
+    customerId: item.customerId,
+    latestLogId: item.expectedLatestLogId,
+  };
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
 }
 
 function completePendingReturnRequests(
