@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   DASHBOARD_TEXT,
+  LOG_CORRECTION_REASON_TEXT_KEYS,
   formatBulkLocationDescription,
   formatBulkVoidDescription,
   formatDashboardActiveLogs,
@@ -19,12 +20,70 @@ import {
   formatDashboardStaffName,
   formatDashboardTankId,
   formatDashboardTankStatusLabel,
+  getLogCorrectionBlockReasonText,
 } from "./i18n";
 import { StaffOperationError } from "@/lib/staff-operation-error";
+import { LOG_CORRECTION_BLOCK_REASONS } from "@/features/staff-dashboard/policy/log-correction-policy";
 
 const JAPANESE_TEXT = /[\u3040-\u30ff\u3400-\u9fff]/u;
 
 describe("staff dashboard i18n", () => {
+  it("訂正不可理由codeを既存のja/en文言へ完全に対応付ける", () => {
+    expect(Object.keys(LOG_CORRECTION_REASON_TEXT_KEYS).sort()).toStrictEqual(
+      [...LOG_CORRECTION_BLOCK_REASONS].sort(),
+    );
+    expect(LOG_CORRECTION_REASON_TEXT_KEYS).toStrictEqual({
+      not_tank_log: "notTankLog",
+      inactive_log: "inactiveLog",
+      missing_created_at: "missingCreatedAt",
+      edit_expired: "editExpired",
+      transition_plan_missing: "transitionPlanMissing",
+      recovery_correction_blocked: "recoveryCorrectionBlocked",
+      review_correction_blocked: "reviewCorrectionBlocked",
+    });
+
+    const expected = {
+      not_tank_log: {
+        ja: "タンク操作ログではありません",
+        en: "This is not a tank-operation log.",
+      },
+      inactive_log: {
+        ja: "有効なログではありません",
+        en: "This log is not active.",
+      },
+      missing_created_at: {
+        ja: "作成日時が取得できず期限判定できません",
+        en: "The edit deadline cannot be checked because the creation time is unavailable.",
+      },
+      edit_expired: {
+        ja: "一般スタッフの編集可能期限を超過しています",
+        en: "The editing window for staff has expired.",
+      },
+      transition_plan_missing: {
+        ja: "transitionPlanを確認できないログは訂正できません",
+        en: "This log cannot be corrected because its transition plan is unavailable.",
+      },
+      recovery_correction_blocked: {
+        ja: "自動補完ログは取消後に正しい操作を再実行してください",
+        en: "Void this recovery log, then run the correct operation again.",
+      },
+      review_correction_blocked: {
+        ja: "集計レビュー対象のログは直接訂正できません",
+        en: "Logs under review cannot be corrected directly.",
+      },
+    } as const;
+
+    LOG_CORRECTION_BLOCK_REASONS.forEach((reason) => {
+      expect(getLogCorrectionBlockReasonText(reason, "ja")).toBe(
+        expected[reason].ja,
+      );
+      expect(getLogCorrectionBlockReasonText(reason, "en")).toBe(
+        expected[reason].en,
+      );
+    });
+    expect(getLogCorrectionBlockReasonText(null, "ja")).toBeNull();
+  });
+
   it("keeps every English dictionary value free of Japanese chrome", () => {
     for (const value of Object.values(DASHBOARD_TEXT)) {
       expect(value.ja).toBeTruthy();

@@ -68,7 +68,6 @@ describe("log-correction-workflow", () => {
       targetLogId: "target-log-001",
       tankId: "A-01",
       reason: "  abc  ",
-      editedByRole: "一般",
       resolveActor,
     });
 
@@ -84,12 +83,10 @@ describe("log-correction-workflow", () => {
         },
         reason: "  abc  ",
         editor: ACTOR_A,
-        editedByRole: "一般",
       },
     ]);
     const coreInput = applyLogCorrectionMock.mock.calls[0][0];
     expect(Object.keys(coreInput).sort()).toStrictEqual([
-      "editedByRole",
       "editor",
       "mode",
       "patch",
@@ -109,7 +106,6 @@ describe("log-correction-workflow", () => {
       targetLogId: "target-log-002",
       tankId: "B-02",
       reason: "訂正理由そのまま",
-      editedByRole: "準管理者",
       resolveActor,
     });
 
@@ -129,7 +125,6 @@ describe("log-correction-workflow", () => {
       targetLogId: "target-log-003",
       tankId: "C-03",
       reason: "訂正理由そのまま",
-      editedByRole: "管理者",
       resolveActor,
     });
 
@@ -145,7 +140,6 @@ describe("log-correction-workflow", () => {
     const result = await voidDashboardLog({
       logId: "void-log-001",
       reason: "  xyz  ",
-      voidedByRole: "準管理者",
       resolveActor,
     });
 
@@ -156,14 +150,12 @@ describe("log-correction-workflow", () => {
       {
         logId: "void-log-001",
         voider: ACTOR_B,
-        voidedByRole: "準管理者",
         reason: "  xyz  ",
       },
     ]);
     expect(Object.keys(voidLogMock.mock.calls[0][0]).sort()).toStrictEqual([
       "logId",
       "reason",
-      "voidedByRole",
       "voider",
     ]);
     expect(applyLogCorrectionMock).toHaveBeenCalledTimes(0);
@@ -177,7 +169,6 @@ describe("log-correction-workflow", () => {
     const promise = voidDashboardLog({
       logId: "void-log-002",
       reason: "取消理由そのまま",
-      voidedByRole: "一般",
       resolveActor,
     });
 
@@ -196,7 +187,6 @@ describe("log-correction-workflow", () => {
     const promise = voidDashboardLog({
       logId: "void-log-003",
       reason: "取消理由そのまま",
-      voidedByRole: "管理者",
       resolveActor,
     });
 
@@ -228,7 +218,6 @@ describe("log-correction-workflow", () => {
       location: "検証貸出先",
       customer: CUSTOMER,
       reason: "  loc  ",
-      editedByRole: "一般",
       resolveActor,
     });
 
@@ -259,7 +248,6 @@ describe("log-correction-workflow", () => {
           },
           reason: "  loc  ",
           editor: ACTOR_A,
-          editedByRole: "一般",
         },
       ],
       [
@@ -272,7 +260,6 @@ describe("log-correction-workflow", () => {
           },
           reason: "  loc  ",
           editor: ACTOR_B,
-          editedByRole: "一般",
         },
       ],
       [
@@ -285,13 +272,11 @@ describe("log-correction-workflow", () => {
           },
           reason: "  loc  ",
           editor: ACTOR_C,
-          editedByRole: "一般",
         },
       ],
     ]);
     applyLogCorrectionMock.mock.calls.forEach(([coreInput]) => {
       expect(Object.keys(coreInput).sort()).toStrictEqual([
-        "editedByRole",
         "editor",
         "mode",
         "patch",
@@ -314,7 +299,6 @@ describe("log-correction-workflow", () => {
       location: "自社",
       customer: null,
       reason: "自社利用先へ訂正",
-      editedByRole: "管理者",
       resolveActor,
     });
 
@@ -329,7 +313,6 @@ describe("log-correction-workflow", () => {
         },
         reason: "自社利用先へ訂正",
         editor: ACTOR_A,
-        editedByRole: "管理者",
       },
     ]);
     const patch = applyLogCorrectionMock.mock.calls[0][0].patch;
@@ -363,7 +346,6 @@ describe("log-correction-workflow", () => {
       location: "訂正先",
       customer: CUSTOMER,
       reason: "貸出先訂正理由",
-      editedByRole: "準管理者",
       resolveActor,
     });
 
@@ -401,7 +383,6 @@ describe("log-correction-workflow", () => {
       location: "訂正先",
       customer: CUSTOMER,
       reason: "貸出先訂正理由",
-      editedByRole: "一般",
       resolveActor,
     });
 
@@ -434,7 +415,6 @@ describe("log-correction-workflow", () => {
         { id: "void-b", tankId: "B-02" },
       ],
       reason: "  void  ",
-      voidedByRole: "管理者",
       resolveActor,
     });
 
@@ -459,7 +439,6 @@ describe("log-correction-workflow", () => {
         {
           logId: "void-c",
           voider: ACTOR_C,
-          voidedByRole: "管理者",
           reason: "  void  ",
         },
       ],
@@ -467,7 +446,6 @@ describe("log-correction-workflow", () => {
         {
           logId: "void-a",
           voider: ACTOR_A,
-          voidedByRole: "管理者",
           reason: "  void  ",
         },
       ],
@@ -475,7 +453,6 @@ describe("log-correction-workflow", () => {
         {
           logId: "void-b",
           voider: ACTOR_B,
-          voidedByRole: "管理者",
           reason: "  void  ",
         },
       ],
@@ -484,7 +461,6 @@ describe("log-correction-workflow", () => {
       expect(Object.keys(coreInput).sort()).toStrictEqual([
         "logId",
         "reason",
-        "voidedByRole",
         "voider",
       ]);
     });
@@ -511,7 +487,6 @@ describe("log-correction-workflow", () => {
         { id: "void-d", tankId: "D-04" },
       ],
       reason: "一括取消理由",
-      voidedByRole: "準管理者",
       resolveActor,
     });
 
@@ -547,7 +522,6 @@ describe("log-correction-workflow", () => {
         { id: "void-c", tankId: "C-03" },
       ],
       reason: "一括取消理由",
-      voidedByRole: "一般",
       resolveActor,
     });
 
@@ -568,14 +542,12 @@ describe("log-correction-workflow", () => {
       location: "訂正先",
       customer: null,
       reason: "貸出先訂正理由",
-      editedByRole: "一般",
       resolveActor,
     })).resolves.toStrictEqual([]);
 
     await expect(voidDashboardLogs({
       logs: [],
       reason: "一括取消理由",
-      voidedByRole: "一般",
       resolveActor,
     })).resolves.toStrictEqual([]);
 

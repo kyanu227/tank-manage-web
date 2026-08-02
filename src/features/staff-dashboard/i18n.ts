@@ -1,4 +1,5 @@
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
+import type { LogCorrectionBlockReason } from "@/features/staff-dashboard/policy/log-correction-policy";
 import {
   formatStaffCount,
   formatStaffTankCount,
@@ -107,8 +108,26 @@ export const DASHBOARD_TEXT = {
 
 export type DashboardTextKey = keyof typeof DASHBOARD_TEXT;
 
+export const LOG_CORRECTION_REASON_TEXT_KEYS = {
+  not_tank_log: "notTankLog",
+  inactive_log: "inactiveLog",
+  missing_created_at: "missingCreatedAt",
+  edit_expired: "editExpired",
+  transition_plan_missing: "transitionPlanMissing",
+  recovery_correction_blocked: "recoveryCorrectionBlocked",
+  review_correction_blocked: "reviewCorrectionBlocked",
+} satisfies Record<LogCorrectionBlockReason, DashboardTextKey>;
+
 export function getDashboardText(key: DashboardTextKey, locale: Locale = DEFAULT_LOCALE): string {
   return DASHBOARD_TEXT[key][locale];
+}
+
+export function getLogCorrectionBlockReasonText(
+  reason: LogCorrectionBlockReason | null,
+  locale: Locale = DEFAULT_LOCALE,
+): string | null {
+  if (reason == null) return null;
+  return getDashboardText(LOG_CORRECTION_REASON_TEXT_KEYS[reason], locale);
 }
 
 export function formatDashboardItemCount(count: number, locale: Locale): string {

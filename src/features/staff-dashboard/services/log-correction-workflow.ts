@@ -5,7 +5,6 @@ import type {
 import {
   applyLogCorrection,
   voidLog,
-  type StaffCorrectionRole,
 } from "@/lib/tank-operation";
 import { logStaffOperationError } from "@/lib/staff-operation-error";
 
@@ -20,14 +19,12 @@ export type CorrectDashboardLogTankIdInput = {
   targetLogId: string;
   tankId: string;
   reason: string;
-  editedByRole: StaffCorrectionRole;
   resolveActor: ResolveCorrectionActor;
 };
 
 export type VoidDashboardLogInput = {
   logId: string;
   reason: string;
-  voidedByRole: StaffCorrectionRole;
   resolveActor: ResolveCorrectionActor;
 };
 
@@ -36,14 +33,12 @@ export type CorrectDashboardLogLocationsInput = {
   location: string;
   customer: CustomerSnapshot | null;
   reason: string;
-  editedByRole: StaffCorrectionRole;
   resolveActor: ResolveCorrectionActor;
 };
 
 export type VoidDashboardLogsInput = {
   logs: readonly DashboardLogTargetInput[];
   reason: string;
-  voidedByRole: StaffCorrectionRole;
   resolveActor: ResolveCorrectionActor;
 };
 
@@ -60,7 +55,6 @@ export async function correctDashboardLogTankId(
     targetLogId,
     tankId,
     reason,
-    editedByRole,
     resolveActor,
   } = input;
 
@@ -72,7 +66,6 @@ export async function correctDashboardLogTankId(
     },
     reason,
     editor: resolveActor(),
-    editedByRole,
   });
 }
 
@@ -83,14 +76,12 @@ export async function voidDashboardLog(
   const {
     logId,
     reason,
-    voidedByRole,
     resolveActor,
   } = input;
 
   await voidLog({
     logId,
     voider: resolveActor(),
-    voidedByRole,
     reason,
   });
 }
@@ -104,7 +95,6 @@ export async function correctDashboardLogLocations(
     location,
     customer,
     reason,
-    editedByRole,
     resolveActor,
   } = input;
   const failures: DashboardLogOperationFailure[] = [];
@@ -120,7 +110,6 @@ export async function correctDashboardLogLocations(
         },
         reason,
         editor: resolveActor(),
-        editedByRole,
       });
     } catch (error: unknown) {
       logStaffOperationError("Dashboard log location correction failed", error);
@@ -138,7 +127,6 @@ export async function voidDashboardLogs(
   const {
     logs,
     reason,
-    voidedByRole,
     resolveActor,
   } = input;
   const failures: DashboardLogOperationFailure[] = [];
@@ -148,7 +136,6 @@ export async function voidDashboardLogs(
       await voidLog({
         logId: log.id,
         voider: resolveActor(),
-        voidedByRole,
         reason,
       });
     } catch (error: unknown) {

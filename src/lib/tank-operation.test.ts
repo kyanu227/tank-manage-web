@@ -27,6 +27,8 @@ import {
   getStaffOperationErrorMessage,
   StaffOperationError,
 } from "@/lib/staff-operation-error";
+import { CORRECTION_LIMIT_MS } from "@/lib/tank-operation-limits";
+import { canModifyLogReason } from "@/features/staff-dashboard/policy/log-correction-policy";
 
 type PlanTankTransition = (
   request: TransitionPlanRequest,
@@ -233,6 +235,110 @@ function createRecordedTransaction(
     update: vi.fn(),
     delete: vi.fn(),
   };
+}
+
+function directCorrectionLog(
+  revisionCreatedAt: unknown,
+): Record<string, unknown> {
+  return {
+    tankId: "T001",
+    action: "lend",
+    transitionAction: "lend",
+    location: "顧客A",
+    staffId: "staff-original",
+    staffName: "元担当者",
+    staffEmail: "original@example.com",
+    customerId: "customer-001",
+    customerName: "顧客A",
+    note: "既存メモ",
+    logNote: "既存ログメモ",
+    transitionPlan: {
+      version: 1,
+      kind: "direct",
+      steps: [{
+        action: "lend",
+        fromStatus: "filled",
+        toStatus: "lent",
+        actorType: "operator",
+        businessEffect: "rental_open",
+        customerId: "customer-001",
+        customerName: "顧客A",
+        location: "顧客A",
+      }],
+      requiredEvidence: [],
+    },
+    transitionReviewStatus: "not_required",
+    policyMode: "strict",
+    policyRevision: 1,
+    affectedCustomerIds: ["customer-001"],
+    hasUnknownAffectedCustomer: false,
+    prevStatus: "filled",
+    newStatus: "lent",
+    logStatus: "active",
+    logKind: "tank",
+    rootLogId: "root-log-001",
+    revision: 1,
+    originalAt: 1_700_000_000_000,
+    timestamp: 1_700_000_000_000,
+    revisionCreatedAt,
+    prevTankSnapshot: {
+      status: "filled",
+      customerId: null,
+      customerName: null,
+      location: "倉庫",
+      staff: "元担当者",
+      logNote: "",
+    },
+    nextTankSnapshot: {
+      status: "lent",
+      customerId: "customer-001",
+      customerName: "顧客A",
+      location: "顧客A",
+      staff: "元担当者",
+      logNote: "既存ログメモ",
+    },
+    previousLogIdOnSameTank: "previous-log-001",
+  };
+}
+
+function useCorrectionTransaction(
+  logId: string,
+  logData: Record<string, unknown>,
+): ReturnType<typeof createRecordedTransaction> {
+  const transaction = {
+    get: vi.fn(async (reference: unknown) => {
+      const path = referencePath(reference);
+      if (path === mocks.aggregationReference.path) return snapshot(undefined);
+      if (path === `logs/${logId}`) return snapshot(logData);
+      if (path === "tanks/T001") {
+        return snapshot(tankData({ latestLogId: logId }));
+      }
+      return snapshot(undefined);
+    }),
+    set: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  };
+  mocks.runTransaction.mockImplementationOnce(
+    async (_database: unknown, callback: (tx: typeof transaction) => Promise<unknown>) => {
+      transactionCallbackCount += 1;
+      recordedTransactions.push(transaction);
+      return callback(transaction);
+    },
+  );
+  return transaction;
+}
+
+async function withDateNow<T>(
+  nowMs: number,
+  run: () => Promise<T>,
+): Promise<T> {
+  const dateNow = vi.spyOn(Date, "now").mockReturnValue(nowMs);
+  try {
+    return await run();
+  } finally {
+    dateNow.mockRestore();
+  }
 }
 
 async function captureError(promise: Promise<unknown>): Promise<unknown> {
@@ -1176,6 +1282,251 @@ describe("typed correction input validation", () => {
     expect(operationError.params).toEqual({ minLength: 5 });
     expect(mocks.runTransaction).toHaveBeenCalledTimes(0);
     expect(transactionCallbackCount).toBe(0);
+  });
+});
+
+describe("log correction common window and atomic payload", () => {
+  const nowMs = 1_800_000_000_000;
+
+  it.each([
+    ["一般staff相当の訂正", "correction", ACTOR],
+    ["管理者相当の訂正", "correction", { ...ACTOR, role: "admin" }],
+    ["一般staff相当の取消", "void", ACTOR],
+    ["管理者相当の取消", "void", { ...ACTOR, role: "admin" }],
+  ] as const)("%sも72時間超なら拒否する", async (_label, kind, actor) => {
+    const logId = "target-log-expired";
+    const transaction = useCorrectionTransaction(
+      logId,
+      directCorrectionLog(nowMs - CORRECTION_LIMIT_MS - 1),
+    );
+
+    const error = await captureError(withDateNow(nowMs, async () => {
+      if (kind === "correction") {
+        await applyLogCorrection({
+          targetLogId: logId,
+          mode: "replace",
+          patch: { tankId: "T001" },
+          reason: "訂正理由です",
+          editor: actor,
+        });
+        return;
+      }
+      await voidLog({
+        logId,
+        reason: "取消理由です",
+        voider: actor,
+      });
+    }));
+
+    requireStaffOperationError(error, "correction_window_expired");
+    expect(transactionCallbackCount).toBe(1);
+    expectNoWrites(transaction);
+  });
+
+  it.each([
+    ["訂正・ちょうど72時間", "correction", 0, null],
+    ["訂正・72時間 + 1ms", "correction", 1, "edit_expired"],
+    ["取消・ちょうど72時間", "void", 0, null],
+    ["取消・72時間 + 1ms", "void", 1, "edit_expired"],
+  ] as const)(
+    "%sでUI policyとdomainの判定が一致する",
+    async (_label, kind, elapsedAfterLimitMs, expectedPolicyReason) => {
+      const logId = `target-log-shared-window-${kind}-${elapsedAfterLimitMs}`;
+      const revisionCreatedAt =
+        nowMs - CORRECTION_LIMIT_MS - elapsedAfterLimitMs;
+      const transaction = useCorrectionTransaction(
+        logId,
+        directCorrectionLog(revisionCreatedAt),
+      );
+
+      expect(canModifyLogReason({
+        logKind: "tank",
+        logStatus: "active",
+        revisionCreatedAt,
+      }, nowMs)).toBe(expectedPolicyReason);
+
+      const error = await captureError(withDateNow(nowMs, async () => {
+        if (kind === "correction") {
+          await applyLogCorrection({
+            targetLogId: logId,
+            mode: "replace",
+            patch: { tankId: "T001" },
+            reason: "訂正理由です",
+            editor: ACTOR,
+          });
+          return;
+        }
+        await voidLog({
+          logId,
+          reason: "取消理由です",
+          voider: ACTOR,
+        });
+      }));
+
+      if (expectedPolicyReason === null) {
+        expect(error).toBeNull();
+        expect(transaction.set.mock.calls.length).toBeGreaterThan(0);
+        expect(transaction.update.mock.calls.length).toBeGreaterThan(0);
+        return;
+      }
+
+      requireStaffOperationError(error, "correction_window_expired");
+      expectNoWrites(transaction);
+    },
+  );
+
+  it.each([
+    ["72時間 - 1ms", CORRECTION_LIMIT_MS - 1, true],
+    ["ちょうど72時間", CORRECTION_LIMIT_MS, true],
+    ["72時間 + 1ms", CORRECTION_LIMIT_MS + 1, false],
+  ] as const)("取消の期限境界 %s を固定する", async (_label, ageMs, allowed) => {
+    const logId = "target-log-boundary";
+    const transaction = useCorrectionTransaction(
+      logId,
+      directCorrectionLog(nowMs - ageMs),
+    );
+
+    const error = await captureError(withDateNow(nowMs, () => voidLog({
+      logId,
+      reason: "取消理由です",
+      voider: ACTOR,
+    })));
+
+    if (!allowed) {
+      requireStaffOperationError(error, "correction_window_expired");
+      expectNoWrites(transaction);
+      return;
+    }
+
+    expect(error).toBeNull();
+    expect(transaction.set).toHaveBeenCalledTimes(1);
+    expect(transaction.update).toHaveBeenCalledTimes(2);
+  });
+
+  it("不正なrevisionCreatedAtはdomainでもfail-closedにする", async () => {
+    const logId = "target-log-invalid-date";
+    const transaction = useCorrectionTransaction(
+      logId,
+      directCorrectionLog(new Date(Number.NaN)),
+    );
+
+    const error = await captureError(withDateNow(nowMs, () => voidLog({
+      logId,
+      reason: "取消理由です",
+      voider: ACTOR,
+    })));
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe("対象ログの作成日時を確認できません");
+    expectNoWrites(transaction);
+  });
+
+  it("訂正を1 transactionでrevision chain・snapshot・actor payloadごと更新する", async () => {
+    const logId = "target-log-correction";
+    const transaction = useCorrectionTransaction(
+      logId,
+      directCorrectionLog(nowMs - CORRECTION_LIMIT_MS),
+    );
+    const editor = { ...ACTOR, role: "admin" };
+
+    const result = await withDateNow(nowMs, () => applyLogCorrection({
+      targetLogId: logId,
+      mode: "replace",
+      patch: { tankId: "T001" },
+      reason: "  訂正理由です  ",
+      editor,
+    }));
+
+    expect(result).toStrictEqual({ logId: "generated-log-1" });
+    expect(transactionCallbackCount).toBe(1);
+    expect(recordedTransactions).toStrictEqual([transaction]);
+    expect(transaction.set).toHaveBeenCalledTimes(2);
+    expect(transaction.update).toHaveBeenCalledTimes(2);
+    expect(transaction.update.mock.calls[0]).toStrictEqual([
+      { id: logId, path: `logs/${logId}` },
+      {
+        logStatus: "superseded",
+        supersededByLogId: "generated-log-1",
+      },
+    ]);
+
+    const revisionWrite = transaction.set.mock.calls.find(
+      ([reference]) => referencePath(reference) === "logs/generated-log-1",
+    );
+    const revisionPayload = revisionWrite?.[1] as Record<string, unknown>;
+    expect(revisionPayload).toMatchObject({
+      rootLogId: "root-log-001",
+      revision: 2,
+      supersedesLogId: logId,
+      editedByStaffId: ACTOR.staffId,
+      editedByStaffName: ACTOR.staffName,
+      editedByStaffEmail: ACTOR.staffEmail,
+      editReason: "訂正理由です",
+      prevTankSnapshot: {
+        status: "filled",
+        customerId: null,
+        customerName: null,
+        location: "倉庫",
+        staff: "元担当者",
+        logNote: "",
+      },
+      nextTankSnapshot: {
+        status: "lent",
+        customerId: "customer-001",
+        customerName: "顧客A",
+        location: "顧客A",
+        staff: "元担当者",
+        logNote: "既存ログメモ",
+      },
+    });
+    expect(Object.keys(revisionPayload).some((key) => key.includes("Role"))).toBe(false);
+  });
+
+  it("取消を1 transactionでsnapshot復元・actor payloadごと更新する", async () => {
+    const logId = "target-log-void";
+    const transaction = useCorrectionTransaction(
+      logId,
+      directCorrectionLog(nowMs - CORRECTION_LIMIT_MS),
+    );
+    const voider = { ...ACTOR, role: "admin" };
+
+    await withDateNow(nowMs, () => voidLog({
+      logId,
+      reason: "  取消理由です  ",
+      voider,
+    }));
+
+    expect(transactionCallbackCount).toBe(1);
+    expect(recordedTransactions).toStrictEqual([transaction]);
+    expect(transaction.set).toHaveBeenCalledTimes(1);
+    expect(transaction.update).toHaveBeenCalledTimes(2);
+    expect(transaction.update.mock.calls[0]).toStrictEqual([
+      { id: logId, path: `logs/${logId}` },
+      {
+        logStatus: "voided",
+        voidReason: "取消理由です",
+        voidedAt: { kind: "server-timestamp" },
+        voidedByStaffId: ACTOR.staffId,
+        voidedByStaffName: ACTOR.staffName,
+        voidedByStaffEmail: ACTOR.staffEmail,
+      },
+    ]);
+    expect(
+      Object.keys(transaction.update.mock.calls[0]?.[1] ?? {})
+        .some((key) => key.includes("Role")),
+    ).toBe(false);
+    expect(transaction.update.mock.calls[1]?.[1]).toStrictEqual({
+      status: "filled",
+      location: "倉庫",
+      staff: "元担当者",
+      customerId: null,
+      customerName: null,
+      logNote: "",
+      maintenanceDate: { kind: "delete-field" },
+      nextMaintenanceDate: { kind: "delete-field" },
+      latestLogId: "previous-log-001",
+      updatedAt: { kind: "server-timestamp" },
+    });
   });
 });
 

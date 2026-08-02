@@ -61,6 +61,7 @@ import {
   type TransitionPlanBlockCode,
 } from "./tank-transition-policy";
 import {
+  CORRECTION_LIMIT_MS,
   assertAtomicTankOperationCount,
 } from "./tank-operation-limits";
 
@@ -170,8 +171,6 @@ export type TankOperationWriter = {
   delete: (reference: DocumentReference) => unknown;
 };
 
-export type StaffCorrectionRole = "管理者" | "準管理者" | "一般";
-
 export type LogCorrectionPatch = {
   tankId?: string;
   transitionAction?: TankAction | TankActionCode;
@@ -189,13 +188,11 @@ export interface ApplyLogCorrectionInput {
   patch?: LogCorrectionPatch;
   reason: string;
   editor: OperationActor;
-  editedByRole?: StaffCorrectionRole;
 }
 
 export interface VoidLogInput {
   logId: string;
   voider: OperationActor;
-  voidedByRole?: StaffCorrectionRole;
   reason: string;
 }
 
@@ -387,8 +384,6 @@ const RESERVED_LOG_EXTRA_FIELDS = new Set([
   "reviewEventId",
 ]);
 
-const PRIVILEGED_CORRECTION_ROLES: StaffCorrectionRole[] = ["管理者", "準管理者"];
-const CORRECTION_LIMIT_MS = 72 * 60 * 60 * 1000;
 const TANK_OPERATION_EXTRA_FIELDS = [
   "maintenanceDate",
   "nextMaintenanceDate",
@@ -879,7 +874,7 @@ export async function applyLogCorrection(
       });
     }
 
-    enforceCorrectionWindow(oldLog, input.editedByRole);
+    enforceCorrectionWindow(oldLog);
 
     let sourceLog: TankLogData | null = null;
     if (input.mode === "revert") {
@@ -1083,7 +1078,7 @@ export async function voidLog(input: VoidLogInput): Promise<void> {
 
     const log = logSnap.data() as TankLogData;
     assertActiveTankLog(log);
-    enforceCorrectionWindow(log, input.voidedByRole);
+    enforceCorrectionWindow(log);
 
     const tankId = requireString(log.tankId, "対象ログのtankId");
     const tankRef = doc(db, "tanks", tankId);
@@ -1617,12 +1612,9 @@ function isOfficialAggregationTankLog(log: TankLogData): boolean {
   );
 }
 
-function enforceCorrectionWindow(log: TankLogData, role: StaffCorrectionRole | undefined): void {
-  const effectiveRole = role ?? "一般";
-  if (PRIVILEGED_CORRECTION_ROLES.includes(effectiveRole)) return;
-
+function enforceCorrectionWindow(log: TankLogData): void {
   const createdAt = timestampToMillis(log.revisionCreatedAt);
-  if (createdAt == null) {
+  if (createdAt == null || !Number.isFinite(createdAt)) {
     throw new Error("対象ログの作成日時を確認できません");
   }
   if (Date.now() - createdAt > CORRECTION_LIMIT_MS) {

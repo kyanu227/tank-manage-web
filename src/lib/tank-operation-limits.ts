@@ -1,5 +1,6 @@
 /** 全tank operation共通のapplication上限。staff直接recoveryで100件まで実測済み。 */
 export const MAX_ATOMIC_TANK_OPERATIONS = 100;
+export const CORRECTION_LIMIT_MS = 72 * 60 * 60 * 1000;
 
 export function assertAtomicTankOperationCount(count: number): void {
   if (!Number.isSafeInteger(count) || count < 0) {

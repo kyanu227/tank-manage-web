@@ -4,7 +4,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { TransactionDoc } from "@/lib/firebase/repositories/types";
 import { requireStaffIdentity, useStaffLocale, useStaffSession } from "@/hooks/useStaffSession";
 import { useTanks } from "@/hooks/useTanks";
-import type { StaffCorrectionRole } from "@/lib/tank-operation";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import { DashboardCorrectionModals } from "@/features/staff-dashboard/components/DashboardCorrectionModals";
 import { DashboardLogsSection } from "@/features/staff-dashboard/components/DashboardLogsSection";
@@ -25,8 +24,14 @@ import {
   formatDashboardUpdateSuccess,
   formatDashboardVoidSuccess,
   getDashboardText,
+  getLogCorrectionBlockReasonText,
 } from "@/features/staff-dashboard/i18n";
-import { timestampToMillis, toDate } from "@/features/staff-dashboard/timestamp";
+import {
+  canCorrectLogReason,
+  canModifyLog,
+  canModifyLogReason,
+} from "@/features/staff-dashboard/policy/log-correction-policy";
+import { toDate } from "@/features/staff-dashboard/timestamp";
 import {
   fetchStaffDashboardLogHistory,
   fetchStaffDashboardSourceData,
@@ -69,16 +74,12 @@ type BulkLocationOption = {
 };
 type BulkLocationMode = "lend" | "inhouse" | null;
 
-const LIMIT_MS = 72 * 60 * 60 * 1000;
 const IN_HOUSE_LOCATION_VALUE = "__inhouse__";
 
 export default function StaffDashboard() {
   const session = useStaffSession();
   const staffLocale = useStaffLocale();
-  const correctionRole = useMemo(
-    () => normalizeCorrectionRole(session?.role),
-    [session?.role]
-  );
+  const correctionNowMs = Date.now();
   const { tanks, loading: tanksLoading, loadFailed: tanksLoadFailed, refetch: refetchTanks } = useTanks();
   const tankIds = useMemo(() => tanks.map((t) => t.id), [tanks]);
 
@@ -185,14 +186,14 @@ export default function StaffDashboard() {
   const allSelectableLogIds = useMemo(
     () =>
       logs
-        .filter((log) => log.logKind === "tank" && canModifyLog(log, correctionRole))
+        .filter((log) => canModifyLog(log, correctionNowMs))
         .map((log) => log.id),
-    [logs, correctionRole]
+    [logs, correctionNowMs]
   );
 
   const bulkLocationMode = useMemo(() => {
     if (selectedLogs.length === 0) return null;
-    if (selectedLogs.some((log) => canCorrectLogReason(log, correctionRole) != null)) {
+    if (selectedLogs.some((log) => canCorrectLogReason(log, correctionNowMs) != null)) {
       return null;
     }
     const actions = selectedLogs.map((log) => toTankActionCode(log.transitionAction ?? log.action));
@@ -202,7 +203,7 @@ export default function StaffDashboard() {
       return "inhouse";
     }
     return null;
-  }, [correctionRole, selectedLogs]);
+  }, [correctionNowMs, selectedLogs]);
 
   const bulkLocationOptions = useMemo<BulkLocationOption[]>(() => {
     if (bulkLocationMode === "lend") {
@@ -219,7 +220,7 @@ export default function StaffDashboard() {
   }, [bulkLocationMode, customerOptions]);
 
   const openEdit = (log: DashboardLogEntry) => {
-    if (canCorrectLogReason(log, correctionRole)) return;
+    if (canCorrectLogReason(log, correctionNowMs)) return;
     setEditingLog(log);
     setEditForm({
       tankId: log.tankId,
@@ -237,7 +238,6 @@ export default function StaffDashboard() {
         targetLogId: editingLog.id,
         tankId: editForm.tankId,
         reason: editForm.reason,
-        editedByRole: correctionRole,
         resolveActor: requireStaffIdentity,
       });
       setEditingLog(null);
@@ -264,7 +264,6 @@ export default function StaffDashboard() {
       await voidDashboardLog({
         logId: voidingLog.id,
         reason: voidReason,
-        voidedByRole: correctionRole,
         resolveActor: requireStaffIdentity,
       });
       setVoidingLog(null);
@@ -333,7 +332,6 @@ export default function StaffDashboard() {
         location: selectedOption.location,
         customer: selectedOption.customer,
         reason: bulkLocationReason,
-        editedByRole: correctionRole,
         resolveActor: requireStaffIdentity,
       });
 
@@ -365,7 +363,6 @@ export default function StaffDashboard() {
       const failures = await voidDashboardLogs({
         logs: selectedLogs,
         reason: bulkVoidReason,
-        voidedByRole: correctionRole,
         resolveActor: requireStaffIdentity,
       });
 
@@ -466,11 +463,15 @@ export default function StaffDashboard() {
     : sortedLogs.map((log) => {
         const rootId = log.rootLogId ?? log.id;
 
-        const modifyDisabledReason =
-          canModifyLogReason(log, correctionRole, staffLocale);
+        const modifyDisabledReason = getLogCorrectionBlockReasonText(
+          canModifyLogReason(log, correctionNowMs),
+          staffLocale,
+        );
 
-        const correctionDisabledReason =
-          canCorrectLogReason(log, correctionRole, staffLocale);
+        const correctionDisabledReason = getLogCorrectionBlockReasonText(
+          canCorrectLogReason(log, correctionNowMs),
+          staffLocale,
+        );
 
         const history =
           historyByRoot[rootId] ?? [];
@@ -764,12 +765,6 @@ export default function StaffDashboard() {
   );
 }
 
-function normalizeCorrectionRole(role?: string): StaffCorrectionRole {
-  if (role === "admin" || role === "管理者") return "管理者";
-  if (role === "準管理者") return "準管理者";
-  return "一般";
-}
-
 function toTankActionCode(value: unknown): TankActionCode | null {
   return typeof value === "string" ? coerceTankActionCode(value) : null;
 }
@@ -778,35 +773,6 @@ function tankStatusColor(status: string): string {
   const code = coerceTankStatusCode(status);
   const legacyStatus = code ? tankStatusCodeToLegacyStatus(code) : status;
   return STATUS_COLORS[legacyStatus] || "#cbd5e1";
-}
-
-function canModifyLog(log: DashboardLogEntry, role: StaffCorrectionRole): boolean {
-  return canModifyLogReason(log, role) == null;
-}
-
-function canCorrectLogReason(log: DashboardLogEntry, role: StaffCorrectionRole, locale: Locale = "ja"): string | null {
-  const baseReason = canModifyLogReason(log, role, locale);
-  if (baseReason) return baseReason;
-  if (!log.transitionPlan?.kind) {
-    return getDashboardText("transitionPlanMissing", locale);
-  }
-  if (log.transitionPlan?.kind === "recovery") {
-    return getDashboardText("recoveryCorrectionBlocked", locale);
-  }
-  if (log.transitionReviewStatus && log.transitionReviewStatus !== "not_required") {
-    return getDashboardText("reviewCorrectionBlocked", locale);
-  }
-  return null;
-}
-
-function canModifyLogReason(log: DashboardLogEntry, role: StaffCorrectionRole, locale: Locale = "ja"): string | null {
-  if (log.logKind !== "tank") return getDashboardText("notTankLog", locale);
-  if (log.logStatus && log.logStatus !== "active") return getDashboardText("inactiveLog", locale);
-  if (role === "管理者" || role === "準管理者") return null;
-  const ms = timestampToMillis(log.revisionCreatedAt);
-  if (ms == null) return getDashboardText("missingCreatedAt", locale);
-  if (Date.now() - ms > LIMIT_MS) return getDashboardText("editExpired", locale);
-  return null;
 }
 
 function getEditDisabledReason(

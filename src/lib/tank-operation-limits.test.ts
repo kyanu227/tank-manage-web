@@ -1,10 +1,15 @@
 import { describe, expect, it } from "vitest";
 import {
+  CORRECTION_LIMIT_MS,
   MAX_ATOMIC_TANK_OPERATIONS,
   assertAtomicTankOperationCount,
 } from "@/lib/tank-operation-limits";
 
 describe("atomic tank operation limit", () => {
+  it("keeps the shared correction window at 72 hours", () => {
+    expect(CORRECTION_LIMIT_MS).toBe(259_200_000);
+  });
+
   it("accepts the Rules-verified maximum", () => {
     expect(MAX_ATOMIC_TANK_OPERATIONS).toBe(100);
     expect(() => assertAtomicTankOperationCount(100)).not.toThrow();
