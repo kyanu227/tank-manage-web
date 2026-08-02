@@ -66,8 +66,7 @@ export default function AdminSidebar({
   return (
     <>
       <aside className={`${styles.desktopSidebar} ${collapsed ? styles.desktopSidebarCollapsed : ""}`}>
-        <div className={styles.sidebarHeader}>
-          {!collapsed && <span className={styles.brand}>管理画面</span>}
+        <div className={`${styles.sidebarToolbar} ${collapsed ? styles.sidebarToolbarCollapsed : ""}`}>
           <button
             type="button"
             className={styles.collapseButton}
@@ -75,7 +74,7 @@ export default function AdminSidebar({
             aria-label={collapsed ? "サイドバーを展開" : "サイドバーを縮小"}
             title={collapsed ? "サイドバーを展開" : "サイドバーを縮小"}
           >
-            <ChevronLeft size={18} style={{ transform: collapsed ? "rotate(180deg)" : undefined }} />
+            <ChevronLeft size={16} style={{ transform: collapsed ? "rotate(180deg)" : undefined }} />
           </button>
         </div>
         <AdminSidebarContent collapsed={collapsed} reviewCount={visibleReviewCount} />
@@ -90,7 +89,6 @@ export default function AdminSidebar({
         aria-label="管理メニュー"
       >
         <div className={styles.drawerHeader}>
-          <span className={styles.brand}>管理画面</span>
           <button type="button" className={styles.drawerClose} aria-label="管理メニューを閉じる" onClick={() => closeMobile(true)}>
             <X size={19} />
           </button>

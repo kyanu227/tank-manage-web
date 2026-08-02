@@ -56,7 +56,7 @@ function DashboardSection({ title, description, children }: {
         <h2>{title}</h2>
         {description && <p>{description}</p>}
       </div>
-      {children}
+      <div className={styles.sectionBody}>{children}</div>
     </section>
   );
 }
@@ -69,31 +69,36 @@ function MetricCard({
   external = false,
   tone = "neutral",
   suffix,
+  variant = "action",
 }: {
   label: string;
   value?: DashboardValue;
   icon: ReactNode;
   href: string;
   external?: boolean;
-  tone?: "neutral" | "warning" | "danger";
+  tone?: "neutral" | "primary" | "success" | "warning" | "danger";
   suffix?: string;
+  variant?: "summary" | "action";
 }) {
+  const valueDisplay = value !== undefined && (
+    <strong className={styles.metricValue}>
+      {value === null ? "—" : value.toLocaleString()}
+      {value !== null && suffix && <small>{suffix}</small>}
+    </strong>
+  );
+
   return (
     <Link
       href={href}
       target={external ? "_blank" : undefined}
       rel={external ? "noreferrer" : undefined}
-      className={`${styles.metricCard} ${tone === "neutral" ? "" : styles[`tone_${tone}`]}`}
+      className={`${styles.metricCard} ${styles[`metricCard_${variant}`]} ${tone === "neutral" ? "" : styles[`tone_${tone}`]}`}
     >
       <div className={styles.metricIcon}>{icon}</div>
       <div className={styles.metricBody}>
+        {variant === "summary" && valueDisplay}
         <span className={styles.metricLabel}>{label}</span>
-        {value !== undefined && (
-          <strong className={styles.metricValue}>
-            {value === null ? "—" : value.toLocaleString()}
-            {value !== null && suffix && <small>{suffix}</small>}
-          </strong>
-        )}
+        {variant === "action" && valueDisplay}
       </div>
       <ArrowRight size={17} className={styles.metricArrow} />
     </Link>
@@ -180,37 +185,42 @@ export default function AdminDashboardPage() {
         </Link>
       )}
 
-      {(canReview || canBilling) && (
-        <DashboardSection title="要対応" description="管理画面で確認・完了する項目です。">
+      <section className={styles.summarySection} aria-labelledby="admin-today-summary">
+        <h2 id="admin-today-summary" className={styles.visuallyHidden}>今日の状況</h2>
+        <div className={styles.summaryGrid}>
+          <MetricCard label="本日の操作" value={values.todayOps} suffix="件" icon={<BarChart3 size={21} />} href="/staff/dashboard" external tone="primary" variant="summary" />
+          <MetricCard label="貸出中" value={values.renting} suffix="本" icon={<Truck size={21} />} href="/staff/dashboard" external variant="summary" />
+          <MetricCard label="稼働スタッフ" value={values.activeStaff} suffix="名" icon={<Users size={21} />} href={canStaffAnalytics ? "/admin/staff-analytics" : "/staff/dashboard"} external={!canStaffAnalytics} tone="success" variant="summary" />
+        </div>
+      </section>
+
+      <div className={styles.workspaceGrid}>
+        {(canReview || canBilling) && (
+          <DashboardSection title="要対応" description="管理画面で確認・完了する項目です。">
+            <div className={styles.cardGrid}>
+              {canReview && <MetricCard label="例外操作レビュー" value={values.operationReviews} suffix="件" icon={<ClipboardCheck size={20} />} href="/admin/operation-reviews" tone="warning" />}
+              {canBilling && <MetricCard label="請求を確認" icon={<FileText size={20} />} href="/admin/billing" />}
+            </div>
+          </DashboardSection>
+        )}
+
+        <DashboardSection title="現場対応待ち" description="処理は現場アプリで行います。リンクは別タブで開きます。">
           <div className={styles.cardGrid}>
-            {canReview && <MetricCard label="例外操作レビュー" value={values.operationReviews} suffix="件" icon={<ClipboardCheck size={20} />} href="/admin/operation-reviews" tone="warning" />}
-            {canBilling && <MetricCard label="請求を確認" icon={<FileText size={20} />} href="/admin/billing" />}
+            <MetricCard label="受注・返却処理" value={values.pending} suffix="件" icon={<HardHat size={20} />} href="/staff/lend" external tone="warning" />
+            <MetricCard label="未充填報告" value={values.qualityReports} suffix="件" icon={<AlertTriangle size={20} />} href="/staff/dashboard" external tone="danger" />
           </div>
         </DashboardSection>
-      )}
-
-      <DashboardSection title="現場対応待ち" description="処理は現場アプリで行います。リンクは別タブで開きます。">
-        <div className={styles.cardGrid}>
-          <MetricCard label="受注・返却処理" value={values.pending} suffix="件" icon={<HardHat size={20} />} href="/staff/lend" external tone="warning" />
-          <MetricCard label="未充填報告" value={values.qualityReports} suffix="件" icon={<AlertTriangle size={20} />} href="/staff/dashboard" external tone="danger" />
-        </div>
-      </DashboardSection>
-
-      <DashboardSection title="今日の状況">
-        <div className={styles.cardGridThree}>
-          <MetricCard label="本日の操作" value={values.todayOps} suffix="件" icon={<BarChart3 size={20} />} href="/staff/dashboard" external />
-          <MetricCard label="貸出中" value={values.renting} suffix="本" icon={<Truck size={20} />} href="/staff/dashboard" external />
-          <MetricCard label="稼働スタッフ" value={values.activeStaff} suffix="名" icon={<Users size={20} />} href={canStaffAnalytics ? "/admin/staff-analytics" : "/staff/dashboard"} external={!canStaffAnalytics} />
-        </div>
-      </DashboardSection>
+      </div>
 
       {(canSales || canStaffAnalytics) && (
-        <DashboardSection title="分析サマリー" description="期間別の詳しい集計は分析画面で確認します。">
-          <div className={styles.analysisGrid}>
-            {canSales && <MetricCard label="売上を分析" icon={<LineChart size={20} />} href="/admin/sales" />}
-            {canStaffAnalytics && <MetricCard label="スタッフ実績を分析" icon={<Users size={20} />} href="/admin/staff-analytics" />}
-          </div>
-        </DashboardSection>
+        <div className={styles.analysisSection}>
+          <DashboardSection title="分析サマリー" description="期間別の詳しい集計は分析画面で確認します。">
+            <div className={styles.analysisGrid}>
+              {canSales && <MetricCard label="売上を分析" icon={<LineChart size={20} />} href="/admin/sales" tone="primary" />}
+              {canStaffAnalytics && <MetricCard label="スタッフ実績を分析" icon={<Users size={20} />} href="/admin/staff-analytics" tone="success" />}
+            </div>
+          </DashboardSection>
+        </div>
       )}
     </div>
   );

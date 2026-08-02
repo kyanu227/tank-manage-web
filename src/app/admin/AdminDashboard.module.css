@@ -1,77 +1,114 @@
 .dashboard {
   margin: 0 auto;
-  max-width: 1180px;
+  max-width: 1280px;
 }
 
 .pageHeader {
-  margin-bottom: 26px;
+  margin-bottom: 22px;
 }
 
 .pageHeader h1 {
   color: #0f172a;
-  font-size: 25px;
+  font-size: 28px;
   font-weight: 850;
-  letter-spacing: -.025em;
+  letter-spacing: -.035em;
   margin: 0;
 }
 
 .pageHeader p,
 .sectionHeader p {
   color: #64748b;
-  font-size: 13px;
+  font-size: 13.5px;
   line-height: 1.6;
-  margin: 5px 0 0;
+  margin: 6px 0 0;
 }
 
 .section {
-  margin-top: 30px;
+  background: #fff;
+  border: 1px solid #e6e9f0;
+  border-radius: 16px;
+  box-shadow: 0 3px 14px rgba(15, 23, 42, .035);
+  min-width: 0;
+  overflow: hidden;
 }
 
 .sectionHeader {
-  margin-bottom: 12px;
+  border-bottom: 1px solid #edf0f4;
+  min-height: 78px;
+  padding: 18px 20px 15px;
 }
 
 .sectionHeader h2 {
   color: #1e293b;
-  font-size: 15px;
+  font-size: 15.5px;
   font-weight: 850;
   letter-spacing: -.01em;
   margin: 0;
 }
 
+.sectionBody {
+  padding: 16px;
+}
+
+.summarySection {
+  margin-top: 0;
+}
+
+.summaryGrid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.workspaceGrid {
+  align-items: stretch;
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 20px;
+}
+
+.workspaceGrid > :only-child {
+  grid-column: 1 / -1;
+}
+
+.analysisSection {
+  margin-top: 18px;
+}
+
 .cardGrid,
-.cardGridThree,
 .analysisGrid {
   display: grid;
-  gap: 12px;
-}
-
-.cardGrid,
-.analysisGrid {
+  gap: 10px;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.cardGridThree {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .metricCard {
   align-items: center;
   background: #fff;
-  border: 1px solid #e2e8f0;
-  border-radius: 14px;
+  border: 1px solid #e7eaf0;
+  border-radius: 13px;
   color: #334155;
   display: flex;
-  gap: 13px;
-  min-height: 92px;
-  padding: 17px;
+  gap: 14px;
   text-decoration: none;
   transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
 }
 
+.metricCard_summary {
+  min-height: 116px;
+  padding: 20px;
+}
+
+.metricCard_action {
+  background: #fbfcfe;
+  min-height: 80px;
+  padding: 14px;
+}
+
 .metricCard:hover {
-  border-color: #cbd5e1;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, .07);
+  border-color: #cdd3df;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, .07);
   transform: translateY(-1px);
 }
 
@@ -83,14 +120,30 @@
 
 .metricIcon {
   align-items: center;
-  background: #f1f5f9;
-  border-radius: 11px;
-  color: #475569;
+  background: #f1efff;
+  border-radius: 14px;
+  color: #6657d9;
   display: flex;
   flex: 0 0 auto;
-  height: 42px;
+  height: 48px;
   justify-content: center;
+  width: 48px;
+}
+
+.metricCard_action .metricIcon {
+  border-radius: 12px;
+  height: 42px;
   width: 42px;
+}
+
+.tone_primary .metricIcon {
+  background: #eaf6ff;
+  color: #1685c7;
+}
+
+.tone_success .metricIcon {
+  background: #eafaf5;
+  color: #0f9f74;
 }
 
 .tone_warning .metricIcon {
@@ -107,20 +160,30 @@
   display: flex;
   flex: 1;
   flex-direction: column;
-  gap: 4px;
+  gap: 5px;
   min-width: 0;
 }
 
 .metricLabel {
   color: #64748b;
-  font-size: 12px;
+  font-size: 12.5px;
   font-weight: 750;
+}
+
+.metricCard_action .metricLabel {
+  color: #475569;
+  font-size: 13px;
 }
 
 .metricValue {
   color: #0f172a;
-  font-size: 26px;
-  line-height: 1.05;
+  font-size: 27px;
+  letter-spacing: -.025em;
+  line-height: 1;
+}
+
+.metricCard_action .metricValue {
+  font-size: 21px;
 }
 
 .metricValue small {
@@ -132,6 +195,11 @@
 .metricArrow {
   color: #94a3b8;
   flex: 0 0 auto;
+}
+
+.metricCard_summary .metricArrow {
+  align-self: flex-start;
+  margin-top: 2px;
 }
 
 .modeWarning {
@@ -152,19 +220,40 @@
   flex: 1;
 }
 
+.visuallyHidden {
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  padding: 0;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+  clip: rect(0 0 0 0);
+}
+
+@media (max-width: 1180px) {
+  .workspaceGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 760px) {
+  .summaryGrid,
   .cardGrid,
-  .cardGridThree,
   .analysisGrid {
     grid-template-columns: 1fr;
   }
 
   .pageHeader h1 {
-    font-size: 22px;
+    font-size: 24px;
   }
 
-  .section {
-    margin-top: 25px;
+  .metricCard_summary {
+    min-height: 102px;
+  }
+
+  .sectionHeader {
+    min-height: 0;
   }
 }
 

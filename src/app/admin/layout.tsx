@@ -45,10 +45,9 @@ function AdminAppShell({ children }: { children: React.ReactNode }) {
 }
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
   return (
     <AdminAuthGuard>
-      <AdminAppShell key={pathname}>{children}</AdminAppShell>
+      <AdminAppShell>{children}</AdminAppShell>
     </AdminAuthGuard>
   );
 }

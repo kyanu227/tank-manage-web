@@ -47,7 +47,10 @@ export default function AdminPopoverMenu({
   }, [open]);
 
   return (
-    <div ref={rootRef} className={styles.footerAction}>
+    <div
+      ref={rootRef}
+      className={`${styles.footerAction} ${centered ? styles.footerActionCentered : ""}`}
+    >
       <button
         ref={triggerRef}
         type="button"
