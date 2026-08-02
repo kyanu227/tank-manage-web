@@ -329,6 +329,37 @@ function useCorrectionTransaction(
   return transaction;
 }
 
+function useCorrectionTransactionWithSource(
+  targetLogId: string,
+  targetLogData: Record<string, unknown>,
+  sourceLogId: string,
+  sourceLogData: Record<string, unknown> | undefined,
+): ReturnType<typeof createRecordedTransaction> {
+  const transaction = {
+    get: vi.fn(async (reference: unknown) => {
+      const path = referencePath(reference);
+      if (path === mocks.aggregationReference.path) return snapshot(undefined);
+      if (path === `logs/${targetLogId}`) return snapshot(targetLogData);
+      if (path === `logs/${sourceLogId}`) return snapshot(sourceLogData);
+      if (path === "tanks/T001") {
+        return snapshot(tankData({ latestLogId: targetLogId }));
+      }
+      return snapshot(undefined);
+    }),
+    set: vi.fn(),
+    update: vi.fn(),
+    delete: vi.fn(),
+  };
+  mocks.runTransaction.mockImplementationOnce(
+    async (_database: unknown, callback: (tx: typeof transaction) => Promise<unknown>) => {
+      transactionCallbackCount += 1;
+      recordedTransactions.push(transaction);
+      return callback(transaction);
+    },
+  );
+  return transaction;
+}
+
 async function withDateNow<T>(
   nowMs: number,
   run: () => Promise<T>,
@@ -1283,6 +1314,202 @@ describe("typed correction input validation", () => {
     expect(mocks.runTransaction).toHaveBeenCalledTimes(0);
     expect(transactionCallbackCount).toBe(0);
   });
+
+  it("revert元未指定はcoded errorでfail-closedを維持する", async () => {
+    const error = await captureError(applyLogCorrection({
+      targetLogId: "log-001",
+      mode: "revert",
+      reason: "十分な理由です",
+      editor: ACTOR,
+    }));
+
+    requireStaffOperationError(error, "recovery_source_log_required");
+    expect(mocks.runTransaction).toHaveBeenCalledTimes(0);
+  });
+});
+
+describe("PR-10 coded guard errors", () => {
+  const nowMs = 1_800_000_000_000;
+
+  it("transitionPlan不明と直接logの不正集計状態をcoded errorで拒否する", async () => {
+    const invalidPlanId = "target-invalid-plan";
+    const invalidPlanData = directCorrectionLog(nowMs);
+    delete invalidPlanData.transitionPlan;
+    const invalidPlanTransaction = useCorrectionTransaction(
+      invalidPlanId,
+      invalidPlanData,
+    );
+
+    const invalidPlanError = await captureError(voidLog({
+      logId: invalidPlanId,
+      reason: "十分な取消理由です",
+      voider: ACTOR,
+    }));
+    requireStaffOperationError(
+      invalidPlanError,
+      "log_transition_plan_unverifiable",
+    );
+    expectNoWrites(invalidPlanTransaction);
+
+    const aggregationId = "target-invalid-aggregation";
+    const aggregationTransaction = useCorrectionTransaction(
+      aggregationId,
+      {
+        ...directCorrectionLog(nowMs),
+        transitionReviewStatus: "pending",
+      },
+    );
+
+    const aggregationError = await captureError(applyLogCorrection({
+      targetLogId: aggregationId,
+      mode: "replace",
+      reason: "十分な訂正理由です",
+      editor: ACTOR,
+    }));
+    requireStaffOperationError(
+      aggregationError,
+      "direct_log_aggregation_invalid",
+    );
+    expectNoWrites(aggregationTransaction);
+  });
+
+  const sourceCases: Array<Readonly<{
+    label: string;
+    sourceLog: Record<string, unknown> | undefined;
+    expectedCode: StaffOperationError["code"];
+  }>> = [
+    {
+      label: "sourceなし",
+      sourceLog: undefined,
+      expectedCode: "recovery_source_log_not_found",
+    },
+    {
+      label: "tank log以外",
+      sourceLog: { ...directCorrectionLog(nowMs), logKind: "order" },
+      expectedCode: "recovery_tank_log_required",
+    },
+    {
+      label: "取消済み",
+      sourceLog: { ...directCorrectionLog(nowMs), logStatus: "voided" },
+      expectedCode: "recovery_voided_revision_forbidden",
+    },
+    {
+      label: "recovery revision",
+      sourceLog: {
+        ...directCorrectionLog(nowMs),
+        transitionPlan: {
+          ...(directCorrectionLog(nowMs).transitionPlan as Record<string, unknown>),
+          kind: "recovery",
+        },
+      },
+      expectedCode: "recovery_generated_revision_forbidden",
+    },
+    {
+      label: "正式集計状態不明",
+      sourceLog: {
+        ...directCorrectionLog(nowMs),
+        transitionReviewStatus: "pending",
+      },
+      expectedCode: "recovery_unofficial_revision_forbidden",
+    },
+    {
+      label: "別revision chain",
+      sourceLog: { ...directCorrectionLog(nowMs), rootLogId: "other-root" },
+      expectedCode: "recovery_chain_mismatch",
+    },
+  ];
+
+  it.each(sourceCases)("revertの$labelをcoded errorで拒否する", async ({
+    sourceLog,
+    expectedCode,
+  }) => {
+    const targetLogId = `target-${expectedCode}`;
+    const sourceLogId = `source-${expectedCode}`;
+    const transaction = useCorrectionTransactionWithSource(
+      targetLogId,
+      directCorrectionLog(nowMs),
+      sourceLogId,
+      sourceLog,
+    );
+
+    const error = await captureError(applyLogCorrection({
+      targetLogId,
+      mode: "revert",
+      sourceLogId,
+      reason: "十分な復元理由です",
+      editor: ACTOR,
+    }));
+
+    requireStaffOperationError(error, expectedCode);
+    expectNoWrites(transaction);
+  });
+
+  it.each([
+    [
+      "originalAt/timestampなし",
+      { originalAt: null, timestamp: null },
+      "log_original_at_missing",
+    ],
+    [
+      "timestampがfalsy",
+      { originalAt: 1_700_000_000_000, timestamp: 0 },
+      "log_timestamp_missing",
+    ],
+  ] as const)("%sをcoded errorで拒否する", async (
+    _label,
+    overrides,
+    expectedCode,
+  ) => {
+    const logId = `target-${expectedCode}`;
+    const transaction = useCorrectionTransaction(logId, {
+      ...directCorrectionLog(nowMs),
+      ...overrides,
+    });
+
+    const error = await captureError(applyLogCorrection({
+      targetLogId: logId,
+      mode: "replace",
+      patch: { tankId: "T001" },
+      reason: "十分な訂正理由です",
+      editor: ACTOR,
+    }));
+
+    requireStaffOperationError(error, expectedCode);
+    expectNoWrites(transaction);
+  });
+
+  it.each([
+    [
+      "受注貸出context不正",
+      operationInput({
+        transitionAction: "lend",
+        logAction: "order_lend",
+      }),
+      "ordered_lend_transaction_required",
+      0,
+    ],
+    [
+      "耐圧日を非検査操作で更新",
+      operationInput({
+        tankExtra: { maintenanceDate: "2026-08-03" },
+      }),
+      "inspection_date_update_forbidden",
+      1,
+    ],
+  ] as const)("%sをcoded errorで拒否する", async (
+    _label,
+    input,
+    expectedCode,
+    expectedSetCalls,
+  ) => {
+    const error = await captureError(applyTankOperation(input));
+
+    requireStaffOperationError(error, expectedCode);
+    const transaction = recordedTransactions[0]!;
+    expect(transaction.set).toHaveBeenCalledTimes(expectedSetCalls);
+    expect(transaction.update).toHaveBeenCalledTimes(0);
+    expect(transaction.delete).toHaveBeenCalledTimes(0);
+  });
 });
 
 describe("log correction common window and atomic payload", () => {
@@ -1416,8 +1643,13 @@ describe("log correction common window and atomic payload", () => {
       voider: ACTOR,
     })));
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe("対象ログの作成日時を確認できません");
+    const operationError = requireStaffOperationError(
+      error,
+      "log_revision_created_at_missing",
+    );
+    expect(getStaffOperationErrorMessage(operationError, "ja")).toBe(
+      "対象ログの作成日時を確認できません",
+    );
     expectNoWrites(transaction);
   });
 
@@ -1645,6 +1877,12 @@ describe("carry_over customer projection compatibility", () => {
           throw new Error("carry_over error が返りませんでした");
         }
         expect(getStaffOperationErrorMessage(error, "ja")).toBe(errorMessage);
+        if (errorMessage === "持ち越し前の顧客projectionが不正です") {
+          requireStaffOperationError(
+            error,
+            "carry_over_previous_customer_projection_invalid",
+          );
+        }
         expect(error).not.toBeInstanceOf(StaleTankCycleError);
         return;
       }

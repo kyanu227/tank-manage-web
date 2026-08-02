@@ -75,6 +75,7 @@ export const DASHBOARD_TEXT = {
   superseded: { ja: "置換済", en: "Superseded" },
   voided: { ja: "取消済", en: "Voided" },
   unknown: { ja: "不明", en: "Unknown" },
+  unknownCustomer: { ja: "不明な顧客", en: "Unknown customer" },
   unknownAction: { ja: "不明", en: "Unknown action" },
   unknownStatus: { ja: "不明", en: "Unknown status" },
   unknownSource: { ja: "不明", en: "Unknown source" },

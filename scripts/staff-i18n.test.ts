@@ -75,7 +75,39 @@ describe("staff Japanese residual enforcement", () => {
     expect(files.length).toBeGreaterThan(0);
     expect(files.some((file) => file.endsWith("src/app/staff/layout.tsx"))).toBe(true);
     expect(files.some((file) => file.endsWith("src/components/StaffAuthGuard.tsx"))).toBe(true);
+    expect(files.some((file) => file.endsWith("src/lib/tank-operation.ts"))).toBe(true);
+    expect(files.some((file) => file.endsWith("src/lib/customer-identity-read.ts"))).toBe(true);
     expect(files.every((file) => !file.includes(".test."))).toBe(true);
+  });
+
+  it("removes TypeScript comments without hiding Japanese string literals", () => {
+    const temporaryRoot = mkdtempSync(join(tmpdir(), "staff-i18n-comments-"));
+    try {
+      const sourceDirectory = resolve(temporaryRoot, "src/lib");
+      mkdirSync(sourceDirectory, { recursive: true });
+      writeFileSync(
+        resolve(sourceDirectory, "customer-identity-read.ts"),
+        [
+          "// 日本語コメント",
+          "/*",
+          " * 日本語コメント",
+          " */",
+          "/** 日本語 */",
+          'const a = "日本語"; // 注釈',
+          'const url = "https://x.com"; // 日本語注釈',
+        ].join("\n"),
+      );
+
+      expect(scanStaffJapanese(temporaryRoot).map(({ line, text }) => ({
+        line,
+        text,
+      }))).toStrictEqual([{
+        line: 6,
+        text: 'const a = "日本語"; // 注釈',
+      }]);
+    } finally {
+      rmSync(temporaryRoot, { recursive: true, force: true });
+    }
   });
 
   it("rejects Japanese occurrences outside the exact fingerprint baseline", () => {

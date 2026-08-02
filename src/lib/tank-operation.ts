@@ -826,7 +826,7 @@ export async function applyLogCorrection(
     });
   }
   if (input.mode === "revert" && !input.sourceLogId) {
-    throw new Error("復元元ログが指定されていません");
+    throw new StaffOperationError("recovery_source_log_required");
   }
 
   const targetRef = doc(db, "logs", input.targetLogId);
@@ -847,13 +847,13 @@ export async function applyLogCorrection(
     assertActiveTankLog(oldLog);
     const oldTransitionPlan = normalizeTransitionPlan(oldLog.transitionPlan);
     if (!oldTransitionPlan) {
-      throw new Error("対象ログのtransitionPlanを検証できません");
+      throw new StaffOperationError("target_log_transition_plan_unverifiable");
     }
     if (oldTransitionPlan.kind === "recovery") {
       throw new StaffOperationError("recovery_log_not_editable");
     }
     if (oldLog.transitionReviewStatus !== "not_required") {
-      throw new Error("直接操作ログの集計状態が不正なため編集できません");
+      throw new StaffOperationError("direct_log_aggregation_invalid");
     }
     if (oldLog.supersededByLogId) {
       throw new StaffOperationError("log_already_replaced");
@@ -881,24 +881,24 @@ export async function applyLogCorrection(
       const sourceRef = doc(db, "logs", input.sourceLogId!);
       const sourceSnap = await tx.get(sourceRef);
       if (!sourceSnap.exists()) {
-        throw new Error("復元元ログが存在しません");
+        throw new StaffOperationError("recovery_source_log_not_found");
       }
       sourceLog = sourceSnap.data() as TankLogData;
       if (sourceLog.logKind !== "tank") {
-        throw new Error("タンク操作ログだけ復元できます");
+        throw new StaffOperationError("recovery_tank_log_required");
       }
       if (sourceLog.logStatus === "voided") {
-        throw new Error("取消済み revision には戻せません");
+        throw new StaffOperationError("recovery_voided_revision_forbidden");
       }
       const sourceTransitionPlan = normalizeTransitionPlan(sourceLog.transitionPlan);
       if (!sourceTransitionPlan || sourceTransitionPlan.kind === "recovery") {
-        throw new Error("自動補完されたrevisionへは直接復元できません");
+        throw new StaffOperationError("recovery_generated_revision_forbidden");
       }
       if (sourceLog.transitionReviewStatus !== "not_required") {
-        throw new Error("正式集計状態を確認できないrevisionへは復元できません");
+        throw new StaffOperationError("recovery_unofficial_revision_forbidden");
       }
       if (requireString(sourceLog.rootLogId, "復元元ログのrootLogId") !== requireString(oldLog.rootLogId, "対象ログのrootLogId")) {
-        throw new Error("同一チェーン内のログだけ復元できます");
+        throw new StaffOperationError("recovery_chain_mismatch");
       }
     }
 
@@ -982,11 +982,11 @@ export async function applyLogCorrection(
     const rootLogId = requireString(oldLog.rootLogId, "対象ログのrootLogId");
     const originalAt = oldLog.originalAt ?? oldLog.timestamp;
     if (!originalAt) {
-      throw new Error("対象ログのoriginalAtがありません");
+      throw new StaffOperationError("log_original_at_missing");
     }
     const inheritedTimestamp = oldLog.timestamp ?? oldLog.originalAt;
     if (!inheritedTimestamp) {
-      throw new Error("対象ログのtimestampがありません");
+      throw new StaffOperationError("log_timestamp_missing");
     }
 
     tx.update(targetRef, {
@@ -1142,7 +1142,7 @@ function assertVisibleActionContext(
     || context.workflow !== "order"
     || !stringOrUndefined(context.transactionId)
   ) {
-    throw new Error("受注貸出は受注transactionの完了処理でだけ実行できます");
+    throw new StaffOperationError("ordered_lend_transaction_required");
   }
 }
 
@@ -1204,7 +1204,7 @@ function applyTankExtraToSnapshot(
     throw new Error(`tankExtraに未対応のfieldがあります: ${unsupportedKeys.join(", ")}`);
   }
   if (Object.keys(tankExtra).length > 0 && transitionAction !== "inspection") {
-    throw new Error("耐圧日情報は耐圧検査操作でだけ更新できます");
+    throw new StaffOperationError("inspection_date_update_forbidden");
   }
 
   const next = { ...snapshot };
@@ -1309,7 +1309,7 @@ function completeMalformedCarryOverProjection(
   customer: Required<TankCustomerProjection>
 ): TankCustomerProjection {
   if (previous.customerId === null || previous.customerName === null) {
-    throw new Error("持ち越し前の顧客projectionが不正です");
+    throw new StaffOperationError("carry_over_previous_customer_projection_invalid");
   }
 
   const previousCustomerId = normalizedProjectionString(previous.customerId);
@@ -1322,7 +1322,7 @@ function completeMalformedCarryOverProjection(
     return customer;
   }
 
-  throw new Error("持ち越し前の顧客projectionが不正です");
+  throw new StaffOperationError("carry_over_previous_customer_projection_invalid");
 }
 
 function requireExistingCustomerProjection(
@@ -1598,7 +1598,7 @@ function assertActiveTankLog(log: TankLogData): void {
     throw new StaffOperationError("log_not_active");
   }
   if (!normalizeTransitionPlan(log.transitionPlan)) {
-    throw new Error("transitionPlanを検証できないログは編集・取消できません");
+    throw new StaffOperationError("log_transition_plan_unverifiable");
   }
 }
 
@@ -1615,7 +1615,7 @@ function isOfficialAggregationTankLog(log: TankLogData): boolean {
 function enforceCorrectionWindow(log: TankLogData): void {
   const createdAt = timestampToMillis(log.revisionCreatedAt);
   if (createdAt == null || !Number.isFinite(createdAt)) {
-    throw new Error("対象ログの作成日時を確認できません");
+    throw new StaffOperationError("log_revision_created_at_missing");
   }
   if (Date.now() - createdAt > CORRECTION_LIMIT_MS) {
     throw new StaffOperationError("correction_window_expired");

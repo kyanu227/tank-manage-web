@@ -935,7 +935,7 @@ event schema が不正なら**0円として続行せず、集計を停止する*
 |---|---|---|---|
 | **V1** | **domain/atomic writer が React hook module と browser API に依存** | `src/lib/tank-operation.ts:63` `import { getStaffLocale } from "@/hooks/useStaffSession"`、同 `:789` `window.confirm(buildTankRecoveryConfirmationMessage(...))` | §5.2 / §12.4 違反。domain から hook / locale / `window` を排除し、ADR-006 の confirmation resolver port へ移す |
 | **V2** | domain が locale を暗黙に読む | `src/lib/tank-operation.ts:776` `const locale = getStaffLocale()` | 表示都合が atomic writer 内部に入り、pure test 性を下げる |
-| **V3** | domain module にハードコード日本語（表示文言） | `src/lib/customer-identity-read.ts:40` `?? "不明な顧客"` / 同 `:53` `?? "不明"` | display boundary の外に表示文言がある |
+| **V3** | domain module にハードコード日本語（表示文言） | base `ac88da6` の `src/lib/customer-identity-read.ts:40,53` に加え、`src/lib/tank-operation.ts` の raw `Error` 17箇所（`:829,850,856,884,888,891,895,898,901,985,989,1145,1207,1312,1325,1601,1618`）。PR-10 の解消範囲と残件は後記 | PR-10 で当該19箇所を display boundary / coded error へ移した。template error・診断labelの残件は引き続きV3 |
 | **V4-a** | **Staff dashboard correction role** | `src/app/staff/dashboard/page.tsx:7,78-79,188-190,195,205,222,240,267,336,368,470,473,767,783,787,802` / `src/features/staff-dashboard/services/log-correction-workflow.ts:8,23,30,39,46,63,75,86,93,107,123,141,151` / `firestore.rules:110-116` | ADR-007 により**削除する。code 化しない**。page から可否判定を pure policy へ移し、Rules の role bypass は別 PR で削除する |
 | **V4-b** | **admin role の日本語文字列が permission code として機能** | `src/lib/firebase/operation-review-service.ts:212,231` `role !== "管理者"`、`staff.role` / `staffByEmail.role` の永続値、`settings/adminPermissions`、`firestore.rules:44,48` `staffRole() == "管理者"` / `"準管理者"` | §8.1 違反。admin access control に必要な role は code 化する。schema 問題なので data reset 前に解消する |
 | **V5** | **保存値が日本語文字列** | `src/features/maintenance/services/damage-workflow.ts:26` `location: "倉庫"` ほか | §12.1 違反。表示ではなく保存 schema の問題 |
@@ -945,6 +945,13 @@ event schema が不正なら**0円として続行せず、集計を停止する*
 | **G10** | error message の ja 優先経路 | `src/lib/staff-operation-error.ts:153,159` `locale === "ja"` | error catalog を display boundary へ移し、ja 優先経路を削除する |
 
 **V1/V2 の是正方針**: [ADR-006](./adr/ADR-006-recovery-confirmation-port.md) のとおり confirmation resolver port を採用する。`getStaffLocale()` と `window.confirm()` を domain から排除し、resolver 未注入時は fail-closed とする。
+
+**V3 PR-10（base `ac88da6`）**:
+
+- 解消: `customer-identity-read.ts:40,53` の既定日本語2箇所を削除し、staff read-model の display boundary から既存ja labelを注入する形へ変更。`key`（`customer:${customerId}` / `legacy-location:${...}` / `__unknown__`）と `isLegacy` は不変
+- 解消: `tank-operation.ts:829,850,856,884,888,891,895,898,901,985,989,1145,1207,1312,1325,1601,1618` の raw `Error` 17箇所を、locale非依存の `StaffOperationError` 16 code（`:1312,1325` は同一code）へ変更。ja表示は移動前と完全一致
+- 未解消: `tank-operation.ts:565,595,862,873,900,921,954,961-963,981-982,1046,1083,1093,1097,1151,1204,1215,1240,1243-1244,1267,1271,1281,1286,1343,1354,1367,1414-1415,1422-1423,1458,1484,1497-1498,1505,1534,1536,1539,1542,1640,1663,1670,1744,1758,1775,1784` の template error / `message` / 診断label。PR-10の発注対象17箇所には含めず、条件式・validation helperの責務を変えないため残した
+- scan: `scripts/staff-i18n-scan.ts` の明示対象に `tank-operation.ts` を追加し、文字列内の comment marker を維持したまま行・block comment token を検査前に除外する。再生成したbaselineは250件→111件（コメント由来189件を削除、上記V3残件47件とV5保存値 `"倉庫"` 3件を追加、net -139）。削除189件はcomment除去後の行に日本語が残らないことを機械確認済み
 
 **V4 の是正方針**: Staff dashboard correction role は廃止する（V4-a、[ADR-007](./adr/ADR-007-staff-log-correction-authority.md)）。admin access control に必要な role だけを code 化する（V4-b）。admin operation review の管理者制限は維持する。
 
@@ -972,7 +979,7 @@ event schema が不正なら**0円として続行せず、集計を停止する*
 | V1 | `src/lib/tank-operation.ts:63` `import { getStaffLocale } from "@/hooks/useStaffSession"` |
 | V2 | `src/lib/tank-operation.ts:776` `const locale = getStaffLocale()` |
 | V1 本体 | `src/lib/tank-operation.ts:789` `window.confirm(buildTankRecoveryConfirmationMessage(...))` |
-| V3 | `src/lib/customer-identity-read.ts:40` `?? "不明な顧客"` / `:53` `?? "不明"` |
+| V3 | base `ac88da6` の `src/lib/customer-identity-read.ts:40,53` と `src/lib/tank-operation.ts:829,850,856,884,888,891,895,898,901,985,989,1145,1207,1312,1325,1601,1618`（raw `Error` 17箇所）。PR-10で当該19箇所を解消し、template error・診断labelの残件は§21.4「V3 PR-10」に記録 |
 | V4 | `StaffCorrectionRole = "管理者" \| "準管理者" \| "一般"`。参照: `src/app/staff/dashboard/page.tsx:7,78-79,188-190,195,205,222,240,267,336,368,470,473,767,783,787,802` / `src/features/staff-dashboard/services/log-correction-workflow.ts:8,23,30,39,46,63,75,86,93,107,123,141,151`。Rules: `firestore.rules:110-116` `correctionWindowAllows()` が `isAdminStaff()` を or 条件に持つ（＝管理者・準管理者は 72h 制限を bypass） |
 | V5 | `src/features/maintenance/services/damage-workflow.ts:26` `location: "倉庫"` ほか |
 | V6 | `src/lib/firebase/tank-tag-service.ts` が `runTransaction` 外 `updateDoc`。caller: `src/features/staff-operations/services/bulk-return-workflow.ts:1` / `src/features/inhouse/services/inhouse-return-workflow.ts:3` |

@@ -9,6 +9,10 @@ import {
   coerceTankStatusCode,
   type TankStatusCode,
 } from "@/lib/tank-action-status-codes";
+import {
+  getGeneratedUnknownCustomerLabel,
+  getLegacyUnknownCustomerLabel,
+} from "../bulk-return-display";
 import type {
   BulkReturnDatePool,
   BulkReturnGroupMeta,
@@ -129,11 +133,17 @@ function createGroupMeta(
 }
 
 function resolveBulkCustomerIdentity(tank: BulkTankDoc): CustomerIdentityGroup {
-  return buildCustomerIdentityGroup({
-    customerId: tank.customerId,
-    customerName: tank.customerName,
-    location: tank.location,
-  });
+  return buildCustomerIdentityGroup(
+    {
+      customerId: tank.customerId,
+      customerName: tank.customerName,
+      location: tank.location,
+    },
+    {
+      unknownCustomerLabel: getGeneratedUnknownCustomerLabel("ja"),
+      legacyUnknownLabel: getLegacyUnknownCustomerLabel("ja"),
+    },
+  );
 }
 
 function chooseStableDisplayName(current: string, next: string): string {
