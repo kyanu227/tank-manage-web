@@ -3,8 +3,9 @@
 ダイビングタンクのレンタル管理システム（Web版）。
 旧GASシステムからの移行・刷新プロジェクト。
 
-> **📍 画面がどのファイルから来てるか迷ったら [SITEMAP.md](./SITEMAP.md) を見る**。
-> 全画面のURL→ファイル対応、OperationsTerminal の分岐構造、データ層の書き込み経路を1枚にまとめてある。
+> **📍 画面がどのファイルから来てるか迷ったら [SITEMAP.md](./SITEMAP.md)**。
+> **📐 設計判断（なぜこう作るか）は [docs/architecture/README.md](./docs/architecture/README.md)**。
+> architecture の正本は `docs/architecture/`。CLAUDE.md は作業手順・担当境界・禁止事項を規定する（両者は競合しない）。
 
 ## 技術スタック
 
@@ -74,7 +75,8 @@ src/
 │   ├── maintenance/            # メンテナンス workflow
 │   ├── inhouse/                # 自社タンク workflow
 │   ├── procurement/            # 備品発注・タンク購入/登録
-│   └── admin-customers/        # 顧客・ポータル利用者管理
+│   ├── admin-customers/        # 顧客・ポータル利用者管理
+│   └── */i18n.ts               # display boundary（ja/en辞書）
 ├── components/
 │   ├── AdminAuthGuard.tsx      # 管理者認証・権限ガード
 │   ├── StaffAuthGuard.tsx      # スタッフ認証ガード
@@ -86,7 +88,12 @@ src/
         ├── repositories/       # tanks/logs/transactions の読み取りrepository
         ├── customer-user.ts    # portal Auth / customerUsers ヘルパー
         ├── staff-auth.ts       # staff / staffByEmail 読み取り + mirror 同期・staffByUid write ヘルパー
-        └── diff-write.ts       # 差分更新ヘルパー
+        ├── diff-write.ts       # 差分更新ヘルパー
+        └── （src/lib 直下）
+            staff-operation-error.ts        # domain error code + catalog
+            staff-display.ts                # display boundary
+            tank-recovery-confirmation-message.ts
+            locale.ts
 ```
 
 ## AI組織構造（秘書ハブ型）
@@ -124,7 +131,7 @@ src/
 - **進捗・判断の正本（2026-07-29 改訂）**:
   - GitHub PR 本文
   - merge 済み design note
-  - `docs/architecture/refactor-sequence.md`
+  - `docs/architecture/clean-break-cutover-plan.md`（実装順序の正本。refactor-sequence は historical）
 - **`progress.md`**: 長期 phase や cutover の集約記録に使う。
   **PR ごとの毎回追記は必須にしない**
   - 改訂前は「論理単位ごとに `progress.md` へ追記」を全発注で必須としていたが、
@@ -204,7 +211,6 @@ Claude must not edit unless the task explicitly says otherwise:
 - `src/lib/tank-operation.ts`
 - `src/lib/firebase/repositories/**`
 - `firestore.rules`
-- `firestore.indexes.json`
 - `firebase.json`
 - `package.json`
 - `package-lock.json`
@@ -223,7 +229,7 @@ A Claude UI-only PR must state:
 - no billing calculation changed
 - no settings schema changed
 - no customerId/staffId identity behavior changed
-- no package/rules/index/firebase.json changed
+- no package/rules/firebase.json changed
 
 Validation:
 
@@ -245,6 +251,7 @@ Codex should check:
 6. no raw internal code appears in UI
 7. no Firestore query/write was added
 8. no billing/tax/customer identity logic was changed
+9. changes respect `docs/architecture/design-principles.md`
 
 Codex should not rework visual preference, exact spacing, color choice, or aesthetic direction unless it breaks usability, printing, accessibility, or business meaning.
 
@@ -261,12 +268,14 @@ For billing UI/design work:
 - Any change to invoice amount, return-tag billing, T番号 logic, or settings schema belongs to Codex.
 
 ## ディレクトリ階層の方針
-- `src/components/` は汎用部品のみ（`AuthPanel`, `DrumRoll`, `QuickSelect` 等）
+
+正本は [docs/architecture/domain-map.md](./docs/architecture/domain-map.md)。要点のみ:
+
+- `src/components/` は汎用部品のみ
 - 業務フロー単位の塊は `src/features/<feature-name>/` に閉じる
-  - 例: `src/features/staff-operations/`（貸出/返却/充填/受注/返却タグ処理/一括返却）
-  - 配下は `components/` `hooks/` `types.ts` `constants.ts` の緩い規約
 - `src/app/**/page.tsx` は `features/` を呼び出す薄い殻に留める
-- バグリスク低減のため階層追加は積極的に許容する（凝集度 > フラットさ）
+- **feature間の直接importは禁止**（composition層でのみ束ねる）
+- `src/domains/` への移行は**行わない**（責務を変えないファイル移動は禁止）
 
 ## コード規約
 

@@ -1,5 +1,7 @@
 # Tank ID Operation Compatibility Audit
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 ## Purpose
 
 This document audits operation-side compatibility before connecting `src/lib/tank-id.ts` to manual operation, bulk return, order fulfillment, return tag processing, portal, or repository boundaries.
