@@ -1,6 +1,9 @@
 import type { OperationActor } from "@/lib/operation-context";
 import { calculateInspectionSchedule } from "@/lib/inspection-schedule";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
+import {
+  applyBulkTankOperations,
+  type TankRecoveryConfirmationResolver,
+} from "@/lib/tank-operation";
 import { ACTION } from "@/lib/tank-rules";
 
 export type InspectionTargetInput = {
@@ -14,6 +17,7 @@ export type SubmitInspectionCompletionInput = {
   nextInspectionDateBase: Date;
   inspectionDate: Date;
   actor: OperationActor;
+  recoveryConfirmationResolver?: TankRecoveryConfirmationResolver;
 };
 
 export async function submitInspectionCompletion(
@@ -25,6 +29,7 @@ export async function submitInspectionCompletion(
     nextInspectionDateBase,
     inspectionDate,
     actor,
+    recoveryConfirmationResolver,
   } = input;
   const context = {
     actor,
@@ -37,17 +42,18 @@ export async function submitInspectionCompletion(
     inspectionDate,
   });
 
-  await applyBulkTankOperations(
-    tanks.map(({ tankId, currentStatus }) => ({
-      tankId,
-      transitionAction: ACTION.INSPECTION,
-      currentStatus,
-      context,
-      location: "倉庫",
-      tankExtra: {
-        maintenanceDate: schedule.maintenanceDate,
-        nextMaintenanceDate: schedule.nextMaintenanceDate,
-      },
-    })),
-  );
+  const operations = tanks.map(({ tankId, currentStatus }) => ({
+    tankId,
+    transitionAction: ACTION.INSPECTION,
+    currentStatus,
+    context,
+    location: "倉庫",
+    tankExtra: {
+      maintenanceDate: schedule.maintenanceDate,
+      nextMaintenanceDate: schedule.nextMaintenanceDate,
+    },
+  }));
+  await applyBulkTankOperations(operations, undefined, {
+    recoveryConfirmationResolver,
+  });
 }

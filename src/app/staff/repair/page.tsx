@@ -15,6 +15,7 @@ import {
 } from "@/features/maintenance/i18n";
 import { submitRepairCompletion } from "@/features/maintenance/services/repair-workflow";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
+import { useTankRecoveryConfirmationResolver } from "@/hooks/useTankRecoveryConfirmationResolver";
 import { useTanks } from "@/hooks/useTanks";
 import { formatStaffTankCount } from "@/lib/staff-display";
 import {
@@ -33,6 +34,7 @@ const ACCENT_BG = "#f0f9ff";
 export default function RepairPage() {
   useMaintenanceSwipe("repair");
   const staffLocale = useStaffLocale();
+  const recoveryConfirmationResolver = useTankRecoveryConfirmationResolver();
   const { tanks: allTanks, loading, loadFailed, refetch } = useTanks();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [submitting, setSubmitting] = useState(false);
@@ -88,6 +90,7 @@ export default function RepairPage() {
           currentStatus: t.status,
         })),
         actor,
+        recoveryConfirmationResolver,
       });
       setResult({ success: true, message: formatRepairSuccess(selected.length, staffLocale) });
       setSelectedIds(new Set());

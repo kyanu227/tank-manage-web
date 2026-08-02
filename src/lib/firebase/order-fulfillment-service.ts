@@ -5,7 +5,11 @@ import {
   totalOrderQuantity,
   type PendingOrder,
 } from "@/lib/order-types";
-import { applyBulkTankOperations } from "@/lib/tank-operation";
+import {
+  applyBulkTankOperations,
+  type TankRecoveryConfirmationResolver,
+  type TankOperationWriter,
+} from "@/lib/tank-operation";
 import { ACTION } from "@/lib/tank-rules";
 
 type FulfillmentTank = {
@@ -82,13 +86,22 @@ export async function approveOrder(
   });
 }
 
-export async function fulfillOrder(input: {
+export type FulfillOrderInput = {
   order: PendingOrder;
   validTanks: FulfillmentTank[];
   allTanks: FulfillmentTankMap;
   actor: OperationActor;
-}): Promise<void> {
-  const { order, validTanks, allTanks, actor } = input;
+  recoveryConfirmationResolver?: TankRecoveryConfirmationResolver;
+};
+
+export async function fulfillOrder(input: FulfillOrderInput): Promise<void> {
+  const {
+    order,
+    validTanks,
+    allTanks,
+    actor,
+    recoveryConfirmationResolver,
+  } = input;
   const orderNote = `受注ID: ${order.id}`;
   const context = {
     actor,
@@ -101,27 +114,28 @@ export async function fulfillOrder(input: {
     workflow: "order" as const,
   };
 
-  await applyBulkTankOperations(
-    validTanks.map((tank) => ({
-      tankId: tank.id,
-      transitionAction: ACTION.LEND,
-      logAction: "受注貸出",
-      currentStatus: allTanks[tank.id]?.status ?? "",
-      context,
-      location: order.customerName,
-      tankNote: orderNote,
-      logNote: orderNote,
-    })),
-    (batch) => {
-      batch.update(doc(db, "transactions", order.id), {
-        status: "completed",
-        fulfilledAt: serverTimestamp(),
-        fulfilledBy: actor.staffName,
-        fulfilledByStaffId: actor.staffId,
-        fulfilledByStaffName: actor.staffName,
-        ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
-        updatedAt: serverTimestamp(),
-      });
-    },
-  );
+  const operations = validTanks.map((tank) => ({
+    tankId: tank.id,
+    transitionAction: ACTION.LEND,
+    logAction: "受注貸出",
+    currentStatus: allTanks[tank.id]?.status ?? "",
+    context,
+    location: order.customerName,
+    tankNote: orderNote,
+    logNote: orderNote,
+  }));
+  const completeOrder = (batch: TankOperationWriter) => {
+    batch.update(doc(db, "transactions", order.id), {
+      status: "completed",
+      fulfilledAt: serverTimestamp(),
+      fulfilledBy: actor.staffName,
+      fulfilledByStaffId: actor.staffId,
+      fulfilledByStaffName: actor.staffName,
+      ...(actor.staffEmail ? { fulfilledByStaffEmail: actor.staffEmail } : {}),
+      updatedAt: serverTimestamp(),
+    });
+  };
+  await applyBulkTankOperations(operations, completeOrder, {
+    recoveryConfirmationResolver,
+  });
 }

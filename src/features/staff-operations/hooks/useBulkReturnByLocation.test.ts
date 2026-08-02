@@ -29,6 +29,9 @@ import { useBulkReturnByLocation } from "./useBulkReturnByLocation";
 const localeState = vi.hoisted(() => ({
   current: "ja" as Locale,
 }));
+const recoveryResolverState = vi.hoisted(() => ({
+  resolver: vi.fn(),
+}));
 
 vi.mock("react", async () => {
   const actual = await vi.importActual<typeof import("react")>("react");
@@ -43,6 +46,10 @@ vi.mock("react", async () => {
 vi.mock("@/hooks/useStaffSession", () => ({
   requireStaffIdentity: vi.fn(),
   useStaffLocale: () => localeState.current,
+}));
+
+vi.mock("@/hooks/useTankRecoveryConfirmationResolver", () => ({
+  useTankRecoveryConfirmationResolver: () => recoveryResolverState.resolver,
 }));
 
 vi.mock("@/lib/tank-operation", () => ({
@@ -258,6 +265,7 @@ describe("useBulkReturnByLocation submission guard", () => {
       tanks,
       fallbackLocation: "顧客A",
       actor: ACTOR,
+      recoveryConfirmationResolver: recoveryResolverState.resolver,
     });
     expect(returningSetter).toHaveBeenCalledTimes(2);
     expect(alert).toHaveBeenCalledTimes(1);

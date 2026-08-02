@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { requireStaffIdentity } from "@/hooks/useStaffSession";
+import { useTankRecoveryConfirmationResolver } from "@/hooks/useTankRecoveryConfirmationResolver";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 import { formatStaffCount } from "@/lib/staff-display";
 import {
@@ -44,6 +45,7 @@ export function useReturnTagProcessing({
   fetchBulkTanks,
   locale = DEFAULT_LOCALE,
 }: UseReturnTagProcessingParams): UseReturnTagProcessingResult {
+  const recoveryConfirmationResolver = useTankRecoveryConfirmationResolver();
   const [pendingReturnTagsLoading, setPendingReturnTagsLoading] = useState(true);
   const [pendingReturnTagsLoadFailed, setPendingReturnTagsLoadFailed] = useState(false);
   const [returnGroups, setReturnGroups] = useState<ReturnGroup[]>([]);
@@ -97,6 +99,7 @@ export function useReturnTagProcessing({
         group: selectedReturnGroup,
         selections: returnTagSelections,
         actor,
+        recoveryConfirmationResolver,
       });
 
       alert(getStaffOperationText("processedReturnTags", locale, {
@@ -116,7 +119,14 @@ export function useReturnTagProcessing({
     } finally {
       setReturnConfirmationSubmitting(false);
     }
-  }, [fetchBulkTanks, fetchPendingReturnTags, locale, returnTagSelections, selectedReturnGroup]);
+  }, [
+    fetchBulkTanks,
+    fetchPendingReturnTags,
+    locale,
+    recoveryConfirmationResolver,
+    returnTagSelections,
+    selectedReturnGroup,
+  ]);
 
   return {
     pendingReturnTagsLoading,

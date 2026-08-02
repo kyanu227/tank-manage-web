@@ -60,18 +60,13 @@ import {
   type TransitionPlan,
   type TransitionPlanBlockCode,
 } from "./tank-transition-policy";
-import { getStaffLocale } from "@/hooks/useStaffSession";
-import {
-  buildTankRecoveryConfirmationMessage,
-  getTankRecoveryText,
-} from "./tank-recovery-confirmation-message";
 import {
   assertAtomicTankOperationCount,
 } from "./tank-operation-limits";
 
 export { MAX_ATOMIC_TANK_OPERATIONS } from "./tank-operation-limits";
 import { assertRecoveryConfirmationsMatchReplannedState } from "./tank-recovery-confirmation-validation";
-import { StaffOperationError } from "./staff-operation-error";
+import { StaffOperationError } from "./staff-operation-error-code";
 
 /* ════════════════════════════════════════════
    型定義
@@ -148,6 +143,19 @@ export type TankRecoveryConfirmation = {
   fingerprint: string;
   recoveryEvidence: RecoveryEvidence;
 };
+
+export type TankRecoveryConfirmationRequest = Readonly<{
+  fingerprint: string;
+  requirements: readonly TankRecoveryRequirement[];
+}>;
+
+export type TankRecoveryConfirmationResolver = (
+  request: TankRecoveryConfirmationRequest,
+) => Promise<TankRecoveryConfirmation>;
+
+export type TankOperationWriterOptions = Readonly<{
+  recoveryConfirmationResolver?: TankRecoveryConfirmationResolver;
+}>;
 
 export interface TankOperationResult {
   tankId: string;
@@ -274,13 +282,16 @@ export type TankRecoveryRequirement = {
 };
 
 /** transaction外のUIにだけ確認を要求するための制御用error。 */
-export class TankRecoveryConfirmationRequiredError extends Error {
+export class TankRecoveryConfirmationRequiredError extends StaffOperationError {
+  readonly name = "TankRecoveryConfirmationRequiredError";
   readonly fingerprint: string;
-  readonly requirements: TankRecoveryRequirement[];
+  readonly requirements: readonly TankRecoveryRequirement[];
 
-  constructor(fingerprint: string, requirements: TankRecoveryRequirement[]) {
-    super("正規の状態遷移へ自動補完するため、現物確認が必要です。");
-    this.name = "TankRecoveryConfirmationRequiredError";
+  constructor(
+    fingerprint: string,
+    requirements: readonly TankRecoveryRequirement[],
+  ) {
+    super("recovery_confirmation_required");
     this.fingerprint = fingerprint;
     this.requirements = requirements;
   }
@@ -392,16 +403,18 @@ const TANK_OPERATION_EXTRA_FIELDS = [
  * 旧 batch 型の append 経路は廃止し、外部から read なしでログだけを積めないようにする。
  */
 export async function appendTankOperation(
-  input: TankOperationInput
+  input: TankOperationInput,
+  options?: TankOperationWriterOptions,
 ): Promise<TankOperationResult & { logId: string }> {
-  return applyTankOperation(input);
+  return applyTankOperation(input, options);
 }
 
 /**
  * 単一タンクの操作を原子的に実行する。
  */
 export async function applyTankOperation(
-  input: TankOperationInput
+  input: TankOperationInput,
+  options?: TankOperationWriterOptions,
 ): Promise<TankOperationResult & { logId: string }> {
   const logRef = doc(collection(db, "logs"));
   const tankRef = doc(db, "tanks", normalizeTankId(input.tankId));
@@ -411,7 +424,11 @@ export async function applyTankOperation(
     tankRef,
   };
 
-  const [result] = await runPlannedOperationsWithRecoveryConfirmation([planned]);
+  const [result] = await runPlannedOperationsWithRecoveryConfirmation(
+    [planned],
+    undefined,
+    options?.recoveryConfirmationResolver,
+  );
 
   return { ...result, logId: logRef.id };
 }
@@ -423,6 +440,7 @@ export async function applyTankOperation(
 export async function applyBulkTankOperations(
   inputs: TankOperationInput[],
   extraOps?: (writer: TankOperationWriter) => void,
+  options?: TankOperationWriterOptions,
 ): Promise<TankOperationResult[]> {
   if (inputs.length === 0) return [];
   assertAtomicTankOperationCount(inputs.length);
@@ -438,12 +456,17 @@ export async function applyBulkTankOperations(
     };
   });
 
-  return runPlannedOperationsWithRecoveryConfirmation(planned, extraOps);
+  return runPlannedOperationsWithRecoveryConfirmation(
+    planned,
+    extraOps,
+    options?.recoveryConfirmationResolver,
+  );
 }
 
 async function runPlannedOperationsWithRecoveryConfirmation(
   initialPlanned: PlannedTankOperation[],
   extraOps?: (writer: TankOperationWriter) => void,
+  recoveryConfirmationResolver?: TankRecoveryConfirmationResolver,
 ): Promise<TankOperationResult[]> {
   let planned = initialPlanned;
 
@@ -459,7 +482,18 @@ async function runPlannedOperationsWithRecoveryConfirmation(
       const requirement = asRecoveryConfirmationRequiredError(error);
       if (!requirement) throw error;
 
-      const confirmation = requestRecoveryConfirmation(requirement);
+      requirement.requirements.forEach((item) => {
+        assertRecoveryRequirementCanBeConfirmed(item);
+      });
+      if (!recoveryConfirmationResolver) {
+        throw new StaffOperationError("recovery_browser_required");
+      }
+
+      // resolver は transaction callback の外でだけ呼び出す。
+      const confirmation = await recoveryConfirmationResolver({
+        fingerprint: requirement.fingerprint,
+        requirements: requirement.requirements,
+      });
       planned = planned.map((operation) => ({
         ...operation,
         input: {
@@ -769,52 +803,8 @@ function asRecoveryConfirmationRequiredError(
   );
 }
 
-/** native dialogはtransaction callbackの外でだけ呼び出す。 */
-function requestRecoveryConfirmation(
-  error: TankRecoveryConfirmationRequiredError,
-): TankRecoveryConfirmation {
-  const locale = getStaffLocale();
-  if (typeof window === "undefined") {
-    throw new StaffOperationError("recovery_browser_required", {
-      message: getTankRecoveryText("browserRequired", locale),
-    });
-  }
-
-  error.requirements.forEach((requirement) => {
-    assertRecoveryRequirementCanBeConfirmed(requirement, locale);
-  });
-
-  // 一括操作でもタンクごとに全stepと確認対象を読めるよう、1本ずつ確認する。
-  for (const [index, requirement] of error.requirements.entries()) {
-    const accepted = window.confirm(buildTankRecoveryConfirmationMessage(
-      requirement,
-      index,
-      error.requirements.length,
-      locale,
-    ));
-    if (!accepted) {
-      throw new StaffOperationError("recovery_cancelled", {
-        message: getTankRecoveryText("cancelled", locale),
-      });
-    }
-  }
-
-  const recoveryEvidence: RecoveryEvidence = {};
-  error.requirements.forEach((requirement) => {
-    requirement.plan.requiredEvidence.forEach((key) => {
-      recoveryEvidence[key] = true;
-    });
-  });
-
-  return {
-    fingerprint: error.fingerprint,
-    recoveryEvidence,
-  };
-}
-
 function assertRecoveryRequirementCanBeConfirmed(
   requirement: TankRecoveryRequirement,
-  locale: "ja" | "en",
 ): void {
   if (!requirement.plan.requiredEvidence.includes("previousCustomerConfirmed")) return;
   const previousCustomerStep = requirement.plan.steps.find(
@@ -823,9 +813,6 @@ function assertRecoveryRequirementCanBeConfirmed(
   if (!previousCustomerStep?.customerId?.trim() || !previousCustomerStep.customerName?.trim()) {
     throw new StaffOperationError("recovery_previous_customer_missing", {
       params: { tankId: requirement.tankId },
-      message: getTankRecoveryText("missingPreviousCustomer", locale, {
-        tankId: requirement.tankId,
-      }),
     });
   }
 }

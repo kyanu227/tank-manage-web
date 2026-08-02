@@ -23,6 +23,7 @@ import {
   getInHouseText,
 } from "@/features/inhouse/i18n";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
+import { useTankRecoveryConfirmationResolver } from "@/hooks/useTankRecoveryConfirmationResolver";
 import { useTanks } from "@/hooks/useTanks";
 import { formatStaffTankCount } from "@/lib/staff-display";
 import { logStaffOperationError } from "@/lib/staff-operation-error";
@@ -34,6 +35,7 @@ const ACCENT = "#6366f1";
 
 export default function InHousePage() {
   const staffLocale = useStaffLocale();
+  const recoveryConfirmationResolver = useTankRecoveryConfirmationResolver();
   const { tanks: allTanks, tankMap, prefixes, loading, loadFailed, refetch } = useTanks();
   const [activePrefix, setActivePrefix] = useState<string | null>(null);
   const [numberValue, setNumberValue] = useState("");
@@ -135,6 +137,7 @@ export default function InHousePage() {
         tankId,
         currentStatus: tank.status,
         actor,
+        recoveryConfirmationResolver,
       });
       setLastAdded(tankId);
       if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
@@ -165,6 +168,7 @@ export default function InHousePage() {
           tag: tank.tag,
         })),
         actor,
+        recoveryConfirmationResolver,
       });
       alert(getInHouseText("bulkReturnSuccess", staffLocale));
       setTagOverrides({});

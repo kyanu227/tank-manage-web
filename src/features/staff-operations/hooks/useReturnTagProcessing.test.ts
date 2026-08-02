@@ -20,6 +20,10 @@ import { StaffOperationError } from "@/lib/staff-operation-error";
 import type { ReturnConfirmationSelectionMap, ReturnGroup } from "../types";
 import { useReturnTagProcessing } from "./useReturnTagProcessing";
 
+const recoveryResolverState = vi.hoisted(() => ({
+  resolver: vi.fn(),
+}));
+
 vi.mock("react", async () => {
   const actual = await vi.importActual<typeof import("react")>("react");
   return {
@@ -31,6 +35,10 @@ vi.mock("react", async () => {
 
 vi.mock("@/hooks/useStaffSession", () => ({
   requireStaffIdentity: vi.fn(),
+}));
+
+vi.mock("@/hooks/useTankRecoveryConfirmationResolver", () => ({
+  useTankRecoveryConfirmationResolver: () => recoveryResolverState.resolver,
 }));
 
 vi.mock("@/lib/firebase/return-tag-processing-service", () => ({
@@ -149,6 +157,7 @@ describe("useReturnTagProcessing confirmation", () => {
       group,
       selections,
       actor: ACTOR,
+      recoveryConfirmationResolver: recoveryResolverState.resolver,
     });
   });
 

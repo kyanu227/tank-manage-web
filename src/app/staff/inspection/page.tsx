@@ -17,6 +17,7 @@ import {
 } from "@/features/maintenance/i18n";
 import { submitInspectionCompletion } from "@/features/maintenance/services/inspection-workflow";
 import { requireStaffIdentity, useStaffLocale } from "@/hooks/useStaffSession";
+import { useTankRecoveryConfirmationResolver } from "@/hooks/useTankRecoveryConfirmationResolver";
 import { useTanks } from "@/hooks/useTanks";
 import { useInspectionSettings } from "@/hooks/useInspectionSettings";
 import { formatStaffTankCount } from "@/lib/staff-display";
@@ -58,6 +59,7 @@ function toDate(v: unknown): Date | null {
 export default function InspectionPage() {
   useMaintenanceSwipe("inspection");
   const staffLocale = useStaffLocale();
+  const recoveryConfirmationResolver = useTankRecoveryConfirmationResolver();
   const { tanks: allTanks, loading: tanksLoading, loadFailed, refetch } = useTanks();
   const { settings, loading: settingsLoading } = useInspectionSettings();
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -128,6 +130,7 @@ export default function InspectionPage() {
         nextInspectionDateBase,
         inspectionDate,
         actor,
+        recoveryConfirmationResolver,
       });
       setResult({ success: true, message: formatInspectionSuccess(selected.length, staffLocale) });
       setSelectedIds(new Set());
