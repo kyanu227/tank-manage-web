@@ -31,6 +31,13 @@ const OTHER_ADMIN = {
   name: "別管理者",
   role: "管理者",
 };
+const SUB_ADMIN = {
+  uid: "sub-admin-uid",
+  email: "rules-sub-admin@example.com",
+  staffId: "sub-admin-1",
+  name: "Rules準管理者",
+  role: "準管理者",
+};
 const WORKER = {
   uid: "worker-uid",
   email: "rules-worker@example.com",
@@ -307,13 +314,13 @@ try {
     });
   });
 
-  await succeeds("valid direct log void", async () => {
+  await succeeds("admin can void a log within 72 hours", async () => {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
     await seedActiveDirectLog();
     await executeVoid();
   });
 
-  await succeeds("valid direct log correction", async () => {
+  await succeeds("admin can correct a log within 72 hours", async () => {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
     await seedActiveDirectLog();
     await executeCorrection();
@@ -352,10 +359,28 @@ try {
     assert.notEqual(rerunLog.id, oldLog.id);
   });
 
-  await succeeds("recent worker correction remains allowed", async () => {
+  await succeeds("sub-admin can correct a log within 72 hours", async () => {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
-    await seedActiveDirectLog({ revisionCreatedAt: new Date() });
+    await seedActiveDirectLog();
+    await executeCorrection({}, SUB_ADMIN);
+  });
+
+  await succeeds("sub-admin can void a log within 72 hours", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
+    await executeVoid(SUB_ADMIN);
+  });
+
+  await succeeds("worker can correct a log within 72 hours", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
     await executeCorrection({}, WORKER);
+  });
+
+  await succeeds("worker can void a log within 72 hours", async () => {
+    await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+    await seedActiveDirectLog();
+    await executeVoid(WORKER);
   });
 
   await succeeds("valid cross-tank correction preserves both snapshots", async () => {
@@ -635,15 +660,61 @@ async function runDenialCases() {
 
   await fails("worker cannot correct a log after 72 hours", async () => {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
-    await seedActiveDirectLog();
+    await seedActiveDirectLog({ revisionCreatedAt: new Date(1_000) });
     await executeCorrection({}, WORKER);
   });
 
   await fails("worker cannot void a log after 72 hours", async () => {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
-    await seedActiveDirectLog();
+    await seedActiveDirectLog({ revisionCreatedAt: new Date(1_000) });
     await executeVoid(WORKER);
   });
+
+  for (const [roleLabel, actor] of [
+    ["admin", ADMIN],
+    ["sub-admin", SUB_ADMIN],
+  ]) {
+    await fails(`${roleLabel} cannot correct a log after 72 hours`, async () => {
+      await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+      await seedActiveDirectLog({ revisionCreatedAt: new Date(1_000) });
+      await executeCorrection({}, actor);
+    });
+
+    await fails(`${roleLabel} cannot void a log after 72 hours`, async () => {
+      await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+      await seedActiveDirectLog({ revisionCreatedAt: new Date(1_000) });
+      await executeVoid(actor);
+    });
+  }
+
+  for (const [revisionCase, seedOptions] of [
+    ["missing", { omitRevisionCreatedAt: true }],
+    ["non-timestamp", { revisionCreatedAt: "invalid-timestamp" }],
+  ]) {
+    for (const [roleLabel, actor] of [
+      ["admin", ADMIN],
+      ["sub-admin", SUB_ADMIN],
+      ["worker", WORKER],
+    ]) {
+      await fails(
+        `${roleLabel} cannot correct a log with ${revisionCase} revisionCreatedAt`,
+        async () => {
+          await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+          await seedActiveDirectLog(seedOptions);
+          await executeCorrection({}, actor);
+        },
+      );
+
+      await fails(
+        `${roleLabel} cannot void a log with ${revisionCase} revisionCreatedAt`,
+        async () => {
+          await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
+          await seedActiveDirectLog(seedOptions);
+          await executeVoid(actor);
+        },
+      );
+    }
+  }
 
   await fails("correction cannot reassign the official actor", async () => {
     await resetAndSeed({ size: 0, policyMode: "strict", policyRevision: 1 });
@@ -981,6 +1052,7 @@ async function resetAndSeed({
     await Promise.all([
       seedStaff(firestore, ADMIN),
       seedStaff(firestore, OTHER_ADMIN),
+      seedStaff(firestore, SUB_ADMIN),
       seedStaff(firestore, WORKER),
       setDoc(doc(firestore, "settings", "tankOperationPolicy"), {
         transitionEnforcement: policyMode,
@@ -1602,27 +1674,32 @@ function executeReviewBatch({
   });
 }
 
-async function seedActiveDirectLog({ revisionCreatedAt = new Date(1_000) } = {}) {
+async function seedActiveDirectLog({
+  revisionCreatedAt = new Date(),
+  omitRevisionCreatedAt = false,
+} = {}) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore();
     const id = "T001";
     const prevTankSnapshot = tankSnapshot({ status: "empty" });
     const nextTankSnapshot = tankSnapshot({ status: "filled", staff: ADMIN.name });
-    await Promise.all([
-      setDoc(doc(firestore, "logs", "active-log"), {
-        ...buildOperationLog({
-          id,
-          kind: "direct",
-          policyMode: "strict",
-          policyRevision: 1,
-        }),
-        rootLogId: "active-log",
-        timestamp: new Date(1_000),
-        originalAt: new Date(1_000),
-        revisionCreatedAt,
-        prevTankSnapshot,
-        nextTankSnapshot,
+    const log = {
+      ...buildOperationLog({
+        id,
+        kind: "direct",
+        policyMode: "strict",
+        policyRevision: 1,
       }),
+      rootLogId: "active-log",
+      timestamp: new Date(1_000),
+      originalAt: new Date(1_000),
+      revisionCreatedAt,
+      prevTankSnapshot,
+      nextTankSnapshot,
+    };
+    if (omitRevisionCreatedAt) delete log.revisionCreatedAt;
+    await Promise.all([
+      setDoc(doc(firestore, "logs", "active-log"), log),
       setDoc(doc(firestore, "tanks", id), {
         ...nextTankSnapshot,
         latestLogId: "active-log",
@@ -1631,7 +1708,10 @@ async function seedActiveDirectLog({ revisionCreatedAt = new Date(1_000) } = {})
   });
 }
 
-async function seedActiveRecoveryLog({ withLaterActiveLog = false } = {}) {
+async function seedActiveRecoveryLog({
+  withLaterActiveLog = false,
+  revisionCreatedAt = new Date(),
+} = {}) {
   await testEnvironment.withSecurityRulesDisabled(async (context) => {
     const firestore = context.firestore();
     const id = "T001";
@@ -1645,7 +1725,7 @@ async function seedActiveRecoveryLog({ withLaterActiveLog = false } = {}) {
       rootLogId: "active-log",
       timestamp: new Date(1_000),
       originalAt: new Date(1_000),
-      revisionCreatedAt: new Date(1_000),
+      revisionCreatedAt,
     };
     const laterLog = {
       ...buildOperationLog({
@@ -1690,7 +1770,7 @@ async function seedActiveInternalRecoveryLog() {
       rootLogId: "active-log",
       timestamp: new Date(1_000),
       originalAt: new Date(1_000),
-      revisionCreatedAt: new Date(1_000),
+      revisionCreatedAt: new Date(),
     };
     await Promise.all([
       setDoc(doc(firestore, "logs", "active-log"), recoveryLog),
@@ -1732,7 +1812,7 @@ async function seedCrossTankCorrectionFixture() {
         rootLogId: "active-log",
         timestamp: new Date(1_000),
         originalAt: new Date(1_000),
-        revisionCreatedAt: new Date(1_000),
+        revisionCreatedAt: new Date(),
         prevTankSnapshot: oldPrevTankSnapshot,
         nextTankSnapshot: oldNextTankSnapshot,
       }),
