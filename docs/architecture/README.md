@@ -1,6 +1,14 @@
 # Architecture 文書の入口
 
-- 第三稿: 2026-08-02（基準 `6c1d4c5` = origin/main。独立レビュー3件を反映）
+- 確定版: 2026-08-02（基準 `6c1d4c5` = origin/main。独立レビュー3件を反映）
+- **Status: Authoritative index**
+
+```text
+Architecture design:          approved
+Clean-break implementation:   not started
+```
+
+**設計は承認済み。実装は未着手。** 現在のコードが下記の target 設計どおりになっているとは限らない。
 
 ---
 
@@ -37,30 +45,33 @@
 
 ---
 
-## オーナーに確認したいこと（これが決まらないと実装に進めない）
+## 確定した設計判断（Accepted ADR）
 
-技術判断は Claude 側で決めています。ここに残したのは**業務を知らないと答えられないもの**だけです。
+すべての未決事項はユーザー判断により確定済み。詳細は各 ADR。
 
-| # | 質問 | 決まると進むもの |
-|---|---|---|
-| 1 | タンクの刻印番号を打ち直すことはある？ 間違った番号で登録したとき、今はどう直してる？ | P2-A |
-| 2 | タンクの置き場所は「倉庫・自社・お客さん」の3つで足りる？ 修理業者や検査機関に預けることはある？ | P2-A |
-| 3 | 耐圧検査は、お客さんに貸したままの状態でも実施することがある？（今のコードは可能になっている） | P2-A / P6-B |
-| 4 | 返却タグを選んでいる途中で、別の端末から続きをやることはある？ 同じタンクを2人で同時に触ることは？ | P5-A |
-| 5 | ログを後から訂正したとき、**もう出した請求書の金額が変わってもよい**？ それとも当時の金額で固定したい？ | P6-A |
+| ADR | 決定 |
+|---|---|
+| [ADR-001](./adr/ADR-001-tank-identity.md) tank identity | canonical `tankId` を document ID として維持。**surrogate ID は導入しない** |
+| [ADR-002](./adr/ADR-002-custody-model.md) custody model | コード境界は discriminated union、Firestore 保存は flat field。kind は `warehouse` / `in_house` / `customer` の3つのみ |
+| [ADR-003](./adr/ADR-003-rental-cycle-identity.md) rental cycle | `rentalCycleId` を**新設しない**。`latestLogId` は stale guard 専用、cycle は typed event から再構築 |
+| [ADR-004](./adr/ADR-004-return-tag-draft.md) return tag draft | **UI local state**。`tanks.logNote` への draft 保存は廃止 |
+| [ADR-005](./adr/ADR-005-billing-finalization.md) billing finalization | preview は再計算可能、確定・発行済み請求書は immutable snapshot。**実装は deferred** |
+| [ADR-006](./adr/ADR-006-recovery-confirmation-port.md) recovery confirmation | **confirmation resolver port** を採用。domain から React / localStorage / `window` を排除 |
+
+あわせて確定した業務判断: **貸出中の耐圧検査は認めない**（design-principles §8.8）。
 
 ---
 
 ## 文書一覧
 
-**重要**: 1・2・4 は `Status: Draft` であり、**まだ正本ではない**。現在有効な正本順位は [document-authority.md](./document-authority.md) **§1 Current authoritative order**。
+正本順位は [document-authority.md](./document-authority.md) **§1**。
 
 | # | 文書 | 内容 | Status |
 |---|---|---|---|
-| 1 | [design-principles.md](./design-principles.md) | 設計原則。互換性と不変条件の区別、依存方向、identity、source of truth、i18n境界、atomicity、failure isolation、test戦略、禁止事項 | **Draft** |
-| 2 | [domain-map.md](./domain-map.md) | 業務用語→実装の対応、domain一覧、依存グラフ、**source-of-truth matrix（一覧の正本）**、target tree、gap | **Draft** |
-| 3 | [document-authority.md](./document-authority.md) | 正本順位（Current / Proposed）と既存docsの処遇 | 運用中 |
-| 4 | [clean-break-cutover-plan.md](./clean-break-cutover-plan.md) | 新schemaへ切り替えるPR順序（reset-first） | **Draft** |
+| 1 | [design-principles.md](./design-principles.md) | 設計原則。互換性と不変条件の区別、依存方向、identity、source of truth、i18n境界、atomicity、failure isolation、test戦略、禁止事項 | **Approved** |
+| 2 | [domain-map.md](./domain-map.md) | 業務用語→実装の対応、domain一覧、依存グラフ、**source-of-truth matrix（一覧の正本）**、target tree、gap | **Approved** |
+| 3 | [document-authority.md](./document-authority.md) | 正本順位と既存docsの処遇 | **Approved** |
+| 4 | [clean-break-cutover-plan.md](./clean-break-cutover-plan.md) | 新schemaへ切り替えるPR順序（reset-first） | **Approved plan / 実装未着手** |
 | 5 | [write-ownership.md](./write-ownership.md) | field単位の write owner | 運用中 |
 | 6 | [feature-boundaries.md](./feature-boundaries.md) | feature単位の境界 | 運用中 |
 

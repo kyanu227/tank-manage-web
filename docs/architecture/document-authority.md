@@ -2,7 +2,8 @@
 
 - 初版: 2026-07-19
 - 改訂: 2026-08-02（第二稿。基準 `6c1d4c5` = origin/main）
-- Status: この文書自体は**現行の運用正本**。ただし §2 の「Proposed」は未承認
+- **確定版: 2026-08-02（ユーザー最終判断により正式正本化）**
+- **Status: Approved / Authoritative**
 
 ---
 
@@ -22,55 +23,54 @@
 
 ---
 
-## 1. Current authoritative order（現在有効。**これが現行の運用ルール**）
-
-`design-principles.md` はDraftであるため、**現時点の正本順位は従来どおり**である。
+## 1. Authoritative order（確定・発効中）
 
 | 順位 | 対象 | 種別 |
 |---|---|---|
-| 1 | `AGENTS.md`（規範ルール部分） | A |
-| 2 | 現行コード | C |
-| 3 | 現行テスト | C |
-| 4 | `docs/architecture/write-ownership.md` / `feature-boundaries.md` | B（既存） |
-| 5 | 本文書 | B（既存） |
-| 6 | `CLAUDE.md` | A |
-| 7 | `SITEMAP.md` | C |
-| 8 | 旧roadmap・旧監査資料 | D |
-
-**Draft文書（`design-principles.md` / `domain-map.md` / `clean-break-cutover-plan.md`）は、この順位に含まれない。** 参考資料として読んでよいが、実装判断の根拠にしない。
-
-### 1.1 規範と事実記述の区別
-
-`AGENTS.md` のうち**規範ルール**（許可・禁止・手順・優先方針）は順位1。
-**事実記述**（ディレクトリ構成・実装状態）が現行コードと食い違う場合は**現行コードを正**とし、乖離を §4 に記録して更新候補とする。
-
----
-
-## 2. Proposed authoritative order（ユーザー承認後に発効）
-
-`design-principles.md` が正式正本化された後の順位。**承認まで発効しない。**
-
-| 順位 | 対象 | 種別 |
-|---|---|---|
-| 1 | `AGENTS.md` / `CLAUDE.md` の**workflow / safety 規範** | A |
-| 2 | **`docs/architecture/design-principles.md`** | **B（最上位）** |
-| 3 | ADR（`docs/architecture/adr/`） | B |
+| 1 | `AGENTS.md` / `CLAUDE.md` の **workflow / safety 規範**（作業手順・禁止操作・deploy手順） | A |
+| 2 | **`docs/architecture/design-principles.md`** | **B（architecture最上位）** |
+| 3 | **Accepted ADR**（`docs/architecture/adr/`） | B |
 | 4 | 現行コード | C |
 | 5 | 現行テスト | C |
 | 6 | `docs/architecture/` 実装詳細（`domain-map` / `write-ownership` / `feature-boundaries` / `clean-break-cutover-plan`） | B |
-| 7 | domain-local 設計文書 | B |
+| 7 | domain-local 設計文書（`return-flow-policy` / `billing-rule-design` / `i18n-*` 等） | B |
 | 8 | `SITEMAP.md` | C |
-| 9 | historical | D |
+| 9 | historical 文書 | D |
 
-### 2.1 A と B が矛盾した場合
+### 1.1 A と B は競合しない
 
-順位1（workflow / safety）を優先する。ただしその矛盾は**解消すべき欠陥**として §4 に記録し、ユーザー承認のうえ修正する。
+順位1（workflow / safety）と順位2〜3（architecture）は**同じ問いに答えていない**。前者は「誰がどの手順で作業してよいか」、後者は「何をどう設計するか」。
 
-### 2.2 発効条件
+同一事項で矛盾した場合は順位1を優先し、その矛盾を**解消すべき欠陥**として §4 に記録する。
 
-1. ユーザーが `design-principles.md` の内容を承認する
-2. 各Draft文書から `Status: Draft / Not yet authoritative` を外す
-3. §4 の `AGENTS.md` / `CLAUDE.md` 修正を実施する（設計方針の重複を解消しないと、正本が再び分裂する）
+### 1.2 C は事実であって規範ではない
+
+現行コード・テストは「**今どうなっているか**」の証拠である。「今後もそうすべき」という規範ではない。
+
+文書と実装が矛盾した場合:
+
+- **現在の実装の事実** → code / test を正とする
+- **target design** → approved architecture（順位2〜3）を正とする
+- 矛盾を黙って解釈せず、**gap として記録する**（[domain-map.md](./domain-map.md) §8）
+
+### 1.3 規範と事実記述の区別
+
+`AGENTS.md` のうち**規範ルール**（許可・禁止・手順・優先方針）は順位1。
+**事実記述**（ディレクトリ構成・実装状態）が現行コードと食い違う場合は**現行コードを正**とし、乖離を §4 に記録する。
+
+---
+
+## 2. 承認範囲
+
+```text
+Architecture design:          approved
+Clean-break implementation:   not started
+Firestore reset:              not executed
+Rules cutover:                not executed
+Hosting deploy:               not executed
+```
+
+approved architecture は **target 設計**である。現在のコードがそうなっていることを意味しない。実装状況は [domain-map.md](./domain-map.md) §8 の gap 表と [design-principles.md](./design-principles.md) §21.4 の違反一覧を見ること。
 
 ---
 

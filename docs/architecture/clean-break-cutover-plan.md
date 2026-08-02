@@ -2,8 +2,20 @@
 
 - 第二稿: 2026-08-02（基準 `6c1d4c5` = origin/main）
 - 第三稿: 2026-08-02（独立レビュー3件を反映。順序を **reset-first** へ変更）
-- Status: **Draft / Not yet authoritative**
-- 上位文書: [design-principles.md](./design-principles.md) / [domain-map.md](./domain-map.md)
+- **確定版: 2026-08-02（ユーザー最終判断により計画を承認）**
+- **Status: Approved plan / Implementation not started**
+
+```text
+Architecture design:          approved
+Clean-break implementation:   not started
+Firestore reset:              not executed
+Rules cutover:                not executed
+Hosting deploy:               not executed
+```
+
+**計画が承認されたことと、実装が完了したことを混同しないこと。**
+
+- 上位文書: [design-principles.md](./design-principles.md) / [domain-map.md](./domain-map.md) / [ADR](./adr/)
 
 ---
 
@@ -43,7 +55,7 @@
 - [ ] 実利用者が存在しないことの再確認（Firestore を read-only で確認）
 - [ ] reset 前の完全バックアップ（既存 `cutover:snapshot:create`）
 - [ ] 停止条件の合意（§7）
-- [ ] **ADR-001〜004 の業務確認**（§5）
+- [x] **ADR-001〜006 確定済み**（§5）
 
 ---
 
@@ -55,7 +67,7 @@
 
 | PR | 目的 | 変更責務 | 変更ファイル候補 | 完了条件 | deploy |
 |---|---|---|---|---|---|
-| **P0-A** docs draft 保存・レビュー | 第三稿をbranchへ保存 | docs のみ | `docs/architecture/*` | 独立レビュー反映済み。Draft のまま | なし |
+| ~~**P0-A**~~ docs 正本化 | ~~設計文書の確定~~ | **完了** | `docs/architecture/**` + `adr/` | ✅ 独立レビュー3件反映・ADR 6件 Accepted・正本化済み | なし |
 | **P0-B** enforcement（宣言的のみ） | 依存方向の回帰を止める | **lint 設定のみ** | `eslint.config.mjs` | `no-restricted-imports` zone で5規則（domain→React/locale、operation→billing、billing→write service、feature↔feature、app/component/hookからwrite SDK）を強制。**現行違反 V1/V2 を検出してFAILすること**を確認後、allowlist登録 | なし |
 | **P0-C** dev / production 分離 | 検証を本番から隔離 | **環境のみ** | dev Firebase project、`.env` 系 | dev が本番projectを向いていない | dev project作成のみ |
 | **P0-D** document authority 発効 + supersede注記 | 正本順位を確定し、死んだ文書を死んだと分かる状態にする | docs のみ | `document-authority.md`、supersede判定の全文書へ1行banner、`AGENTS.md` / `CLAUDE.md` 修正（要ユーザー承認） | Proposed order 発効。**supersede判定の約20文書すべてに banner** | なし |
@@ -73,6 +85,8 @@
 | **P1-A** domain の UI 対話・locale 依存の除去（V1/V2） | atomic writer から React / browser / locale 依存を切る | ①**`tank-operation.ts` 内の `window.` / `document.` 参照が0件**（←これが本体。locale importの除去だけでは不十分） ②`@/hooks/useStaffSession` を import しない ③payload・確認文言・エラー文言が現行と完全一致（characterization test） ④P0-B の allowlist から V1/V2 を削除 |
 | **P1-B** display 文言の boundary 移動（V3） | domain のハードコード日本語を display boundary へ | 表示結果が現行と一致。**`scripts/staff-i18n-scan.ts` の `STAFF_I18N_SOURCE_ROOTS` に `src/lib` を追加**し、既存違反を baseline 登録（これをしないとV3の完了を検証できない） |
 | **P1-C** role code 化（V4） | 日本語文字列を permission code から外す | `StaffCorrectionRole` が code（`admin` / `assistant_admin` / `staff`）。`operation-review-service` の `role !== "管理者"` が code比較。表示labelは display boundary。**schema変更を含むため Rules と `staff` / `staffByEmail` の値も対象** |
+
+| **P1-D** inspection の allowedPrev 制限 | 貸出中の耐圧検査を禁止する（業務判断） | `inspection.allowedPrev` を `["empty","filled","damaged","defective"]` へ。customer custody / in_house / disposed から実行不可。transition policy test で固定。**`rentalCycleId` を導入しない**（ADR-003） |
 
 **P1-A の設計**（ADR-006）: `TankRecoveryConfirmationRequiredError` は既に caller へ throw される構造を持つ。ただし公開writerの呼び出し元は**9箇所**あるため、確認ループを各callerへ複製するのは §18 に反する。**resolver を注入するport**（design-principles §17）を採り、未注入時は fail-closed（確認が必要になったら例外）とする。`TankRecoveryConfirmationRequiredError` に `code` を付与すること（現在 plain `Error` 継承で code を持たない唯一のdomain errorであり、§12.3 違反）。
 
@@ -153,16 +167,18 @@ P0-A (docs保存) ─ P0-B (lint) ─ P0-C (env) ─ P0-D (authority + banner)
 
 ---
 
-## 5. 実装前に必要な業務判断（ADR）
+## 5. Accepted ADR（すべて確定済み）
 
-| ADR | 論点 | 必要な業務情報 | block |
-|---|---|---|---|
-| **ADR-001** | tank identity（surrogate要否） | 刻印の打ち直し / 誤登録の復旧方法 / 番号体系変更の予定 | P2-A |
-| **ADR-002** | custody model + `custodyKind` の値域 | 倉庫・自社・顧客以外の保管先（修理業者・検査機関）はあるか。**`inspection` が `lent` から実行できる現仕様は意図的か**（`allowedPrev: []`） | P2-A |
-| **ADR-003** | rental cycle identity | 訂正・取消後も cycle identity が必要か。**論点は `inspection` の1ケースに絞られた**（design-principles §8.3） | P6-B |
-| **ADR-004** | return tag draft の置き場所 | 端末をまたぐ共有が必要か / 同時編集 / draft の失効 | P5-A |
-| **ADR-005** | billing finalization | 請求確定という業務イベントが存在するか | P6-A |
-| **ADR-006** | domain の UI対話・locale 依存の是正方法 | （技術判断。業務情報不要 — resolver port を推奨） | P1-A |
+| ADR | 決定 | 実装する PR |
+|---|---|---|
+| [ADR-001](./adr/ADR-001-tank-identity.md) tank identity | canonical `tankId` を document ID 維持。surrogate 不採用 | （変更なし） |
+| [ADR-002](./adr/ADR-002-custody-model.md) custody model | 上流 union + flat 保存。kind 3つ。`disposed` は最後の custody を保持し `none` を作らない | P2-A / P4-A |
+| [ADR-003](./adr/ADR-003-rental-cycle-identity.md) rental cycle | `rentalCycleId` 新設しない | P1-D（`inspection` 制限で論点解消） |
+| [ADR-004](./adr/ADR-004-return-tag-draft.md) return tag draft | UI local state | P5-A / P5-B |
+| [ADR-005](./adr/ADR-005-billing-finalization.md) billing finalization | 原則確定・実装 deferred | P6-A（必須経路外） |
+| [ADR-006](./adr/ADR-006-recovery-confirmation-port.md) recovery confirmation | resolver port | P1-A |
+
+業務判断: **貸出中の耐圧検査は認めない** → P1-D。
 
 ---
 

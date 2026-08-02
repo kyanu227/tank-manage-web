@@ -1,7 +1,9 @@
 # Domain Map
 
 - 第二稿: 2026-08-02（基準 `6c1d4c5` = origin/main）
-- Status: **Draft / Not yet authoritative**
+- **確定版: 2026-08-02（ユーザー最終判断により正式正本化）**
+- **Status: Approved / Authoritative**
+- 注意: **設計の承認であって実装の完了ではない。** §8 の gap は未解消
 - 上位文書: [design-principles.md](./design-principles.md)
 
 ---

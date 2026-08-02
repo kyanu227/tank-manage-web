@@ -3,8 +3,10 @@
 - 第一稿: 2026-08-02（基準 `e19d8a6` — **古いlocal main。監査基準として無効**）
 - **第二稿: 2026-08-02（基準 `6c1d4c5` = origin/main、PR #182まで。working tree clean）**
 - **第三稿: 2026-08-02（独立レビュー3件を反映）**
-- Status: **Draft / Not yet authoritative** — ユーザー承認までarchitecture正本ではない（§0.2）
-- 位置づけ: 承認後にarchitecture設計判断の規範正本となる文書
+- **確定版: 2026-08-02（ユーザー最終判断により正式正本化）**
+- **Status: Approved / Authoritative**
+- 位置づけ: **architecture設計判断の規範正本**
+- 注意: **設計の承認であって実装の完了ではない。** clean-break implementation は未着手（§0.3）
 
 ---
 
@@ -18,24 +20,38 @@
 
 「綺麗なコード」「流行のarchitecture」「ファイル数の最適化」は目的ではない。本文書の規則はすべてこの目的からの導出であり、導出できない規則は削除してよい。
 
-### 0.2 Draft中の効力
+### 0.2 効力
 
-**本文書はDraftである間、正本順位を変更しない。** 現在有効な正本順位は [document-authority.md](./document-authority.md) の「Current authoritative order」に従う。本文書は「Proposed」側に位置する。
+本文書は **architecture normative authority の最上位**である。正本順位は [document-authority.md](./document-authority.md) §1 に従う。
 
-### 0.3 第一稿からの主要な訂正
+作業手順・禁止操作・deploy手順は `AGENTS.md` / `CLAUDE.md`（workflow / safety authority）が規定する。両者は競合しない — 前者は「何をどう設計するか」、後者は「誰がどの手順で作業するか」に答える。
+
+### 0.3 承認範囲（重要）
+
+```text
+Architecture design:          approved
+Clean-break implementation:   not started
+Firestore reset:              not executed
+Rules cutover:                not executed
+Hosting deploy:               not executed
+```
+
+**本文書が承認されたことは、ここに書かれた target 設計が実装済みであることを意味しない。** 現在のコードの事実は §21.4 の違反一覧と [domain-map.md](./domain-map.md) §8 の gap 表を見ること。
+
+### 0.4 第一稿からの主要な訂正
 
 | # | 第一稿の記述 | 訂正 |
 |---|---|---|
 | 1 | 基準commit `e19d8a6` | **無効**。origin/main は `6c1d4c5` で25 commit先。PR #176〜#182（staff英語化stack）が未監査だった |
 | 2 | 「architecture enforcement は0件」 | **誤り**。局所的enforcementは複数存在する（§21.1） |
 | 3 | 「domain は React / browser API を import しない — 現行遵守」 | **誤り**。現行mainで違反が存在する（§21.4） |
-| 4 | `place` code への単純置換を確定 | **保留**。3案比較へ差し戻し（§8.5） |
-| 5 | surrogate tank ID を REJECT | **推奨に格下げ**。根拠を明示（§8.2） |
-| 6 | `rentalCycleId` 不要と確定 | **保留**。4概念の分離が先（§8.3） |
-| 7 | `tanks.pendingReturnTag` を採用 | **保留**。4案比較へ差し戻し（§9.1） |
-| 8 | 確定請求書を source of truth 化と確定 | **別ADR候補へ分離**（§13.5） |
+| 4 | `place` code への単純置換を確定 | **ADR-002 で確定**（flat保存 + 上流union） |
+| 5 | surrogate tank ID を REJECT | **ADR-001 で確定**（surrogate不採用） |
+| 6 | `rentalCycleId` 不要と確定 | **ADR-003 で確定**（新設しない） |
+| 7 | `tanks.pendingReturnTag` を採用 | **ADR-004 で確定**（UI local state） |
+| 8 | 確定請求書を source of truth 化と確定 | **ADR-005 で確定**（原則確定・実装deferred） |
 
-### 0.4 第二稿からの主要な訂正（独立レビュー3件による）
+### 0.5 第二稿からの主要な訂正（独立レビュー3件による）
 
 | # | 第二稿の記述 | 訂正 |
 |---|---|---|
@@ -419,6 +435,30 @@ type TankCustody =
 
 ---
 
+### 8.8 貸出中の耐圧検査を認めない（業務判断による確定）
+
+**業務判断**: 貸出中のタンクに耐圧検査を実施する正規業務は**存在しない**。
+
+**現行の問題**: `inspection.allowedPrev: []`（`tank-rules.ts`）は空配列＝**全status から実行可能**を意味する。`lent` / `unreturned` からも実行でき、実行すると customer projection が null になり、**返却logなしに rental が終了する**。
+
+**Rule**:
+
+- customer custody（`lent` / `unreturned`）から inspection を実行させない
+- **実物が自社管理下にある状態だけ**を許可する
+- この制約を transition policy test で固定する
+- **この修正を `rentalCycleId` 導入の理由にしない**（ADR-003）
+
+**target `allowedPrev`（最小集合）**: `["empty", "filled", "damaged", "defective"]`
+
+| 除外 | 理由 |
+|---|---|
+| `lent` / `unreturned` | customer custody。業務判断により禁止 |
+| `in_house` | 自社管理下ではあるが**使用中**。inspection の `nextStatus` は `empty` なので、`inhouse_return` を経ずに自社利用を終了させてしまう（`lent` の場合と同じ欠陥） |
+| `disposed` | terminal status |
+
+実装時に現行 status code を再監査し、この集合で過不足がないか確認すること。
+
+
 ## 9. Source-of-truth policy
 
 **Rule**: 同じ意味のfieldを複数collectionで正本扱いしない。各データはちょうど1つの分類（source of truth / immutable event / current projection / display snapshot / audit snapshot / derived read model / cache / temporary UI state）を持つ。
@@ -613,6 +653,48 @@ read model（請求候補・売上・実績・dashboard集計）は logs から�
 domain enum の網羅性は TypeScript の exhaustive check で、辞書の完全性は dictionary test で、**別々に**保証する。
 
 ---
+
+### 12.7 role code（確定）
+
+**現行の問題**: 日本語文字列が permission code として機能している。
+
+```text
+tank-operation.ts:165   StaffCorrectionRole = "管理者" | "準管理者" | "一般"
+tank-operation.ts:379   PRIVILEGED_CORRECTION_ROLES = ["管理者", "準管理者"]
+operation-review-service.ts:212,231   role !== "管理者"   ← runTransaction 内
+```
+
+値は `staff.role` / `staffByEmail.role` に**永続化**され、`settings/adminPermissions` の role 配列にも使われる。**schema 問題なので data reset 前に解消が必要**。
+
+**target code**:
+
+```ts
+type StaffRole = "admin" | "assistant_admin" | "staff";
+```
+
+**Rule**:
+
+- 日本語 role 文字列を permission code として使用しない
+- 表示は ja/en dictionary で行う
+- application code / Rules / permission settings / tests が**最終的に同じ role code** を使う
+
+### 12.8 保存する機械判定値は locale 非依存 code のみ（確定）
+
+**対象**: `action` / `transitionAction` / `status` / `role` / `custodyKind` / `returnCondition` / `workflow` / `source` / `logKind` / review status / permission code
+
+**禁止**: 次を**機械判定の正本 code として保存・比較する**こと。
+
+```text
+"貸出" "返却" "受注貸出" "倉庫" "管理者" "準管理者" "一般"
+```
+
+**区別すること**: 名前や自由入力値は別である。次は実在の表示・監査データとして保存**可能**。
+
+```text
+staffName / customerNameSnapshot / memo / note
+```
+
+判定基準は「**コードがこの値で分岐するか**」。分岐するなら code、しないなら自由文字列でよい。
 
 ## 13. Operation と Billing の分離
 
@@ -856,6 +938,25 @@ event schema が不正なら**0円として続行せず、集計を停止する*
 **注**: これは i18n 実装の欠陥ではなく、**recovery確認ダイアログという「domain の途中でユーザーへ問い合わせる」処理**が持つ本質的な難しさに起因する。是正案は §25 の意図的例外として残すか、確認処理自体を domain の外へ出すかの2択であり、実装時に判断する。
 
 ---
+
+### 21.5 Firestore Rules の write 境界（target 設計）
+
+**現行の問題**: `isValidTankUpdate` は `!isTankProjectionChanged()` を許可条件に含む。`isTankProjectionChanged()` は9個の hardcoded key を見るだけなので、**そのどれも変えない update は staff が無制限に通せる**（log なし・transaction なし・stale guard なし）。
+
+これは **ESLint / architecture test では検出できない**種類の欠陥である。新しい field を追加したとき、Rules 側の list を更新しなければその field は恒久的に無防備になる。
+
+**Rule（clean-break の target 設計）**:
+
+- writable field を**明示列挙**する
+- field set を Rules で検査する（`hasOnly()` による **deny-by-default**）
+- custody の invalid combination を Rules で拒否する
+- lifecycle projection field を operation transaction 以外から書けないようにする
+- draft marker 用の例外（`isReturnTagMarkerOnlyUpdate`）を**削除**する（ADR-004）
+- **application validation だけに依存しない**
+- Rules と application の**両方**で invariant を守る
+
+**Rule（運用）**: schema に field を追加する PR は、**同じ PR で Rules の field list を更新する**。分けると窓が開く。これは §6「Rules変更とapplication変更を混ぜない」に対する意図的な例外であり、cutover plan Phase 2 に記録している。
+
 
 ## 22. Clean-break data policy
 
