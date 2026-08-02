@@ -23,7 +23,7 @@ describe("submitRepairCompletion", () => {
     applyBulkTankOperationsMock.mockResolvedValue([]);
   });
 
-  it("異なるcurrentStatusの複数タンクを入力順のpayloadで一括送信する", async () => {
+  it("異なるcurrentStatusの複数タンクをrepair provenance付きで一括送信する", async () => {
     await submitRepairCompletion({
       tanks: [
         { tankId: "A01", currentStatus: "damaged" },
@@ -39,18 +39,29 @@ describe("submitRepairCompletion", () => {
           tankId: "A01",
           transitionAction: "修理済み",
           currentStatus: "damaged",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "repair",
+          },
           location: "倉庫",
         },
         {
           tankId: "B02",
           transitionAction: "修理済み",
           currentStatus: "defective",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "repair",
+          },
           location: "倉庫",
         },
       ],
     ]);
+
+    const operations = applyBulkTankOperationsMock.mock.calls[0][0];
+    expect(operations.every((operation) => operation.context.actor === ACTOR)).toBe(true);
   });
 
   it("単一タンクもnoteなしの従来どおりのpayloadで一括送信する", async () => {
@@ -66,7 +77,11 @@ describe("submitRepairCompletion", () => {
           tankId: "C03",
           transitionAction: "修理済み",
           currentStatus: "damaged",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "repair",
+          },
           location: "倉庫",
         },
       ],

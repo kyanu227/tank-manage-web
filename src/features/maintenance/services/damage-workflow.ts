@@ -12,7 +12,11 @@ export async function submitDamageReport(
   input: SubmitDamageReportInput,
 ): Promise<void> {
   const { tankIds, note, actor } = input;
-  const context = { actor };
+  const context = {
+    actor,
+    source: "maintenance" as const,
+    workflow: "damage" as const,
+  };
 
   await applyBulkTankOperations(
     tankIds.map((tankId) => ({

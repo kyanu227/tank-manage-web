@@ -26,7 +26,11 @@ export async function submitInspectionCompletion(
     inspectionDate,
     actor,
   } = input;
-  const context = { actor };
+  const context = {
+    actor,
+    source: "maintenance" as const,
+    workflow: "inspection" as const,
+  };
   const schedule = calculateInspectionSchedule({
     validityYears,
     nextInspectionDateBase,

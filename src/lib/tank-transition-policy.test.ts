@@ -107,6 +107,27 @@ describe("tank transition planner", () => {
     if (!result.ok) expect(result.code).toBe("maintenance_direct_only");
   });
 
+  it.each([
+    { currentStatus: "empty" as const, action: "damage_report" as const, nextStatus: "damaged" },
+    { currentStatus: "damaged" as const, action: "repaired" as const, nextStatus: "empty" },
+    { currentStatus: "filled" as const, action: "inspection" as const, nextStatus: "empty" },
+  ])("keeps maintenance $action as a direct $nextStatus transition", ({
+    currentStatus,
+    action,
+    nextStatus,
+  }) => {
+    const result = requirePlan(planTankTransition({
+      policyMode: "strict",
+      current: { status: currentStatus, location: "倉庫" },
+      requestedAction: action,
+    }));
+
+    expect(result.transitionAction).toBe(action);
+    expect(result.plan.kind).toBe("direct");
+    expect(result.plan.steps.map((step) => step.action)).toEqual([action]);
+    expect(result.plan.steps.map((step) => step.toStatus)).toEqual([nextStatus]);
+  });
+
   it("hard-blocks disposed tanks", () => {
     const result = planTankTransition({
       policyMode: "advisory",
@@ -269,6 +290,9 @@ describe("advisory operation scope", () => {
     { source: "order_fulfillment" as const, workflow: "order" as const, transactionId: "order-1" },
     { source: "return_tag_processing" as const, workflow: "return" as const, transactionId: "return-1" },
     { source: "portal" as const, workflow: "uncharged_report" as const, transactionId: "report-1" },
+    { source: "maintenance" as const, workflow: "damage" as const },
+    { source: "maintenance" as const, workflow: "repair" as const },
+    { source: "maintenance" as const, workflow: "inspection" as const },
     { source: "manual" as const, workflow: "tank_operation" as const, transactionId: "unexpected" },
     {},
   ])("keeps customer/transaction/unspecified context strict: %#", (context) => {
