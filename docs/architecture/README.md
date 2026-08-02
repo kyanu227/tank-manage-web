@@ -44,6 +44,7 @@ Clean-break implementation:   not started
 | **画面から探したい** | [SITEMAP.md](../../SITEMAP.md) |
 | Adminの権限モデルはどこか | [Admin capability権限モデル](../design/admin-capability-permissions.md) |
 | Adminのナビ・画面グループはどこか | [Admin情報設計](../design/admin-information-architecture.md) |
+| Admin設定の分類と耐圧検査設定の正本はどこか | [Admin設定と正本](../design/admin-settings-source-of-truth.md) |
 
 ---
 

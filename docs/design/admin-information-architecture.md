@@ -3,6 +3,7 @@
 - Status: **Authoritative for Admin navigation and screen grouping**
 - Updated: 2026-08-02
 - Permission authority: [admin-capability-permissions.md](./admin-capability-permissions.md)
+- Settings authority: [admin-settings-source-of-truth.md](./admin-settings-source-of-truth.md)
 
 ## 1. 目的別のトップレベル構造
 
@@ -68,7 +69,15 @@
 存在しない請求件数などは作らない。個別readの失敗は `—` とし、他sectionを壊さない。
 保存済みの状態遷移modeが既定の `strict` でない場合は警告を表示する。
 
-## 5. レスポンシブとaccessibility
+## 5. 設定と開発者ツール
+
+- システム設定は`業務ルール`、`通知`、`運用制御`の3 tabに統合する。
+- 開発者ツールは`状態遷移図`と`Security Rules`のtab領域とし、日常sidebarへ置かない。
+- tabはview capabilityで絞り、一つだけならtab barを省略する。
+- Security Rulesは専用capabilityがない利用者に存在自体を表示しない。
+- 詳細な分類、write権限、耐圧検査設定の正本は[Admin設定と正本](./admin-settings-source-of-truth.md)に従う。
+
+## 6. レスポンシブとaccessibility
 
 - desktop: 244px、縮小時72pxの固定sidebar。
 - mobile: 固定top barとdrawer。`main`内にhamburgerを置かない。
@@ -77,7 +86,7 @@
 - popoverはEscapeと外側clickで閉じ、triggerへfocusを戻す。
 - logoutはdestructive confirmation後だけ実行する。
 
-## 6. 変更境界
+## 7. 変更境界
 
 この情報設計は、既存のFirestore read/write、billing計算、Firebase Auth、状態遷移、
 operation logの業務意味を変更しない。view capabilityしか持たない画面ではwrite controlを

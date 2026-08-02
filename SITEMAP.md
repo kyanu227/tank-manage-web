@@ -217,15 +217,16 @@ desktop/mobileとも [`AdminSidebarContent`](src/components/admin/AdminSidebarCo
 | 発注品目 | `/admin/order-master` | [`src/app/admin/order-master/page.tsx`](src/app/admin/order-master/page.tsx) |
 | 請求 | `/admin/billing` | [`src/app/admin/billing/page.tsx`](src/app/admin/billing/page.tsx) |
 
-### 5-5. 設定・通知
+### 5-5. システム設定
 
-| 画面 | URL | ファイル |
-|---|---|---|
-| 設定入口（ポータル設定へ） | `/admin/settings` | [`src/app/admin/settings/page.tsx`](src/app/admin/settings/page.tsx) |
-| 状態遷移モード | `/admin/settings/tank-operations` | [`src/app/admin/settings/tank-operations/page.tsx`](src/app/admin/settings/tank-operations/page.tsx) |
-| ポータル設定 | `/admin/settings/portal` | [`src/app/admin/settings/portal/page.tsx`](src/app/admin/settings/portal/page.tsx) |
-| 耐圧検査設定 | `/admin/settings/inspection` | [`src/app/admin/settings/inspection/page.tsx`](src/app/admin/settings/inspection/page.tsx) |
-| 通知設定 | `/admin/notifications` | [`src/app/admin/notifications/page.tsx`](src/app/admin/notifications/page.tsx) |
+| tab | URL | ファイル | 内容 |
+|---|---|---|---|
+| 業務ルール | `/admin/settings` | [`src/app/admin/settings/page.tsx`](src/app/admin/settings/page.tsx) | ポータル自動返却、耐圧検査 |
+| 通知 | `/admin/notifications` | [`src/app/admin/notifications/page.tsx`](src/app/admin/notifications/page.tsx) | メール、LINE、通知対象 |
+| 運用制御 | `/admin/settings/tank-operations` | [`src/app/admin/settings/tank-operations/page.tsx`](src/app/admin/settings/tank-operations/page.tsx) | 状態遷移モード |
+
+`/admin/settings/portal`と`/admin/settings/inspection`は互換routeとして業務ルールへredirectする。
+3 routeは共通の [`AdminSettingsTabs`](src/components/admin/AdminSettingsTabs.tsx) を使う。
 
 ### 5-6. 開発・確認
 
@@ -234,11 +235,15 @@ desktop/mobileとも [`AdminSidebarContent`](src/components/admin/AdminSidebarCo
 | 状態遷移図 | `/admin/state-diagram` | [`src/app/admin/state-diagram/page.tsx`](src/app/admin/state-diagram/page.tsx) |
 | Security Rules | `/admin/security-rules` | [`src/app/admin/security-rules/page.tsx`](src/app/admin/security-rules/page.tsx) |
 
+2 routeは共通の [`AdminDeveloperTabs`](src/components/admin/AdminDeveloperTabs.tsx) を使う。
+Security Rulesは専用capabilityがなければtabとlauncherに存在自体を表示しない。
+
 権限制御: [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) が
 Firestore `settings/adminPermissions.capabilities` を見て、route直アクセスを含めて機能単位で判定する。
 旧 `pages` はread時だけ決定的に変換し、新規保存は `capabilities` のみに行う。
 詳細は [Admin capability権限モデル](docs/design/admin-capability-permissions.md) と
-[Admin情報設計](docs/design/admin-information-architecture.md) を参照する。
+[Admin情報設計](docs/design/admin-information-architecture.md)、
+[Admin設定と正本](docs/design/admin-settings-source-of-truth.md) を参照する。
 
 ### 5-7. 将来構想（未実装）
 

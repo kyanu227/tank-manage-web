@@ -420,7 +420,7 @@ Firestore Rules で email からスタッフ権限を判定しやすくするた
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---:|---|
-| `pages` | map | yes | `{ path: roles[] }`。 |
+| `capabilities` | map | yes | `{ capabilityKey: roles[] }`。Admin UI権限の正本。旧`pages`はread時互換だけ。 |
 | `updatedAt` | Timestamp | no | 更新日時。 |
 
 ### `settings/portal`
@@ -435,12 +435,12 @@ Firestore Rules で email からスタッフ権限を判定しやすくするた
 
 ### `settings/inspection`
 
-耐圧検査設定。
+耐圧検査設定。`validityYears`と`alertMonths`の唯一のruntime正本。
 
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---:|---|
-| `validityYears` | number | yes | 耐圧検査の有効年数。 |
-| `alertMonths` | number | yes | 期限通知を開始する月数。 |
+| `validityYears` | number | yes | 耐圧検査の有効年数。default 5、1〜20の整数。 |
+| `alertMonths` | number | yes | 期限通知を開始する月数。default 6、1〜24の整数。 |
 | `updatedAt` | Timestamp | no | 更新日時。 |
 
 ## `orderMaster`
@@ -530,8 +530,8 @@ Firestore Rules で email からスタッフ権限を判定しやすくするた
 | フィールド | 型 | 必須 | 説明 |
 |---|---|---:|---|
 | `emails` | string[] | yes | 通知先メール一覧。 |
-| `alertMonths` | number | no | 耐圧通知月数。 |
-| `validityYears` | number | no | 耐圧有効年数。 |
+| `alertMonths` | number | no | legacy。runtimeは読まず、新規write・削除・migrationもしない。正本は`settings/inspection`。 |
+| `validityYears` | number | no | legacy。runtimeは読まず、新規write・削除・migrationもしない。正本は`settings/inspection`。 |
 | `updatedAt` | Timestamp | no | 更新日時。 |
 
 ## `lineConfigs`

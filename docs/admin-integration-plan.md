@@ -35,7 +35,7 @@
 | スタッフ role | `staff`, `staffByEmail` | `AdminAuthGuard`, `settings/adminPermissions`, dashboard のログ修正権限 | service 必須。認証ミラーと整合 | 必須 | 管理者のみ。準管理者が自権限を拡張できないこと | P0 |
 | スタッフ rank | `staff`, `rankMaster` | `useStaffSession`, 将来の報酬・ランク計算 | マスタ更新 + staff 更新 | 推奨 | 管理者のみまたは金銭権限者 | P1 |
 | 管理ページ権限 | `settings/adminPermissions` | `AdminAuthGuard`, admin layout, permissions page | 単純設定更新 | 必須 | 管理者のみ。管理者権限は常に残す | P0 |
-| 耐圧検査の有効年数 | `settings/inspection.validityYears` | `staff/inspection`, `staff/dashboard`, `useInspectionSettings` | 単純設定更新 | 必須 | 管理者または準管理者でも可だが履歴必須 | P0 |
+| 耐圧検査の有効年数 | `settings/inspection.validityYears` | `staff/inspection`, `staff/dashboard`, `useInspectionSettings` | 単純設定更新 | 必須 | 管理者のみ変更、準管理者は参照専用 | P0 |
 | 耐圧検査の告知開始月数 | `settings/inspection.alertMonths` | `staff/inspection`, `staff/dashboard`, `useInspectionSettings` | 単純設定更新 | 必須 | 同上 | P0 |
 | 発注品目マスタ | `orderMaster` | `staff/order`, `TankEntryScreen` のタンク種別候補 | 単純マスタ更新 | 推奨 | 管理者/準管理者可。削除は慎重 | P0 |
 | タンク種別候補 | 現状は `orderMaster(category=="tank")` + code fallback | `staff/tank-purchase`, `staff/tank-register`, `TankEntryScreen` | 当面は `orderMaster` に寄せる。将来は `tankTypeMaster` 検討 | 推奨 | 現場入力に直結するため変更履歴推奨 | P1 |
@@ -44,7 +44,7 @@
 | ポータル利用者と貸出先の紐付け | `customerUsers.customerId/customerName`, 派生 status, `transactions` pending link 更新 | `admin/settings` customer tab, portal Auth Phase 0 | service 必須。pending transaction 更新を伴う | 必須 | 管理者/準管理者可。誤紐付けは業務影響大 | P0 |
 | 操作単価 | `priceMaster` | `admin/money`, `incentive-rules.ts` の設計上の入力 | 単純マスタ更新。ただし計算側接続は別確認 | 必須 | 金銭権限者のみ | P1 |
 | ランク条件 | `rankMaster` | `admin/money`, `incentive-rules.ts` の設計上の入力 | 単純マスタ更新 | 必須 | 金銭権限者のみ | P1 |
-| 通知先メール | `notifySettings/config.emails` | `admin/notifications` | 単純設定更新 | 推奨 | 管理者/準管理者可。個人情報扱い | P2 |
+| 通知先メール | `notifySettings/config.emails` | `admin/notifications` | 単純設定更新 | 推奨 | 管理者のみ変更、準管理者は参照専用。個人情報扱い | P2 |
 | LINE通知設定 | `lineConfigs` | `admin/notifications` | 単純マスタ更新。token は秘匿扱い | 必須 | 管理者のみ推奨。token 表示制限が必要 | P2 |
 | 自動返却時刻 | `settings/portal` | 顧客ポータル返却画面 | 単純設定更新 | 推奨 | staff 画面では未使用。ポータル影響あり | P2 |
 | ログ修正可能時間 | 現状 code 定数 `72h` が `staff/dashboard` と `tank-operation.ts` に存在 | `staff/dashboard`, `applyLogCorrection`, `voidLog` | operation/service 必須。設定化するなら `settings/logCorrection` | 必須 | 管理者のみ。現場不正防止に直結 | P2 |
@@ -195,7 +195,7 @@
 ### P2: 業務ルールに近い設定を慎重に扱う
 
 1. ログ編集/取消可能時間を設定化するか判断。
-2. 通知設定と耐圧検査設定の重複を整理する。
+2. ~~通知設定と耐圧検査設定の重複を整理する。~~ **2026-08-02完了**。`settings/inspection`へ一本化。
 3. LINE token の表示制限・更新履歴を設計する。
 4. portal 設定は staff 現場設定とは別計画で扱う。
 
@@ -223,6 +223,6 @@
 
 1. `customers` 正本化後の service 境界を小さな設計書に分ける。
 2. `edit_history` / `delete_history` の共通記録フォーマットを決める。
-3. `settings/inspection` と `notifySettings` の耐圧関連値の役割を整理する。
+3. ~~`settings/inspection` と `notifySettings` の耐圧関連値の役割を整理する。~~ **2026-08-02完了**。前者だけを正本とし、後者のlegacy fieldは無移行で無視する。
 4. staff 権限変更時の service 境界を定義する。
 5. ログ修正可能時間を設定化するか、現状 code 固定のままにするか決める。
