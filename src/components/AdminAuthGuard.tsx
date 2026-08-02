@@ -16,6 +16,11 @@ import {
 import {
   doc, getDoc,
 } from "firebase/firestore";
+import {
+  decodeAdminPermissions,
+  isRoleAllowed,
+  type AdminPermissionsDecodeResult,
+} from "@/lib/admin/admin-permissions";
 import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
 import { DEV_ADMIN_ALLOWED_PATHS, DEV_STAFF_SESSION, isDevAuthBypassEnabled } from "@/lib/auth/dev-auth";
 import { findActiveStaffByEmail } from "@/lib/firebase/staff-auth";
@@ -60,6 +65,41 @@ function filterSubAdminAllowedPaths(paths: string[]) {
     const page = ADMIN_PAGES.find((entry) => entry.path === path);
     return !page?.adminOnly && !page?.devOnly;
   });
+}
+
+type AdminPermissionAccess = {
+  hasAccess: boolean;
+  allowedPaths: string[];
+};
+
+export function resolveAdminPermissionAccess(
+  role: string,
+  pathname: string,
+  permissions: AdminPermissionsDecodeResult,
+): AdminPermissionAccess {
+  if (role === "管理者") {
+    return {
+      hasAccess: true,
+      allowedPaths: ADMIN_PAGES
+        .filter((page) => !page.devOnly && !page.hidden)
+        .map((page) => page.path),
+    };
+  }
+
+  if (role !== "準管理者" || permissions.kind !== "valid") {
+    return { hasAccess: false, allowedPaths: [] };
+  }
+
+  const allowedPaths = Object.entries(permissions.pages)
+    .filter(([, roles]) => isRoleAllowed(roles, "準管理者"))
+    .map(([path]) => path);
+  const visibleAllowedPaths = filterSubAdminAllowedPaths(allowedPaths);
+
+  return {
+    hasAccess: canSubAdminUseRegisteredPage(pathname)
+      && visibleAllowedPaths.some((path) => matchesAdminPath(pathname, path)),
+    allowedPaths: visibleAllowedPaths,
+  };
 }
 
 export default function AdminAuthGuard({
@@ -184,12 +224,13 @@ export default function AdminAuthGuard({
       try {
         // 管理者 always has full access
         if (staffUser.role === "管理者") {
-          setHasAccess(true);
-          // Report all admin paths as allowed
-          const allPaths = ADMIN_PAGES
-            .filter((page) => !page.devOnly && !page.hidden)
-            .map((page) => page.path);
-          onPermissionsLoaded?.(allPaths);
+          const access = resolveAdminPermissionAccess(
+            staffUser.role,
+            pathname,
+            { kind: "missing" },
+          );
+          setHasAccess(access.hasAccess);
+          onPermissionsLoaded?.(access.allowedPaths);
           setPermChecked(true);
           return;
         }
@@ -197,24 +238,19 @@ export default function AdminAuthGuard({
         // 準管理者 → check Firestore permissions
         if (staffUser.role === "準管理者") {
           const permDoc = await getDoc(doc(db, "settings", "adminPermissions"));
-          if (permDoc.exists()) {
-            const pages = permDoc.data().pages as Record<string, string[]>;
-            const allowedPaths = Object.entries(pages)
-              .filter(([, roles]) => roles.includes("準管理者"))
-              .map(([path]) => path);
-            const visibleAllowedPaths = filterSubAdminAllowedPaths(allowedPaths);
-
-            onPermissionsLoaded?.(visibleAllowedPaths);
-
-            // Check if current pathname is allowed
-            const isAllowed = canSubAdminUseRegisteredPage(pathname)
-              && visibleAllowedPaths.some((p) => matchesAdminPath(pathname, p));
-            setHasAccess(isAllowed);
-          } else {
-            // No permissions doc → deny all by default
-            onPermissionsLoaded?.([]);
-            setHasAccess(false);
+          const decoded = decodeAdminPermissions(
+            permDoc.exists() ? permDoc.data() : undefined,
+          );
+          if (decoded.kind === "malformed") {
+            console.error("Malformed admin permissions:", decoded.reason);
           }
+          const access = resolveAdminPermissionAccess(
+            staffUser.role,
+            pathname,
+            decoded,
+          );
+          onPermissionsLoaded?.(access.allowedPaths);
+          setHasAccess(access.hasAccess);
           setPermChecked(true);
           return;
         }
