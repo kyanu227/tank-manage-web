@@ -9,8 +9,16 @@ import {
   logStaffOperationError,
 } from "@/lib/staff-operation-error";
 import { confirmPendingReturnRequests } from "@/lib/firebase/return-tag-processing-service";
-import { transactionsRepository } from "@/lib/firebase/repositories";
-import type { PendingReturn, ReturnConfirmationSelectionMap, ReturnGroup } from "../types";
+import {
+  transactionsRepository,
+  type TransactionDoc,
+} from "@/lib/firebase/repositories";
+import type {
+  PendingReturn,
+  ReturnConfirmationSelectionMap,
+  ReturnGroup,
+  TimestampLike,
+} from "../types";
 import { getStaffOperationText } from "../i18n";
 
 interface UseReturnTagProcessingParams {
@@ -48,7 +56,7 @@ export function useReturnTagProcessing({
     setPendingReturnTagsLoadFailed(false);
     try {
       const docs = await transactionsRepository.getPendingReturnTags();
-      const items = docs as unknown as PendingReturn[];
+      const items = docs.map(toPendingReturn);
       const groupMap = new Map<string, ReturnGroup>();
       items.forEach((item) => {
         if (!groupMap.has(item.customerId)) groupMap.set(item.customerId, { customerId: item.customerId, customerName: item.customerName, items: [] });
@@ -123,4 +131,41 @@ export function useReturnTagProcessing({
     openReturnTagGroup,
     confirmSelectedReturnRequests,
   };
+}
+
+function toPendingReturn(transaction: TransactionDoc): PendingReturn {
+  const condition = Reflect.get(transaction, "condition");
+  if (
+    typeof transaction.customerId !== "string"
+    || typeof transaction.customerName !== "string"
+    || typeof transaction.tankId !== "string"
+    || !isStoredReturnCondition(condition)
+  ) {
+    throw new Error(`Invalid pending return request: ${transaction.id}`);
+  }
+
+  return {
+    id: transaction.id,
+    customerId: transaction.customerId,
+    customerName: transaction.customerName,
+    tankId: transaction.tankId,
+    condition,
+    ...(Object.prototype.hasOwnProperty.call(transaction, "expectedLatestLogId")
+      ? { expectedLatestLogId: transaction.expectedLatestLogId }
+      : {}),
+    ...(isTimestampLike(transaction.createdAt)
+      ? { createdAt: transaction.createdAt }
+      : {}),
+  };
+}
+
+function isStoredReturnCondition(value: unknown): value is PendingReturn["condition"] {
+  return typeof value === "string";
+}
+
+function isTimestampLike(value: unknown): value is TimestampLike {
+  return typeof value === "object"
+    && value !== null
+    && "toMillis" in value
+    && typeof value.toMillis === "function";
 }

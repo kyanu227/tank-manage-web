@@ -37,6 +37,7 @@ export interface PendingReturn {
   customerName: string;
   tankId: string;
   condition: Condition;
+  expectedLatestLogId?: unknown;
   createdAt?: TimestampLike;
 }
 
