@@ -106,7 +106,7 @@
 |---|---|
 | R-02 portal自動返却判定のservice化 | 低優先。後続候補 |
 | R-09 staffByEmail mirror一本化 | 意味変更なしで可能か要確認。可能なら小PR化 |
-| R-10 alertMonths/validityYears二重保存 | schema/正本分離の別設計 |
+| R-10 alertMonths/validityYears二重保存 | **2026-08-02解消**。`settings/inspection`を正本化し、notify側の新規read/writeを停止。legacy fieldは無移行で保持 |
 | R-17 logNote一時state解消 | schema変更の別設計 |
 | R-23 uncharged_report handling fields | schema変更の別設計 |
 | R-25 provenance（source/workflow/returnCondition）caller coverage | 保存内容の追加=意味的変更。抽出完了後に独立PR系列として設計 |

@@ -1,14 +1,12 @@
 "use client";
 
-import { useEffect } from "react";
-import { useRouter } from "next/navigation";
+import AdminSettingsPageShell from "@/components/admin/AdminSettingsPageShell";
+import BusinessRulesSettings from "@/features/admin-settings/components/BusinessRulesSettings";
 
 export default function SettingsPage() {
-  const router = useRouter();
-
-  useEffect(() => {
-    router.replace("/admin/settings/portal");
-  }, [router]);
-
-  return null;
+  return (
+    <AdminSettingsPageShell activeTab="businessRules">
+      <BusinessRulesSettings />
+    </AdminSettingsPageShell>
+  );
 }

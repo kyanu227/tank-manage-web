@@ -4,6 +4,8 @@ import { resolveAdminLauncherLinks } from "@/components/admin/AdminSettingsLaunc
 import { getAdminReviewBadgeLabel } from "@/components/admin/AdminSidebarContent";
 import {
   ADMIN_CUSTOMER_TABS,
+  ADMIN_DEVELOPER_TABS,
+  ADMIN_SETTINGS_TABS,
   getVisibleAdminSectionTabs,
 } from "@/lib/admin/adminSectionTabs";
 
@@ -36,6 +38,25 @@ describe("Admin information architecture", () => {
     });
     expect(resolveAdminLauncherLinks(["developer.stateDiagram.view"], "管理者").developerHref)
       .toBe("/admin/state-diagram");
+  });
+
+  it("設定tabを業務ルール・通知・運用制御の順でcapability filterする", () => {
+    expect(getVisibleAdminSectionTabs(ADMIN_SETTINGS_TABS, [
+      "settings.operationMode.view",
+      "settings.businessRules.view",
+      "settings.notifications.view",
+    ]).map((tab) => tab.id)).toEqual(["businessRules", "notifications", "operationMode"]);
+    expect(getVisibleAdminSectionTabs(ADMIN_SETTINGS_TABS, ["settings.notifications.view"]).map((tab) => tab.id))
+      .toEqual(["notifications"]);
+  });
+
+  it("Security Rules tabは専用capabilityがなければ存在自体を隠す", () => {
+    expect(getVisibleAdminSectionTabs(ADMIN_DEVELOPER_TABS, ["developer.stateDiagram.view"]).map((tab) => tab.id))
+      .toEqual(["stateDiagram"]);
+    expect(getVisibleAdminSectionTabs(ADMIN_DEVELOPER_TABS, [
+      "developer.stateDiagram.view",
+      "developer.securityRules.view",
+    ]).map((tab) => tab.id)).toEqual(["stateDiagram", "securityRules"]);
   });
 
   it("レビューバッジは展開時に上限付き数値、縮小時にdot用空labelを返す", () => {

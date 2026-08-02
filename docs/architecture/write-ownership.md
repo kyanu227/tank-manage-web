@@ -65,7 +65,7 @@
 | settings/billingInvoice | `saveBillingInvoiceSettings`（billing-settings-service.ts:16-31） |
 | settings/tankOperationPolicy | `saveTankOperationPolicy`（tank-operation-policy-service.ts:50-115） |
 | settings/tankAggregationRevision | tank-operation.ts（:584-594, :974-986, :1082-1092）+ operation-review-service（:270-280） |
-| notifySettings/config | admin-notification-settings.ts:66-84。**R-10**: settings/inspection と alertMonths / validityYears を二重保存。owner一本化 or 正本分離が必要 — schema絡みのため別設計論点 |
+| notifySettings/config | `saveAdminNotificationSettings`（admin-notification-settings.ts）。新規writeは`emails`と`updatedAt`のみ。legacyの`alertMonths` / `validityYears`は読まず、merge保存でも触れない |
 | priceMaster / rankMaster | writeBatch一括保存（admin-money-settings.ts:65-139。caller: admin/money/page.tsx:104） |
 | orderMaster | writeBatch一括保存（order-master-settings.ts:26-74。caller: admin/order-master/page.tsx:80） |
 | lineConfigs | admin-notification-settings.ts:86-118 |
@@ -99,7 +99,7 @@ settings / master のwriteは関数単位にまとめる（AGENTS.md: 後から 
 
 | 論点 | 内容 |
 |---|---|
-| R-10 | alertMonths / validityYears の二重保存先の一本化 |
+| R-10 | **2026-08-02解消**。`settings/inspection`へ一本化。`notifySettings/config`のlegacy fieldはmigration・削除せずruntimeから無視 |
 | R-17 | `tanks.logNote` の一時tag state利用の解消（専用field等） |
 | R-23 | uncharged_report の handling fields 追加 |
 | R-26 | legacy actor文字列 approvedBy / fulfilledBy のwrite停止 |

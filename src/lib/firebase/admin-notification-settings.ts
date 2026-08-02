@@ -2,6 +2,7 @@ import { collection, doc, getDocs, serverTimestamp, writeBatch, type DocumentDat
 import { db } from "@/lib/firebase/config";
 import { assertNotChangedSinceLoad, createDocId, hasFieldChanges, isNewDocId } from "@/lib/firebase/diff-write";
 import {
+  buildAdminSystemNotificationSettingsWriteFields,
   normalizeAdminSystemNotificationSettings,
   type NormalizedAdminSystemNotificationSettings,
 } from "@/lib/firebase/admin-notification-settings-load-state";
@@ -21,8 +22,6 @@ export interface AdminLineConfig {
 
 export interface SaveAdminNotificationSettingsInput {
   emails: string[];
-  alertMonths: number;
-  validityYears: number;
   lineConfigs: AdminLineConfig[];
   dirtyLineConfigIds: string[];
   deletedLineConfigIds: string[];
@@ -65,8 +64,6 @@ async function loadAdminLineConfigs(): Promise<AdminLineConfig[]> {
 
 export async function saveAdminNotificationSettings({
   emails,
-  alertMonths,
-  validityYears,
   lineConfigs,
   dirtyLineConfigIds,
   deletedLineConfigIds,
@@ -77,9 +74,7 @@ export async function saveAdminNotificationSettings({
   const batch = writeBatch(db);
 
   batch.set(doc(db, "notifySettings", "config"), {
-    emails: emails.map((email) => email.trim()).filter(Boolean),
-    alertMonths,
-    validityYears,
+    ...buildAdminSystemNotificationSettingsWriteFields(emails),
     updatedAt: serverTimestamp(),
   }, { merge: true });
 

@@ -49,7 +49,10 @@ settings/adminPermissions
 
 現在の運用モードや耐圧検査値は業務上参照する意味があるため、view capabilityとmanage
 capabilityを分離し、必要に応じてread-only表示する。manage capabilityがあっても、既存Rulesが
-管理者限定にしているwriteを準管理者へ拡張しない。
+管理者限定にしているwriteを準管理者へ拡張しない。業務ルール、通知、運用制御のwriteは
+roleが`管理者`であることもUIで確認し、準管理者は常にread-onlyとする。
+
+設定のtab分類と正本は[Admin設定と正本](./admin-settings-source-of-truth.md)に従う。
 
 ## 5. Firebase影響
 

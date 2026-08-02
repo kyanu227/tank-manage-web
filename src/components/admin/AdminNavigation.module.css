@@ -434,6 +434,16 @@
   color: #0f172a;
 }
 
+.tabsEmpty {
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  border-radius: 12px;
+  color: #9a3412;
+  font-size: 13px;
+  margin-bottom: 20px;
+  padding: 16px;
+}
+
 @media (max-width: 1023px) {
   .desktopSidebar {
     display: none;

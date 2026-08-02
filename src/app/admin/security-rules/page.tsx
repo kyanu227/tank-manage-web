@@ -18,6 +18,7 @@ import {
   WORKFLOW_RULES_OVERVIEW,
   type RulesStatus,
 } from "@/lib/admin/securityRulesOverview";
+import AdminDeveloperPageShell from "@/components/admin/AdminDeveloperPageShell";
 
 const statusLabels: Record<RulesStatus, string> = {
   pass: "pass",
@@ -139,7 +140,7 @@ function HeaderCell({ children }: { children: React.ReactNode }) {
   );
 }
 
-export default function SecurityRulesOverviewPage() {
+function SecurityRulesOverviewContent() {
   return (
     <div style={{ padding: "24px 24px 40px", maxWidth: 1280, margin: "0 auto" }}>
       <div style={{ marginBottom: 24 }}>
@@ -387,5 +388,13 @@ export default function SecurityRulesOverviewPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function SecurityRulesOverviewPage() {
+  return (
+    <AdminDeveloperPageShell activeTab="securityRules">
+      <SecurityRulesOverviewContent />
+    </AdminDeveloperPageShell>
   );
 }

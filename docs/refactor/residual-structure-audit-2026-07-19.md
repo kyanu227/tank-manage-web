@@ -42,7 +42,7 @@
 | R-07 | refactor-roadmap.md:181-195; firestore-write-boundary-audit.md:129 | customerUsersとpending orderの複数collection連動 | resolved | src/lib/firebase/customer-linking-service.ts:73-147 | customerUsers更新とpending_link order更新を同serviceのbatchで実行。 |
 | R-08 | refactor-roadmap.md:197-202 | staff認証read時のstaffByEmail自動修復write | resolved | src/lib/firebase/staff-auth.ts:160-195; src/lib/firebase/staff-auth.ts:49-68 | findActiveStaffByEmailはread/fallbackのみ。mirror write helperは別入口。 |
 | R-09 | firestore-write-boundary-audit.md:47,168,222-224 | staffByEmail mirrorの複数経路管理 | unresolved | src/lib/firebase/staff-auth.ts:49-68; src/lib/firebase/staff-sync-service.ts:63-98; src/lib/firebase/staff-locale-service.ts:55-64 | staff保存同期とlocale更新からmirrorが書かれる。 |
-| R-10 | refactor-roadmap.md:204-210 | alertMonths / validityYearsの二重保存先 | unresolved | src/lib/firebase/admin-notification-settings.ts:66-84; src/lib/firebase/admin-settings.ts:85-94; src/app/admin/notifications/page.tsx:25-29,159-175; src/app/admin/settings/inspection/page.tsx:20-31,100-109 | notifySettings/configとsettings/inspectionに別々の編集・write経路がある。 |
+| R-10 | refactor-roadmap.md:204-210 | alertMonths / validityYearsの二重保存先 | resolved (2026-08-02) | `src/lib/inspection-settings.ts`; `src/lib/firebase/admin-settings.ts`; `src/lib/firebase/admin-notification-settings.ts` | `settings/inspection`を唯一の正本化。notify側は新規read/writeを停止し、legacy fieldは削除・migrationせず保持。 |
 | R-11 | firestore-write-boundary-audit.md:122-145; implementation-layer-architecture.md:97-100,223-250 | page/hookからFirestore write SDKを直接呼ぶ主要経路 | resolved | src/lib/firebase/portal-transaction-service.ts:42-163; src/lib/firebase/order-fulfillment-service.ts:14-70; src/lib/firebase/return-tag-processing-service.ts:69-208; src/lib/firebase/tank-tag-service.ts:5-17 | 指定主要page/hookの機械検索ではwrite SDK callなし。domain operation直呼出しの責務は別項目。 |
 | R-12 | page-feature-boundary-audit.md:228-230; firestore-write-boundary-audit.md:100,143-145; system-code-and-data-structure-audit.md:79-84 | 手動貸出・返却・充填hookのUI stateとworkflow混在 | unresolved | src/features/staff-operations/hooks/useManualTankOperation.ts:71-78,98-163,251-361 | state、入力、validation、identity/context、action/location/note、operation呼出しが同一hook。実writeのみ共通処理へ委譲。 |
 | R-13 | page-feature-boundary-audit.md:232-237; staff-operation-service-boundary-design.md:28-45,121-190 | order承認・貸出完了のhook/service境界 | partial | src/features/staff-operations/hooks/useOrderFulfillment.ts:100-117,128-187,219-257; src/lib/firebase/order-fulfillment-service.ts:14-70 | writeとtransaction完了のatomicityはservice。顧客・数量・種別validationはhook内。 |
@@ -186,7 +186,7 @@ src/features配下のimport specifierをalias（@/features/...）とrelative pat
 
 - 主要page/hookからのFirestore write SDK直接呼出しは解消済みだが、domain operationのworkflow構築がpage/hookに残る経路がある（R-11〜R-21）。
 - staffByEmail mirrorにはstaff保存とlocale更新のwrite経路がある（R-09）。
-- notifySettings/configとsettings/inspectionにalertMonths / validityYearsの別write経路がある（R-10）。
+- ~~notifySettings/configとsettings/inspectionにalertMonths / validityYearsの別write経路がある（R-10）。~~ 2026-08-02解消。正本は`settings/inspection`のみ。
 - approvedBy / fulfilledByのlegacy actor fieldがtyped fieldと併記される（R-26）。
 - settings/master writeにedit_history / delete_historyを作るruntime writerはない（R-39）。
 
@@ -209,6 +209,6 @@ docs PR #142 のread-onlyレビューで、§4「collection別write経路一覧�
 | lineConfigs | src/lib/firebase/admin-notification-settings.ts:86-118 |
 | staffJoinRequests | 本人作成・更新: src/lib/firebase/staff-join-requests.ts:132-180 / 承認・却下: src/lib/firebase/staff-join-request-review-service.ts:64-168 |
 | operationReviewEvents | src/lib/firebase/operation-review-service.ts:187,296-310 |
-| notifySettings/config | src/lib/firebase/admin-notification-settings.ts:79-84（§4に行が無かったため補記。二重保存の論点はR-10） |
+| notifySettings/config | `saveAdminNotificationSettings`。2026-08-02以降は`emails`と`updatedAt`のみwrite。R-10は解消済み |
 
 軽微訂正: §3.1の「実transactionは src/lib/tank-operation.ts:384-403,435-675」について、runTransaction開始行は :413-418。

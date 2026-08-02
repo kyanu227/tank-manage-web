@@ -72,7 +72,7 @@ page.tsx
 | 6 | [src/features/staff-operations/hooks/useReturnTagProcessing.ts](../../src/features/staff-operations/hooks/useReturnTagProcessing.ts) `72-143` | 返却タグ処理の「直前再 read → bulk write → transaction batch」シーケンスが hook | 順序が壊れると幽霊 tank が生まれる可能性 |
 | 7 | [src/app/staff/inhouse/page.tsx](../../src/app/staff/inhouse/page.tsx) `68-86` ／ [src/features/staff-operations/hooks/useBulkReturnByLocation.ts](../../src/features/staff-operations/hooks/useBulkReturnByLocation.ts) `65-81` | `tanks.logNote` を `writeBatch().update()` で **直接書き換え**。`tank-operation.ts` を経由しない逃げ道 | tag 付け以外のフィールドに誰かが拡張すると、状態遷移を伴わない更新で `latestLogId` がずれる |
 | 8 | [src/lib/firebase/staff-auth.ts](../../src/lib/firebase/staff-auth.ts) `110-155` | read-only と称する `findActiveStaffByEmail` が **mirror が無いと書き込みする**。失敗は `console.warn` で握りつぶし | mirror が壊れた状態で読み取り経路から書き戻され、根本原因が隠れる |
-| 9 | [src/app/admin/notifications/page.tsx](../../src/app/admin/notifications/page.tsx) ／ [src/app/admin/settings/page.tsx](../../src/app/admin/settings/page.tsx) | `alertMonths` / `validityYears` を **2 箇所** (`notifySettings/config` と `settings/inspection`) に書き、read 側 (`useInspectionSettings`) は片方しか見ない | 管理画面で設定したつもりが反映されない |
+| 9 | [src/app/admin/notifications/page.tsx](../../src/app/admin/notifications/page.tsx) ／ [src/app/admin/settings/page.tsx](../../src/app/admin/settings/page.tsx) | **2026-08-02解消**。`settings/inspection`を唯一の正本とし、notify側の新規read/writeを停止 | legacy fieldは無移行で保持 |
 | 10 | [src/app/staff/inspection/page.tsx](../../src/app/staff/inspection/page.tsx) `101-126` | 「次回耐圧期限 = 今日 + N 年」を page で組み立てて `tankExtra` 注入。inspection 業務不変条件が page に漏れている | 期限算出ロジックが管理画面の閾値設定と分かれて存在し、両方を同期し損ねる |
 
 ---
@@ -203,13 +203,13 @@ page.tsx
   - mirror 不整合の修復は `staffSyncService` または明示 rebuild API に限定
 - 触らない: Google/メール認証フロー、`findStaffProfileByEmailReadOnly`
 
-#### PR 12. `notifySettings` ↔ `settings/inspection` の責務統合
+#### PR 12. `notifySettings` ↔ `settings/inspection` の責務統合（2026-08-02完了）
 
 - 内容:
-  - 「`alertMonths` / `validityYears` の正本は `settings/inspection`」と決め、`notifySettings/config` 側からは削除
+  - 「`alertMonths` / `validityYears` の正本は `settings/inspection`」と決め、`notifySettings/config` 側のruntime read/writeからは除外
   - `admin-notification-settings.ts` から `alertMonths` / `validityYears` を外す
   - 通知 page の UI も「閾値は耐圧検査タブで設定してください」に変更
-- 注意: schema 削除を伴うので read / write 両方を確認した上で実施
+- 注意: productionのlegacy fieldは削除・migrationせず、merge保存でも上書きしない
 
 ---
 
