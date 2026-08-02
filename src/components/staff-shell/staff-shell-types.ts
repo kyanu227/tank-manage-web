@@ -47,8 +47,6 @@ export interface StaffHeaderProps {
   readonly menuOpen: boolean;
   /** aria-controls が指す menu sheet の id */
   readonly menuId: string;
-  /** scroll 中は fade を濃くする。静止時は薄いまま */
-  readonly scrolled: boolean;
   readonly pendingOrderCount: number | null;
   /** 手動／受注の切替を出す画面でのみ渡す（現行は貸出画面のみ） */
   readonly opStyle?: "manual" | "order";

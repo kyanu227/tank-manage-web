@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useMemo, useRef } from "react";
 import { CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
 import { type ReturnTag, RETURN_TAG } from "@/lib/tank-rules";
 import { coerceTankStatusCode } from "@/lib/tank-action-status-codes";
@@ -48,16 +48,8 @@ export default function InHousePage() {
   const [reportResult, setReportResult] = useState<{ success: boolean; message: string } | null>(null);
   const [returning, setReturning] = useState(false);
 
-  // DrumRoll 操作中にページ全体へスクロールが逃げないよう、操作画面中だけロックする。
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-      document.documentElement.style.overflow = "";
-    };
-  }, []);
+  // ページスクロールの禁止は staff shell の viewport policy が持つ
+  // （lib/staff-viewport-policy）。ここでは何もしない。
 
   // 自社利用中タンク（tagOverrides を反映）
   const inHouseTanks = useMemo(() => {

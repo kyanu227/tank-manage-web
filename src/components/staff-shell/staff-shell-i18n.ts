@@ -13,6 +13,7 @@ export const STAFF_SHELL_TEXT = {
   switchToOrder: { ja: "受注モードへ切り替え", en: "Switch to order mode" },
   switchToManual: { ja: "手動モードへ戻る", en: "Back to manual mode" },
   pendingOrders: { ja: "受注", en: "Orders" },
+  pendingOrdersTitle: { ja: "未処理の受注があります", en: "Customer orders are waiting" },
   manual: { ja: "手動", en: "Manual" },
   displayLanguage: { ja: "表示言語", en: "Display language" },
   localeSaving: { ja: "保存中…", en: "Saving…" },

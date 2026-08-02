@@ -13,6 +13,17 @@ export const STAFF_I18N_SOURCE_ROOTS = [
 ] as const;
 
 export const STAFF_I18N_SHARED_FILES = [
+  "src/components/staff-shell/StaffHeader.tsx",
+  "src/components/staff-shell/StaffLocaleSelect.tsx",
+  "src/components/staff-shell/StaffMenuAccount.tsx",
+  "src/components/staff-shell/StaffMenuNav.tsx",
+  "src/components/staff-shell/StaffMenuPrimaryActions.tsx",
+  "src/components/staff-shell/StaffMenuSheet.tsx",
+  "src/components/staff-shell/StaffPolicyBanner.tsx",
+  "src/components/staff-shell/StaffShell.tsx",
+  "src/components/staff-shell/staff-nav-items.ts",
+  "src/components/staff-shell/staff-shell-i18n.ts",
+  "src/components/staff-shell/useStaffLocaleSetting.ts",
   "src/components/DrumRoll.tsx",
   "src/components/MaintenanceTabs.tsx",
   "src/components/PrefixNumberPicker.tsx",
