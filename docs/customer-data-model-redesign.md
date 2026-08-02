@@ -1,5 +1,7 @@
 # customers / customerId 整理 指針
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](architecture/README.md)。内容は当時の記録として残す。
+
 `customers` / `customerUsers` / `transactions.customerId` / `tanks.location` / `logs.location` が並立している現状を整理し、貸出先・請求単位の正本を `customers` に一本化するための作業指針。
 
 2026-04-29 時点で、Firestore の `destinations` コレクションはコード上の参照・書き込み・管理 UI を削除済み。過去互換は考慮しない方針に切り替えた。Firestore 上に残る既存 `destinations` データの削除は、コード変更とは別作業として扱う。

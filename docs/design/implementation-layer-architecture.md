@@ -1,5 +1,7 @@
 # Implementation Layer Architecture
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 作成日: 2026-05-12
 
 対象 commit: `7e59ad3f47a08f7581be5efb0e20b31d37b8fba6`

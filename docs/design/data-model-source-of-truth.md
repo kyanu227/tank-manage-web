@@ -1,5 +1,7 @@
 # Data Model Source of Truth
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 ## Purpose
 
 この文書は、タンク管理 Web アプリの主要 collection と field について、何を source of truth とし、何を snapshot / projection / audit record / derived data として扱うかを整理する設計メモである。

@@ -1,5 +1,8 @@
 # 構造化リファクタのPR順序
 
+> **[SUPERSEDED 2026-08-02]** PR順序としては historical（PR-01〜12 は全て完了）。後継は [clean-break-cutover-plan.md](./clean-break-cutover-plan.md)。
+> **ただし §2 の検証プロトコル（挙動不変条件・payload固定テスト・L0/L2 検証levelとユーザー承認）は現在も有効**であり、cutover plan §8 が継承している。
+
 - 作成日: 2026-07-19
 - 対象commit: 7a118a4c1bce2b12bd272a6de8a69291e9d8d2ef（main HEAD）
 - 入力: [residual-structure-audit-2026-07-19.md](../refactor/residual-structure-audit-2026-07-19.md)、[feature-boundaries.md](./feature-boundaries.md)、[write-ownership.md](./write-ownership.md)
