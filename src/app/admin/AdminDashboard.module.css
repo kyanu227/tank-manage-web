@@ -1,0 +1,175 @@
+.dashboard {
+  margin: 0 auto;
+  max-width: 1180px;
+}
+
+.pageHeader {
+  margin-bottom: 26px;
+}
+
+.pageHeader h1 {
+  color: #0f172a;
+  font-size: 25px;
+  font-weight: 850;
+  letter-spacing: -.025em;
+  margin: 0;
+}
+
+.pageHeader p,
+.sectionHeader p {
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 5px 0 0;
+}
+
+.section {
+  margin-top: 30px;
+}
+
+.sectionHeader {
+  margin-bottom: 12px;
+}
+
+.sectionHeader h2 {
+  color: #1e293b;
+  font-size: 15px;
+  font-weight: 850;
+  letter-spacing: -.01em;
+  margin: 0;
+}
+
+.cardGrid,
+.cardGridThree,
+.analysisGrid {
+  display: grid;
+  gap: 12px;
+}
+
+.cardGrid,
+.analysisGrid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.cardGridThree {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.metricCard {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  color: #334155;
+  display: flex;
+  gap: 13px;
+  min-height: 92px;
+  padding: 17px;
+  text-decoration: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, transform 140ms ease;
+}
+
+.metricCard:hover {
+  border-color: #cbd5e1;
+  box-shadow: 0 6px 18px rgba(15, 23, 42, .07);
+  transform: translateY(-1px);
+}
+
+.metricCard:focus-visible,
+.modeWarning:focus-visible {
+  outline: 3px solid rgba(79, 70, 229, .28);
+  outline-offset: 2px;
+}
+
+.metricIcon {
+  align-items: center;
+  background: #f1f5f9;
+  border-radius: 11px;
+  color: #475569;
+  display: flex;
+  flex: 0 0 auto;
+  height: 42px;
+  justify-content: center;
+  width: 42px;
+}
+
+.tone_warning .metricIcon {
+  background: #fffbeb;
+  color: #b45309;
+}
+
+.tone_danger .metricIcon {
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+.metricBody {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.metricLabel {
+  color: #64748b;
+  font-size: 12px;
+  font-weight: 750;
+}
+
+.metricValue {
+  color: #0f172a;
+  font-size: 26px;
+  line-height: 1.05;
+}
+
+.metricValue small {
+  color: #64748b;
+  font-size: 11px;
+  margin-left: 4px;
+}
+
+.metricArrow {
+  color: #94a3b8;
+  flex: 0 0 auto;
+}
+
+.modeWarning {
+  align-items: center;
+  background: #fff7ed;
+  border: 1px solid #fdba74;
+  border-radius: 12px;
+  color: #9a3412;
+  display: flex;
+  font-size: 13px;
+  gap: 10px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  text-decoration: none;
+}
+
+.modeWarning span {
+  flex: 1;
+}
+
+@media (max-width: 760px) {
+  .cardGrid,
+  .cardGridThree,
+  .analysisGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .pageHeader h1 {
+    font-size: 22px;
+  }
+
+  .section {
+    margin-top: 25px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .metricCard {
+    transition: none;
+  }
+}

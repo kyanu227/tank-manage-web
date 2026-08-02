@@ -12,10 +12,20 @@ import {
   getAdminPermissions,
   saveAdminPermissions,
 } from "@/lib/firebase/admin-permissions-service";
+import AdminStaffTabs from "@/components/admin/AdminStaffTabs";
 
 const ROLES = ["管理者", "準管理者"] as const;
 
 export default function PermissionsPage() {
+  return (
+    <>
+      <AdminStaffTabs activeTab="permissions" />
+      <PermissionsContent />
+    </>
+  );
+}
+
+function PermissionsContent() {
   const { can, role: actorRole } = useAdminCapabilities();
   const canManage = can("staffPermissions.manage");
   const [permissions, setPermissions] = useState<AdminCapabilityGrants>({});

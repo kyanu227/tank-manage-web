@@ -20,6 +20,8 @@ import {
   rejectStaffJoinRequest,
 } from "@/lib/firebase/staff-join-request-review-service";
 import { useStaffIdentity } from "@/hooks/useStaffSession";
+import AdminStaffTabs from "@/components/admin/AdminStaffTabs";
+import { useAdminCapabilities } from "@/hooks/useAdminCapabilities";
 
 const ROLES = ["一般", "準管理者", "管理者"] as const;
 const RANKS = ["レギュラー", "ブロンズ", "シルバー", "ゴールド", "プラチナ"] as const;
@@ -54,6 +56,17 @@ const btnOutline: React.CSSProperties = {
 };
 
 export default function AdminStaffPage() {
+  return (
+    <>
+      <AdminStaffTabs activeTab="members" />
+      <AdminStaffContent />
+    </>
+  );
+}
+
+function AdminStaffContent() {
+  const { can } = useAdminCapabilities();
+  const canManage = can("staff.manage");
   const staffIdentity = useStaffIdentity();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -117,6 +130,7 @@ export default function AdminStaffPage() {
   }, []);
 
   const approveJoinRequest = useCallback(async (uid: string, staffId: string) => {
+    if (!canManage) return;
     if (!staffJoinRequestsEnabled) return;
     if (!joinRequestReviewer) {
       setJoinRequestActionError("管理者セッションを取得できません。再ログインしてください。");
@@ -144,9 +158,10 @@ export default function AdminStaffPage() {
     } finally {
       setJoinRequestActionLoadingUid(null);
     }
-  }, [dirtyStaffIds.length, fetchJoinRequests, fetchStaff, joinRequestReviewer]);
+  }, [canManage, dirtyStaffIds.length, fetchJoinRequests, fetchStaff, joinRequestReviewer]);
 
   const rejectJoinRequest = useCallback(async (uid: string, rejectionReason?: string) => {
+    if (!canManage) return;
     if (!staffJoinRequestsEnabled) return;
     if (!joinRequestReviewer) {
       setJoinRequestActionError("管理者セッションを取得できません。再ログインしてください。");
@@ -169,12 +184,13 @@ export default function AdminStaffPage() {
     } finally {
       setJoinRequestActionLoadingUid(null);
     }
-  }, [fetchJoinRequests, joinRequestReviewer]);
+  }, [canManage, fetchJoinRequests, joinRequestReviewer]);
 
   useEffect(() => { fetchStaff(); }, [fetchStaff]);
   useEffect(() => { fetchJoinRequests(); }, [fetchJoinRequests]);
 
   const addStaff = () => {
+    if (!canManage) return;
     const id = `new_${Date.now()}`;
     setStaffList((prev) => [
       ...prev,
@@ -187,7 +203,12 @@ export default function AdminStaffPage() {
     setDirtyStaffIds((prev) => prev.includes(id) ? prev : [...prev, id]);
   };
 
-  const updateStaff = (id: string, field: keyof StaffMember, value: any) => {
+  const updateStaff = (
+    id: string,
+    field: keyof StaffMember,
+    value: StaffMember[keyof StaffMember],
+  ) => {
+    if (!canManage) return;
     setDirtyStaffIds((prev) => prev.includes(id) ? prev : [...prev, id]);
     setStaffList((prev) => prev.map((s) => (s.id === id ? { ...s, [field]: value } : s)));
   };
@@ -195,12 +216,14 @@ export default function AdminStaffPage() {
   const togglePasscode = (id: string) => {
     setShowPasscodes((prev) => {
       const next = new Set(prev);
-      next.has(id) ? next.delete(id) : next.add(id);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
       return next;
     });
   };
 
   const saveStaff = async () => {
+    if (!canManage) return;
     if (!confirm("担当者リストを保存しますか？")) return;
     setSaving(true);
     try {
@@ -208,8 +231,8 @@ export default function AdminStaffPage() {
       await fetchStaff();
       setDirtyStaffIds([]);
       alert("担当者リストを保存しました。");
-    } catch (e: any) {
-      alert("保存エラー: " + e.message);
+    } catch (e: unknown) {
+      alert("保存エラー: " + (e instanceof Error ? e.message : String(e)));
     } finally {
       setSaving(false);
     }
@@ -227,7 +250,7 @@ export default function AdminStaffPage() {
 
   return (
     <div>
-      {staffJoinRequestsEnabled && (
+      {staffJoinRequestsEnabled && canManage && (
         <StaffJoinRequestsPanel
           requests={joinRequests}
           loading={joinRequestsLoading}
@@ -246,10 +269,16 @@ export default function AdminStaffPage() {
         <p style={{ fontSize: 12, color: "#94a3b8", fontWeight: 500 }}>
           ※「停止」にするとログイン不可になります
         </p>
-        <button onClick={addStaff} style={btnOutline}>
+        {canManage && <button onClick={addStaff} style={btnOutline}>
           <Plus size={14} /> 追加
-        </button>
+        </button>}
       </div>
+
+      {!canManage && (
+        <div style={{ marginBottom: 16, padding: "10px 12px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 12 }}>
+          閲覧権限で表示しています。担当者の追加・変更は管理権限を持つ利用者だけが行えます。
+        </div>
+      )}
 
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 700 }}>
@@ -285,7 +314,7 @@ export default function AdminStaffPage() {
                       style={{ ...inputStyle, fontWeight: 700 }}
                       value={s.name}
                       placeholder="名前"
-                      disabled={!s.isActive}
+                      disabled={!canManage || !s.isActive}
                       onChange={(e) => updateStaff(s.id, "name", e.target.value)}
                     />
                   </td>
@@ -294,7 +323,7 @@ export default function AdminStaffPage() {
                       style={{ ...inputStyle, fontFamily: "monospace", fontSize: 12 }}
                       value={s.email}
                       placeholder="email@example.com"
-                      disabled={!s.isActive}
+                      disabled={!canManage || !s.isActive}
                       onChange={(e) => updateStaff(s.id, "email", e.target.value)}
                     />
                   </td>
@@ -306,7 +335,7 @@ export default function AdminStaffPage() {
                         value={s.passcode}
                         placeholder="Pass"
                         maxLength={6}
-                        disabled={!s.isActive}
+                        disabled={!canManage || !s.isActive}
                         onChange={(e) => updateStaff(s.id, "passcode", e.target.value)}
                       />
                       <button
@@ -326,7 +355,7 @@ export default function AdminStaffPage() {
                     <select
                       style={selectStyle}
                       value={s.role}
-                      disabled={!s.isActive}
+                      disabled={!canManage || !s.isActive}
                       onChange={(e) => updateStaff(s.id, "role", e.target.value)}
                     >
                       {ROLES.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -336,7 +365,7 @@ export default function AdminStaffPage() {
                     <select
                       style={selectStyle}
                       value={s.rank}
-                      disabled={!s.isActive}
+                      disabled={!canManage || !s.isActive}
                       onChange={(e) => updateStaff(s.id, "rank", e.target.value)}
                     >
                       {RANKS.map((r) => <option key={r} value={r}>{r}</option>)}
@@ -344,6 +373,7 @@ export default function AdminStaffPage() {
                   </td>
                   <td style={{ padding: "10px 12px", textAlign: "center" }}>
                     <button
+                      disabled={!canManage}
                       onClick={() => updateStaff(s.id, "isActive", !s.isActive)}
                       style={{
                         border: "none", background: "none",
@@ -362,12 +392,12 @@ export default function AdminStaffPage() {
         </table>
       </div>
 
-      <div style={{ marginTop: 20 }}>
+      {canManage && <div style={{ marginTop: 20 }}>
         <button onClick={saveStaff} disabled={saving} style={btnPrimary}>
           <Save size={16} />
           {saving ? "保存中…" : "担当者リストを保存"}
         </button>
-      </div>
+      </div>}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

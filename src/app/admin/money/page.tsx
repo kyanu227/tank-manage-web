@@ -7,11 +7,24 @@ import {
   loadAdminMoneySettings,
   saveAdminMoneySettings,
 } from "@/lib/firebase/admin-money-settings";
+import AdminStaffTabs from "@/components/admin/AdminStaffTabs";
+import { useAdminCapabilities } from "@/hooks/useAdminCapabilities";
 
 interface PriceRow { uid: string; action: string; base: number | string; score: number | string; }
 interface RankRow { uid: string; name: string; minScore: number | string; }
 
 export default function MoneySettingsPage() {
+  return (
+    <>
+      <AdminStaffTabs activeTab="compensation" />
+      <MoneySettingsContent />
+    </>
+  );
+}
+
+function MoneySettingsContent() {
+  const { can } = useAdminCapabilities();
+  const canManage = can("staffCompensation.manage");
   const [prices, setPrices] = useState<PriceRow[]>([]);
   const [ranks, setRanks] = useState<RankRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -67,12 +80,17 @@ export default function MoneySettingsPage() {
     void fetchSettings();
   }, [fetchSettings]);
 
-  const addPrice = () => setPrices((p) => [...p, { uid: `new_${Date.now()}`, action: "", base: 0, score: 0 }]);
+  const addPrice = () => {
+    if (!canManage) return;
+    setPrices((p) => [...p, { uid: `new_${Date.now()}`, action: "", base: 0, score: 0 }]);
+  };
   const updatePrice = (uid: string, f: keyof Omit<PriceRow, "uid">, v: string | number) => {
+    if (!canManage) return;
     setDirtyPriceIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
     setPrices((p) => p.map((r) => r.uid === uid ? { ...r, [f]: v } : r));
   };
   const removePrice = (uid: string) => {
+    if (!canManage) return;
     if (!isNewDocId(uid)) {
       setDeletedPriceIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
     }
@@ -80,12 +98,17 @@ export default function MoneySettingsPage() {
     setPrices((p) => p.filter((r) => r.uid !== uid));
   };
 
-  const addRank = () => setRanks((r) => [...r, { uid: `new_${Date.now()}`, name: "", minScore: 0 }]);
+  const addRank = () => {
+    if (!canManage) return;
+    setRanks((r) => [...r, { uid: `new_${Date.now()}`, name: "", minScore: 0 }]);
+  };
   const updateRank = (uid: string, f: keyof Omit<RankRow, "uid">, v: string | number) => {
+    if (!canManage) return;
     setDirtyRankIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
     setRanks((r) => r.map((rr) => rr.uid === uid ? { ...rr, [f]: v } : rr));
   };
   const removeRank = (uid: string) => {
+    if (!canManage) return;
     if (!isNewDocId(uid)) {
       setDeletedRankIds((prev) => prev.includes(uid) ? prev : [...prev, uid]);
     }
@@ -94,6 +117,7 @@ export default function MoneySettingsPage() {
   };
 
   const handleSave = async () => {
+    if (!canManage) return;
     if (!pricesLoaded || !ranksLoaded) {
       alert("未取得の設定があるため保存できません。再読み込みしてください。");
       return;
@@ -128,6 +152,11 @@ export default function MoneySettingsPage() {
 
   return (
     <div>
+      {!canManage && (
+        <div style={{ marginBottom: 16, padding: "10px 12px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 12 }}>
+          閲覧権限で表示しています。操作単価とランク条件の変更は管理権限を持つ利用者だけが行えます。
+        </div>
+      )}
       <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em", marginBottom: 4 }}>金銭・ランク設定</h1>
       <p style={{ fontSize: 14, color: "#94a3b8", marginBottom: 24 }}>操作単価とランク条件の管理</p>
 
@@ -148,9 +177,9 @@ export default function MoneySettingsPage() {
           <h2 style={{ fontSize: 14, fontWeight: 700, color: "#334155", display: "flex", alignItems: "center", gap: 8 }}>
             <Wallet size={16} color="#6366f1" /> 単価マスタ
           </h2>
-          <button onClick={addPrice} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          {canManage && <button onClick={addPrice} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
             <Plus size={14} /> 追加
-          </button>
+          </button>}
         </div>
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 400 }}>
@@ -164,10 +193,10 @@ export default function MoneySettingsPage() {
             <tbody>
               {prices.map((p) => (
                 <tr key={p.uid} style={{ borderBottom: "1px solid #f1f5f9" }}>
-                  <td style={{ padding: "8px 10px" }}><input value={p.action} onChange={(e) => updatePrice(p.uid, "action", e.target.value)} placeholder="例: 貸出" style={{ ...inputStyle, fontWeight: 700 }} /></td>
-                  <td style={{ padding: "8px 10px" }}><input type="number" value={p.base} onChange={(e) => updatePrice(p.uid, "base", e.target.value)} style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace" }} /></td>
-                  <td style={{ padding: "8px 10px" }}><input type="number" value={p.score} onChange={(e) => updatePrice(p.uid, "score", e.target.value)} style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace" }} /></td>
-                  <td style={{ padding: "8px 10px", textAlign: "center" }}><button onClick={() => removePrice(p.uid)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ef4444" }}><Trash2 size={16} /></button></td>
+                  <td style={{ padding: "8px 10px" }}><input disabled={!canManage} value={p.action} onChange={(e) => updatePrice(p.uid, "action", e.target.value)} placeholder="例: 貸出" style={{ ...inputStyle, fontWeight: 700 }} /></td>
+                  <td style={{ padding: "8px 10px" }}><input disabled={!canManage} type="number" value={p.base} onChange={(e) => updatePrice(p.uid, "base", e.target.value)} style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace" }} /></td>
+                  <td style={{ padding: "8px 10px" }}><input disabled={!canManage} type="number" value={p.score} onChange={(e) => updatePrice(p.uid, "score", e.target.value)} style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace" }} /></td>
+                  <td style={{ padding: "8px 10px", textAlign: "center" }}>{canManage && <button onClick={() => removePrice(p.uid)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ef4444" }}><Trash2 size={16} /></button>}</td>
                 </tr>
               ))}
             </tbody>
@@ -179,26 +208,26 @@ export default function MoneySettingsPage() {
       <div style={{ background: "#fff", border: "1px solid #e8eaed", borderRadius: 16, padding: 24, marginBottom: 24 }}>
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
           <h2 style={{ fontSize: 14, fontWeight: 700, color: "#334155", display: "flex", alignItems: "center", gap: 8 }}>🏅 ランク条件</h2>
-          <button onClick={addRank} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
+          {canManage && <button onClick={addRank} style={{ display: "flex", alignItems: "center", gap: 4, padding: "6px 12px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", color: "#64748b", fontSize: 12, fontWeight: 600, cursor: "pointer" }}>
             <Plus size={14} /> 追加
-          </button>
+          </button>}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {ranks.map((r) => (
             <div key={r.uid} style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input value={r.name} onChange={(e) => updateRank(r.uid, "name", e.target.value)} placeholder="ランク名" style={{ ...inputStyle, fontWeight: 700, flex: 1 }} />
-              <input type="number" value={r.minScore} onChange={(e) => updateRank(r.uid, "minScore", e.target.value)} placeholder="必要スコア" style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace", width: 120 }} />
-              <button onClick={() => removeRank(r.uid)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ef4444" }}><Trash2 size={16} /></button>
+              <input disabled={!canManage} value={r.name} onChange={(e) => updateRank(r.uid, "name", e.target.value)} placeholder="ランク名" style={{ ...inputStyle, fontWeight: 700, flex: 1 }} />
+              <input disabled={!canManage} type="number" value={r.minScore} onChange={(e) => updateRank(r.uid, "minScore", e.target.value)} placeholder="必要スコア" style={{ ...inputStyle, textAlign: "right", fontFamily: "monospace", width: 120 }} />
+              {canManage && <button onClick={() => removeRank(r.uid)} style={{ border: "none", background: "none", cursor: "pointer", color: "#ef4444" }}><Trash2 size={16} /></button>}
             </div>
           ))}
         </div>
       </div>
 
-      <button onClick={handleSave} disabled={saving || !canSave}
+      {canManage && <button onClick={handleSave} disabled={saving || !canSave}
         style={{ display: "inline-flex", alignItems: "center", gap: 8, padding: "12px 24px", borderRadius: 12, border: "none", background: "#6366f1", color: "#fff", fontSize: 14, fontWeight: 700, cursor: canSave ? "pointer" : "not-allowed", opacity: saving || !canSave ? 0.7 : 1 }}>
         {saving ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Save size={16} />}
         {saving ? "保存中…" : "金銭・ランク設定を保存"}
-      </button>
+      </button>}
       <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
     </div>
   );
