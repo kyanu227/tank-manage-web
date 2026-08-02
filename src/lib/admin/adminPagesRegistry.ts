@@ -5,11 +5,13 @@ import {
   ClipboardCheck,
   FileText,
   LayoutDashboard,
+  Medal,
   Package,
   Settings,
   Shield,
   ShieldCheck,
   Users,
+  UserRoundCog,
   Wallet,
   Workflow,
   type LucideIcon,
@@ -38,6 +40,10 @@ export type AdminPageDef = {
   href: string;
   activeMatch: AdminPageActiveMatch;
   capability: AdminCapability;
+  /** 関連画面のcapabilityだけを持つ場合も、統合ナビを表示する。 */
+  alternateCapabilities?: readonly AdminCapability[];
+  /** 統合画面内の別routeを現在地として扱う。 */
+  relatedPageIds?: readonly string[];
   visibility: AdminPageVisibility;
   sidebar: boolean;
   adminOnly?: boolean;
@@ -60,10 +66,10 @@ export const ADMIN_PAGES: readonly AdminPageDef[] = [
   { id: "reviews", label: "レビュー", icon: ClipboardCheck, group: "response", order: 10, href: "/admin/operation-reviews", activeMatch: "prefix", capability: "reviews.view", visibility: "navigation", sidebar: true, adminOnly: true, badge: "operation-reviews" },
   { id: "billing", label: "請求", icon: FileText, group: "response", order: 20, href: "/admin/billing", activeMatch: "prefix", capability: "billing.view", visibility: "navigation", sidebar: true },
   { id: "sales", label: "売上", icon: BarChart3, group: "analysis", order: 10, href: "/admin/sales", activeMatch: "prefix", capability: "analytics.sales.view", visibility: "navigation", sidebar: true },
-  { id: "staff-analytics", label: "スタッフ実績", icon: Users, group: "analysis", order: 20, href: "/admin/staff-analytics", activeMatch: "prefix", capability: "analytics.staff.view", visibility: "navigation", sidebar: true },
-  { id: "customers", label: "取引先", icon: Building2, group: "management", order: 10, href: "/admin/customers", activeMatch: "prefix", capability: "customers.view", visibility: "navigation", sidebar: true },
+  { id: "staff-analytics", label: "スタッフ実績", icon: Medal, group: "analysis", order: 20, href: "/admin/staff-analytics", activeMatch: "prefix", capability: "analytics.staff.view", visibility: "navigation", sidebar: true },
+  { id: "customers", label: "取引先", icon: Building2, group: "management", order: 10, href: "/admin/customers", activeMatch: "prefix", capability: "customers.view", alternateCapabilities: ["customerPortalUsers.view"], relatedPageIds: ["customer-portal-users"], visibility: "navigation", sidebar: true },
   { id: "customer-portal-users", label: "ポータル利用者", icon: Users, group: "management", order: 11, href: "/admin/customers/users", activeMatch: "prefix", capability: "customerPortalUsers.view", visibility: "internal", sidebar: false },
-  { id: "staff", label: "スタッフ", icon: Users, group: "management", order: 20, href: "/admin/staff", activeMatch: "prefix", capability: "staff.view", visibility: "navigation", sidebar: true },
+  { id: "staff", label: "スタッフ", icon: UserRoundCog, group: "management", order: 20, href: "/admin/staff", activeMatch: "prefix", capability: "staff.view", alternateCapabilities: ["staffPermissions.view", "staffCompensation.view"], relatedPageIds: ["staff-permissions", "staff-compensation"], visibility: "navigation", sidebar: true },
   { id: "staff-permissions", label: "権限", icon: Shield, group: "management", order: 21, href: "/admin/permissions", activeMatch: "prefix", capability: "staffPermissions.view", visibility: "confidential", sidebar: false },
   { id: "staff-compensation", label: "報酬・ランク", icon: Wallet, group: "management", order: 22, href: "/admin/money", activeMatch: "prefix", capability: "staffCompensation.view", visibility: "internal", sidebar: false },
   { id: "order-master", label: "発注品目", icon: Package, group: "management", order: 30, href: "/admin/order-master", activeMatch: "prefix", capability: "orderMaster.view", visibility: "navigation", sidebar: true },
@@ -119,7 +125,45 @@ export function getVisibleAdminSidebarPages(
 ): AdminPageDef[] {
   return getAdminSidebarPages().filter((page) => (
     hasAdminCapability(capabilities, page.capability)
+    || page.alternateCapabilities?.some((capability) => (
+      hasAdminCapability(capabilities, capability)
+    ))
   ));
+}
+
+export function getVisibleAdminSidebarGroups(capabilities: readonly AdminCapability[]) {
+  const pages = getVisibleAdminSidebarPages(capabilities);
+  return [
+    { id: "dashboard" as const, label: "", items: pages.filter((page) => page.group === "dashboard") },
+    ...ADMIN_NAV_GROUPS.map((group) => ({
+      ...group,
+      items: pages.filter((page) => page.group === group.id),
+    })),
+  ].filter((group) => group.items.length > 0);
+}
+
+export function getResolvedAdminPageHref(
+  page: AdminPageDef,
+  capabilities: readonly AdminCapability[],
+): string {
+  if (hasAdminCapability(capabilities, page.capability)) return page.href;
+
+  const alternateCapability = page.alternateCapabilities?.find((capability) => (
+    hasAdminCapability(capabilities, capability)
+  ));
+  if (!alternateCapability) return page.href;
+
+  return ADMIN_PAGES.find((candidate) => candidate.capability === alternateCapability)?.href
+    ?? page.href;
+}
+
+export function isAdminSidebarPageActive(page: AdminPageDef, pathname: string): boolean {
+  if (matchesAdminPagePath(page, pathname)) return true;
+  if (!page.relatedPageIds) return false;
+  return page.relatedPageIds.some((pageId) => {
+    const relatedPage = ADMIN_PAGES.find((candidate) => candidate.id === pageId);
+    return relatedPage ? matchesAdminPagePath(relatedPage, pathname) : false;
+  });
 }
 
 export function getFirstAccessibleAdminHref(

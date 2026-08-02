@@ -6,6 +6,12 @@ import { Building2, Plus, Save, Search, X, RefreshCw, ToggleLeft, ToggleRight, U
 import * as customersService from "@/lib/firebase/customers-service";
 import type { CustomerManagementRow } from "@/lib/firebase/customers-service";
 import PortalUsersPanel from "./PortalUsersPanel";
+import { useAdminCapabilities } from "@/hooks/useAdminCapabilities";
+import {
+  ADMIN_CUSTOMER_TABS,
+  getVisibleAdminSectionTabs,
+} from "@/lib/admin/adminSectionTabs";
+import styles from "@/components/admin/AdminNavigation.module.css";
 
 type Customer = CustomerManagementRow;
 
@@ -83,62 +89,52 @@ const errorMessage = (error: unknown, fallback: string): string => (
 
 export type AdminCustomersInitialTab = "customers" | "portalUsers";
 
-const customerTabs: readonly {
-  key: AdminCustomersInitialTab;
-  href: string;
-  label: string;
-  icon: typeof Building2;
-}[] = [
-  { key: "customers", href: "/admin/customers", label: "顧客管理", icon: Building2 },
-  { key: "portalUsers", href: "/admin/customers/users", label: "ポータル利用者", icon: Users },
-];
-
-const customerTabStyle = (active: boolean): React.CSSProperties => ({
-  padding: "8px 16px", borderRadius: 8, fontSize: 13, fontWeight: 700,
-  display: "inline-flex", alignItems: "center", gap: 6,
-  textDecoration: "none", whiteSpace: "nowrap", transition: "all 0.2s",
-  background: active ? "#fff" : "transparent",
-  color: active ? "#0f172a" : "#64748b",
-  boxShadow: active ? "0 1px 3px rgba(0,0,0,0.1)" : "none",
-});
+const customerTabIcons = { customers: Building2, portalUsers: Users } as const;
 
 export default function CustomerManagementPage({
   initialTab,
 }: {
   initialTab: AdminCustomersInitialTab;
 }) {
-  const content = initialTab === "portalUsers" ? <PortalUsersPanel /> : <CustomersPanel />;
+  const { can, capabilities } = useAdminCapabilities();
+  const tabs = getVisibleAdminSectionTabs(ADMIN_CUSTOMER_TABS, capabilities);
+  const content = initialTab === "portalUsers"
+    ? <PortalUsersPanel canManage={can("customerPortalUsers.manage")} />
+    : <CustomersPanel canManage={can("customers.manage")} />;
+
+  if (tabs.length === 0) {
+    return (
+      <div role="alert" style={{ padding: 18, borderRadius: 12, border: "1px solid #fed7aa", background: "#fff7ed", color: "#9a3412" }}>
+        利用できる取引先管理機能がありません。ダッシュボードへ戻ってください。
+      </div>
+    );
+  }
 
   return (
     <div>
-      <div
-        style={{
-          display: "flex", background: "#f1f5f9", padding: 4, borderRadius: 12,
-          width: "fit-content", maxWidth: "100%", overflowX: "auto", marginBottom: 20,
-        }}
-      >
-        {customerTabs.map((tab) => {
-          const Icon = tab.icon;
-          const active = initialTab === tab.key;
+      {tabs.length > 1 && <nav className={styles.tabs} aria-label="取引先管理">
+        {tabs.map((tab) => {
+          const Icon = customerTabIcons[tab.id];
+          const active = initialTab === tab.id;
           return (
             <Link
-              key={tab.key}
+              key={tab.id}
               href={tab.href}
               aria-current={active ? "page" : undefined}
-              style={customerTabStyle(active)}
+              className={`${styles.tabLink} ${active ? styles.tabLinkActive : ""}`}
             >
               <Icon size={16} />
               {tab.label}
             </Link>
           );
         })}
-      </div>
+      </nav>}
       {content}
     </div>
   );
 }
 
-function CustomersPanel() {
+function CustomersPanel({ canManage }: { canManage: boolean }) {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [dirtyCustomerIds, setDirtyCustomerIds] = useState<string[]>([]);
   const [savingCustomerIds, setSavingCustomerIds] = useState<string[]>([]);
@@ -171,6 +167,7 @@ function CustomersPanel() {
   };
 
   const openNewCustomerModal = () => {
+    if (!canManage) return;
     resetNewCustomer();
     setIsModalOpen(true);
   };
@@ -182,6 +179,7 @@ function CustomersPanel() {
   };
 
   const updateCustomer = (id: string, field: CustomerField, value: string | number | boolean) => {
+    if (!canManage) return;
     setCustomers((prev) => prev.map((customer) => (
       customer.id === id ? { ...customer, [field]: value } : customer
     )));
@@ -189,6 +187,7 @@ function CustomersPanel() {
   };
 
   const updateNewCustomer = (field: keyof CustomerForm, value: string | boolean) => {
+    if (!canManage) return;
     setNewCustomer((prev) => ({ ...prev, [field]: value }));
   };
 
@@ -202,6 +201,7 @@ function CustomersPanel() {
 
   const handleAddCustomer = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (!canManage) return;
     const name = newCustomer.name.trim();
     if (!name) {
       alert("貸出先名を入力してください。");
@@ -236,6 +236,7 @@ function CustomersPanel() {
   };
 
   const saveCustomer = async (customer: Customer) => {
+    if (!canManage) return;
     let payload: ReturnType<typeof buildCustomerPayload>;
     try {
       payload = buildCustomerPayload(customer);
@@ -265,6 +266,7 @@ function CustomersPanel() {
   };
 
   const toggleCustomerStatus = async (customer: Customer) => {
+    if (!canManage) return;
     const nextCustomer = { ...customer, isActive: !customer.isActive };
     let payload: ReturnType<typeof buildCustomerPayload>;
     try {
@@ -314,11 +316,17 @@ function CustomersPanel() {
             <RefreshCw size={14} style={{ animation: loading ? "spin 1s linear infinite" : undefined }} />
             再読込
           </button>
-          <button onClick={openNewCustomerModal} style={btnPrimary}>
+          {canManage && <button onClick={openNewCustomerModal} style={btnPrimary}>
             <Plus size={16} /> 新規登録
-          </button>
+          </button>}
         </div>
       </div>
+
+      {!canManage && (
+        <div style={{ marginBottom: 16, padding: "10px 12px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 12 }}>
+          閲覧権限で表示しています。顧客情報と固有料金の変更は管理権限を持つ利用者だけが行えます。
+        </div>
+      )}
 
       {/* Search */}
       <div
@@ -398,6 +406,7 @@ function CustomersPanel() {
                         >
                           <td style={{ padding: "10px 12px" }}>
                             <input
+                              disabled={!canManage}
                               style={{ ...inputStyle, fontWeight: 700 }}
                               value={customer.name}
                               placeholder="例: 〇〇ダイビング"
@@ -409,6 +418,7 @@ function CustomersPanel() {
                           </td>
                           <td style={{ padding: "10px 12px" }}>
                             <input
+                              disabled={!canManage}
                               style={inputStyle}
                               value={customer.companyName}
                               placeholder="会社名"
@@ -417,6 +427,7 @@ function CustomersPanel() {
                           </td>
                           <td style={{ padding: "10px 12px" }}>
                             <input
+                              disabled={!canManage}
                               style={inputStyle}
                               value={customer.formalName}
                               placeholder="請求書用の正式名称"
@@ -426,6 +437,7 @@ function CustomersPanel() {
                           <td style={{ padding: "10px 12px" }}>
                             <div style={{ display: "flex", gap: 6 }}>
                               <input
+                                disabled={!canManage}
                                 type="number"
                                 style={{ ...inputStyle, textAlign: "right" as const, fontFamily: "monospace", width: 80 }}
                                 value={customer.price10}
@@ -433,6 +445,7 @@ function CustomersPanel() {
                                 onChange={(e) => updateCustomer(customer.id, "price10", toNumber(e.target.value))}
                               />
                               <input
+                                disabled={!canManage}
                                 type="number"
                                 style={{ ...inputStyle, textAlign: "right" as const, fontFamily: "monospace", width: 80 }}
                                 value={customer.price12}
@@ -440,6 +453,7 @@ function CustomersPanel() {
                                 onChange={(e) => updateCustomer(customer.id, "price12", toNumber(e.target.value))}
                               />
                               <input
+                                disabled={!canManage}
                                 type="number"
                                 style={{ ...inputStyle, textAlign: "right" as const, fontFamily: "monospace", width: 80 }}
                                 value={customer.priceAluminum}
@@ -450,6 +464,7 @@ function CustomersPanel() {
                           </td>
                           <td style={{ padding: "10px 12px", textAlign: "center" }}>
                             <button
+                              disabled={!canManage}
                               onClick={() => toggleCustomerStatus(customer)}
                               style={{
                                 border: "none", background: "none",
@@ -465,7 +480,7 @@ function CustomersPanel() {
                           <td style={{ padding: "10px 12px", textAlign: "right" }}>
                             <button
                               onClick={() => saveCustomer(customer)}
-                              disabled={!dirty || saving || !customer.name.trim()}
+                              disabled={!canManage || !dirty || saving || !customer.name.trim()}
                               style={{
                                 ...btnOutline,
                                 color: dirty ? "#6366f1" : "#cbd5e1",
@@ -489,7 +504,7 @@ function CustomersPanel() {
       </div>
 
       {/* New customer modal */}
-      {isModalOpen && (
+      {canManage && isModalOpen && (
         <div
           style={{
             position: "fixed", inset: 0, zIndex: 50,

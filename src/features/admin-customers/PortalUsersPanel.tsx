@@ -39,7 +39,7 @@ const btnPrimary: React.CSSProperties = {
   cursor: "pointer", transition: "all 0.15s",
 };
 
-export default function PortalUsersPanel() {
+export default function PortalUsersPanel({ canManage }: { canManage: boolean }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [customerList, setCustomerList] = useState<Customer[]>([]);
@@ -72,11 +72,13 @@ export default function PortalUsersPanel() {
     field: K,
     value: PortalCustomerUser[K],
   ) => {
+    if (!canManage) return;
     setDirtyCustomerUserIds((prev) => prev.includes(id) ? prev : [...prev, id]);
     setCustomerUserList((prev) => prev.map((u) => (u.id === id ? { ...u, [field]: value } : u)));
   };
 
   const saveCustomerUsers = async () => {
+    if (!canManage) return;
     if (!confirm("ポータル利用者の紐付けを保存しますか？")) return;
     setSaving(true);
     try {
@@ -125,6 +127,12 @@ export default function PortalUsersPanel() {
           ※ Google登録した利用者を既存の顧客マスタに紐付けます。紐付けると未紐付けの発注も承認待ちに移動します。
         </p>
       </div>
+
+      {!canManage && (
+        <div style={{ marginBottom: 16, padding: "10px 12px", borderRadius: 10, background: "#f8fafc", color: "#64748b", fontSize: 12 }}>
+          閲覧権限で表示しています。紐付けの変更は管理権限を持つ利用者だけが行えます。
+        </div>
+      )}
 
       <div style={{ overflowX: "auto" }}>
         <table style={{ width: "100%", borderCollapse: "collapse", minWidth: 760 }}>
@@ -184,6 +192,7 @@ export default function PortalUsersPanel() {
                   </td>
                   <td style={{ padding: "10px 12px" }}>
                     <select
+                      disabled={!canManage}
                       style={{ ...selectStyle, paddingRight: 32 }}
                       value={u.customerId || ""}
                       onChange={(e) => updateCustomerUser(u.id, "customerId", e.target.value)}
@@ -204,12 +213,12 @@ export default function PortalUsersPanel() {
         </table>
       </div>
 
-      <div style={{ marginTop: 20 }}>
+      {canManage && <div style={{ marginTop: 20 }}>
         <button onClick={saveCustomerUsers} disabled={saving} style={btnPrimary}>
           <Save size={16} />
           {saving ? "保存中…" : "ポータル利用者の紐付けを保存"}
         </button>
-      </div>
+      </div>}
 
       <style>{`
         @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }

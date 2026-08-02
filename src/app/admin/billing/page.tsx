@@ -19,6 +19,7 @@ import {
   saveBillingInvoiceSettings,
 } from "@/lib/firebase/billing-settings-service";
 import { useBillingInvoiceCandidates } from "@/hooks/useBillingInvoiceCandidates";
+import { useAdminCapabilities } from "@/hooks/useAdminCapabilities";
 
 type BillingTab = "list" | "settings";
 
@@ -88,6 +89,8 @@ function labelStyle(): CSSProperties {
 }
 
 export default function BillingPage() {
+  const { can } = useAdminCapabilities();
+  const canManage = can("billing.manage");
   const [activeTab, setActiveTab] = useState<BillingTab>("list");
   const [savingSettings, setSavingSettings] = useState(false);
   const [printMode, setPrintMode] = useState<PrintMode>(null);
@@ -161,10 +164,12 @@ export default function BillingPage() {
     key: K,
     value: BillingInvoiceSettings[K],
   ) => {
+    if (!canManage) return;
     setSettingsDraft((prev) => ({ ...prev, [key]: value }));
   };
 
   const saveSettings = async () => {
+    if (!canManage) return;
     const normalized = normalizeBillingInvoiceSettings(settingsDraft);
     if (!normalized.invoiceTitle) {
       alert("請求書タイトルを入力してください。");
@@ -283,6 +288,7 @@ export default function BillingPage() {
             saving={savingSettings}
             onChange={updateDraft}
             onSave={saveSettings}
+            canManage={canManage}
           />
         ) : loading ? (
           <div className="billing-empty">読み込み中…</div>
@@ -555,11 +561,13 @@ function BillingSettingsForm({
   saving,
   onChange,
   onSave,
+  canManage,
 }: {
   settings: BillingInvoiceSettings;
   saving: boolean;
   onChange: <K extends keyof BillingInvoiceSettings>(key: K, value: BillingInvoiceSettings[K]) => void;
   onSave: () => Promise<void>;
+  canManage: boolean;
 }) {
   return (
     <div className="billing-settings-panel">
@@ -577,6 +585,14 @@ function BillingSettingsForm({
         この設定は請求候補に反映されます。確定済み請求書には将来 snapshot を保存する予定です。
         顧客別単価は顧客管理の price10 / price12 / priceAluminum を使用します。
       </div>
+
+      {!canManage && (
+        <div className="billing-note">
+          閲覧権限で表示しています。請求書設定の変更は管理権限を持つ利用者だけが行えます。
+        </div>
+      )}
+
+      <fieldset disabled={!canManage} style={{ border: 0, margin: 0, padding: 0 }}>
 
       <SettingsSection title="基本情報">
         <TextField label="請求書タイトル" value={settings.invoiceTitle} onChange={(value) => onChange("invoiceTitle", value)} />
@@ -708,7 +724,9 @@ function BillingSettingsForm({
         />
       </SettingsSection>
 
-      <div className="billing-settings-actions">
+      </fieldset>
+
+      {canManage && <div className="billing-settings-actions">
         <button
           type="button"
           onClick={onSave}
@@ -717,7 +735,7 @@ function BillingSettingsForm({
         >
           {saving ? "保存中..." : "請求書設定を保存"}
         </button>
-      </div>
+      </div>}
     </div>
   );
 }
