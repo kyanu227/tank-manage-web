@@ -22,7 +22,7 @@ vi.mock("firebase/firestore", () => ({
   writeBatch: mocks.writeBatch,
 }));
 
-vi.mock("@/hooks/useStaffSession", () => ({
+vi.mock("@/lib/staff-session-store", () => ({
   getStaffSession: () => mocks.session,
   updateStoredStaffSessionLocale: mocks.updateStoredStaffSessionLocale,
 }));

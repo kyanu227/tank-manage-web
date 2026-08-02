@@ -1,0 +1,160 @@
+import { normalizeLocale, type Locale } from "@/lib/locale";
+import type { OperationActor } from "@/lib/operation-context";
+
+/**
+ * localStorage "staffSession" に保存されているスタッフセッション情報。
+ * StaffAuthGuard でログイン成功時に保存される。
+ */
+export interface StaffSession {
+  id?: string;
+  name: string;
+  email?: string;
+  role?: string;
+  rank?: string;
+  locale: Locale;
+}
+
+const STORAGE_KEY = "staffSession";
+const FALLBACK_NAME = "スタッフ";
+let cachedRawSession: string | null | undefined;
+let cachedSession: StaffSession | null = null;
+
+export function staffSessionToOperationActor(
+  session: StaffSession | null | undefined,
+): OperationActor | null {
+  const staffId = nonEmptyString(session?.id);
+  const staffName = nonEmptyString(session?.name);
+  if (!staffId || !staffName) return null;
+
+  const staffEmail = nonEmptyString(session?.email);
+  const role = nonEmptyString(session?.role);
+  const rank = nonEmptyString(session?.rank);
+
+  return {
+    staffId,
+    staffName,
+    ...(staffEmail ? { staffEmail } : {}),
+    ...(role ? { role } : {}),
+    ...(rank ? { rank } : {}),
+  };
+}
+
+export function getStaffIdentity(): OperationActor | null {
+  return staffSessionToOperationActor(getStaffSessionSnapshot());
+}
+
+export function getStaffSession(): StaffSession | null {
+  return getStaffSessionSnapshot();
+}
+
+export function getStaffLocale(): Locale {
+  return normalizeLocale(getStaffSessionSnapshot()?.locale);
+}
+
+export function updateStoredStaffSessionLocale(locale: Locale): void {
+  if (typeof localStorage === "undefined") return;
+  const session = getStaffSessionSnapshot();
+  if (!session) return;
+
+  const nextSession: StaffSession = {
+    ...session,
+    locale: normalizeLocale(locale),
+  };
+  const raw = JSON.stringify(nextSession);
+  localStorage.setItem(STORAGE_KEY, raw);
+  cachedRawSession = raw;
+  cachedSession = nextSession;
+  if (typeof globalThis.dispatchEvent === "function") {
+    globalThis.dispatchEvent(new Event("staffLogin"));
+  }
+}
+
+export function requireStaffIdentity(): OperationActor {
+  const identity = getStaffIdentity();
+  if (!identity) {
+    throw new Error("スタッフIDを取得できませんでした。再ログインしてください。");
+  }
+  return identity;
+}
+
+/**
+ * スタッフ名を同期的に取得する。
+ * 送信処理（onClick/onSubmit）内で「今の操作者名」をログに残したい用途向け。
+ * セッション未取得/破損時はフォールバック名 "スタッフ" を返す。
+ */
+export function getStaffName(): string {
+  return getStaffSessionSnapshot()?.name ?? FALLBACK_NAME;
+}
+
+export function subscribeStaffSession(onStoreChange: () => void): () => void {
+  if (typeof globalThis.addEventListener !== "function") return () => {};
+
+  const handleChange = () => {
+    cachedRawSession = undefined;
+    onStoreChange();
+  };
+
+  globalThis.addEventListener("staffLogin", handleChange);
+  globalThis.addEventListener("storage", handleChange);
+  return () => {
+    globalThis.removeEventListener("staffLogin", handleChange);
+    globalThis.removeEventListener("storage", handleChange);
+  };
+}
+
+export function getServerStaffSessionSnapshot(): StaffSession | null {
+  return null;
+}
+
+export function getStaffSessionSnapshot(): StaffSession | null {
+  if (typeof localStorage === "undefined") return null;
+  const raw = localStorage.getItem(STORAGE_KEY);
+  if (raw === cachedRawSession) return cachedSession;
+  cachedRawSession = raw;
+  cachedSession = parseStaffSession(raw);
+  return cachedSession;
+}
+
+function parseStaffSession(raw: string | null): StaffSession | null {
+  if (!raw) return null;
+  try {
+    return normalizeStaffSession(JSON.parse(raw) as unknown);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeStaffSession(value: unknown): StaffSession | null {
+  const record = objectRecord(value);
+  if (!record) return null;
+
+  const name = nonEmptyString(record.name);
+  if (!name) return null;
+
+  const id = nonEmptyString(record.id);
+  const email = nonEmptyString(record.email);
+  const role = nonEmptyString(record.role);
+  const rank = nonEmptyString(record.rank);
+
+  return {
+    name,
+    ...(id ? { id } : {}),
+    ...(email ? { email } : {}),
+    ...(role ? { role } : {}),
+    ...(rank ? { rank } : {}),
+    locale: normalizeLocale(record.locale),
+  };
+}
+
+function objectRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return null;
+  }
+  return value as Record<string, unknown>;
+}
+
+function nonEmptyString(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
+}

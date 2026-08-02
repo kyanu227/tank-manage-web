@@ -268,17 +268,11 @@ const eslintConfig = defineConfig([
     },
   },
   // Architecture allowlist: 1エントリを1ファイルに限定し、解消時はここから削除する。
-  // 暫定: P1-A で解消。@/hooks/useStaffSession のみ許可する。
+  // 意図的例外: staff session adapter。localStorage のみ許可する。design-principles §25。
   {
-    files: ["src/lib/firebase/staff-locale-service.ts"],
+    files: ["src/lib/staff-session-store.ts"],
     rules: {
-      "no-restricted-imports": restrictedImports([{
-        ...DOMAIN_UI_IMPORT_RESTRICTIONS[0],
-        group: [
-          ...DOMAIN_UI_IMPORT_RESTRICTIONS[0].group,
-          "!@/hooks/useStaffSession",
-        ],
-      }]),
+      "no-restricted-globals": ["error", "window", "document", "sessionStorage"],
     },
   },
   // 意図的例外: portal session adapter。window・localStorage のみ許可する。design-principles §25。
