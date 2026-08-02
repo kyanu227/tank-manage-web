@@ -113,11 +113,25 @@ assert.equal(planTankTransition({
   requestedAction: "damage_report",
 }).ok, true, "既存の直接メンテナンス遷移は維持する");
 
-assert.equal(planTankTransition({
-  policyMode: "advisory",
-  current: { status: "disposed" },
-  requestedAction: "inspection",
-}).ok, false, "disposedは常に停止する");
+for (const status of ["lent", "unreturned", "in_house", "disposed"] as const) {
+  assert.equal(planTankTransition({
+    policyMode: "advisory",
+    current: { status },
+    requestedAction: "inspection",
+  }).ok, false, `${status}から耐圧検査を実行してはいけない`);
+}
+
+for (const status of ["empty", "filled", "damaged", "defective"] as const) {
+  const inspection = planTankTransition({
+    policyMode: "advisory",
+    current: { status },
+    requestedAction: "inspection",
+  });
+  assert.equal(inspection.ok, true, `${status}から耐圧検査を実行できる`);
+  if (inspection.ok) {
+    assert.equal(inspection.nextStatus, "empty", "耐圧検査後はemptyへ遷移する");
+  }
+}
 
 assert.equal(planTankTransition({
   policyMode: "advisory",

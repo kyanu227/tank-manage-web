@@ -143,7 +143,8 @@ export const OP_RULES: Record<TankAction, TransitionRule> = {
     nextStatus: STATUS.EMPTY,
   },
   [ACTION.INSPECTION]: {
-    allowedPrev: [], // リストから選択するため制限なし
+    // 貸出中・自社利用中・破棄済みのタンクは検査完了で空へ遷移させない
+    allowedPrev: [STATUS.EMPTY, STATUS.FILLED, STATUS.DAMAGED, STATUS.DEFECTIVE],
     nextStatus: STATUS.EMPTY,
   },
 
@@ -225,7 +226,7 @@ export const CODE_OP_RULES = {
     nextStatus: "empty",
   },
   inspection: {
-    allowedPrev: [],
+    allowedPrev: ["empty", "filled", "damaged", "defective"],
     nextStatus: "empty",
   },
 

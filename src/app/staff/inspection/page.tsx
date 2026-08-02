@@ -25,6 +25,7 @@ import {
   getStaffOperationErrorMessage,
   logStaffOperationError,
 } from "@/lib/staff-operation-error";
+import { validateTransitionCode } from "@/lib/tank-rules";
 
 const ACCENT = "#8b5cf6"; // Violet
 const ACCENT_DARK = "#7c3aed";
@@ -75,7 +76,11 @@ export default function InspectionPage() {
     limit.setMonth(limit.getMonth() + settings.alertMonths);
 
     return allTanks
-      .filter((t) => coerceTankStatusCode(t.status) !== "disposed")
+      // Keep UI candidates aligned with the transition rule; unknown statuses fail closed.
+      .filter((t) => {
+        const status = coerceTankStatusCode(t.status);
+        return status !== null && validateTransitionCode(status, "inspection");
+      })
       .map((t) => ({ tank: t, nextDate: toDate(t.nextMaintenanceDate) }))
       .filter(({ nextDate }) => nextDate && nextDate.getTime() <= limit.getTime())
       .map(({ tank, nextDate }) => {
