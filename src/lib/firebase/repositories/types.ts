@@ -108,6 +108,7 @@ export interface TransactionDoc {
   type: TransactionType;
   status: string;
   tankId?: string;
+  expectedLatestLogId?: unknown;
   source?: string;
   customerId?: string;
   customerName?: string;
