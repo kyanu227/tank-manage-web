@@ -143,9 +143,8 @@ service cloud.firestore {
         : action == "repaired"
         ? fromStatus in ["damaged", "defective"] && toStatus == "empty"
         : action == "inspection"
-        ? fromStatus in [
-            "filled", "empty", "lent", "unreturned", "in_house", "damaged", "defective"
-          ] && toStatus == "empty"
+        ? fromStatus in ["filled", "empty", "damaged", "defective"]
+          && toStatus == "empty"
         : action == "dispose"
         ? fromStatus in ["empty", "filled", "damaged"] && toStatus == "disposed"
         : false;

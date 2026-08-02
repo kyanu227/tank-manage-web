@@ -104,6 +104,22 @@ try {
     });
   });
 
+  for (const fromStatus of ["empty", "filled", "damaged", "defective"]) {
+    await succeeds(`inspection accepts ${fromStatus} tank`, async () => {
+      await resetAndSeed({
+        size: 1,
+        policyMode: "strict",
+        policyRevision: 1,
+        tankState: fromStatus,
+      });
+      await executeOperationBatch({
+        size: 1,
+        kind: "direct",
+        logOverrides: inspectionOverrides(fromStatus),
+      });
+    });
+  }
+
   await succeeds("missing policy document defaults to strict revision 0", async () => {
     await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
     await testEnvironment.withSecurityRulesDisabled(async (context) => {
@@ -426,6 +442,26 @@ try {
 }
 
 async function runDenialCases() {
+  for (const fromStatus of ["lent", "unreturned", "in_house"]) {
+    await fails(`inspection rejects ${fromStatus} tank`, async () => {
+      const customer = fromStatus === "in_house" ? null : CUSTOMER;
+      const location = fromStatus === "in_house" ? "自社" : undefined;
+      await resetAndSeed({
+        size: 1,
+        policyMode: "strict",
+        policyRevision: 1,
+        tankState: fromStatus,
+        tankCustomer: customer,
+        tankLocation: location,
+      });
+      await executeOperationBatch({
+        size: 1,
+        kind: "direct",
+        logOverrides: inspectionOverrides(fromStatus, { customer, location }),
+      });
+    });
+  }
+
   await fails("strict policy rejects recovery", async () => {
     await resetAndSeed({ size: 1, policyMode: "strict", policyRevision: 1 });
     await executeOperationBatch({
@@ -1203,6 +1239,19 @@ function directPlan(action = "fill", fromStatus = "empty", toStatus = "filled") 
       location: action === "lend" ? CUSTOMER.customerName : WAREHOUSE,
     }],
     requiredEvidence: [],
+  };
+}
+
+function inspectionOverrides(fromStatus, { customer = null, location } = {}) {
+  return {
+    action: "inspection",
+    transitionAction: "inspection",
+    prevStatus: fromStatus,
+    newStatus: "empty",
+    transitionPlan: directPlan("inspection", fromStatus, "empty"),
+    prevTankSnapshot: tankSnapshot({ status: fromStatus, customer, location }),
+    nextTankSnapshot: tankSnapshot({ status: "empty", staff: ADMIN.name }),
+    previousLogIdOnSameTank: fromStatus === "empty" ? null : "previous-T001",
   };
 }
 
