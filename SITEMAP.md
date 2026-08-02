@@ -30,7 +30,7 @@
 |---|---|---|---|
 | 顧客ポータル | [`src/app/portal/layout.tsx`](src/app/portal/layout.tsx) | Firebase Auth + `customerUsers/{uid}`（`customerSession` は画面互換） | 同ファイル内 |
 | スタッフ | [`src/app/staff/layout.tsx`](src/app/staff/layout.tsx) | [`StaffAuthGuard`](src/components/StaffAuthGuard.tsx) | 同ファイル `SIDE_NAV` |
-| 管理者 | [`src/app/admin/layout.tsx`](src/app/admin/layout.tsx) | [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) | 同ファイル `ADMIN_NAV_GROUPS` |
+| 管理者 | [`src/app/admin/layout.tsx`](src/app/admin/layout.tsx) | [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) | [`adminPagesRegistry.ts`](src/lib/admin/adminPagesRegistry.ts) |
 
 ---
 
@@ -171,14 +171,16 @@ OperationsTerminal
 
 ## 5. 管理者画面マップ
 
-サイドバー（`src/app/admin/layout.tsx` の `ADMIN_NAV_GROUPS`）はカテゴリ単位で並ぶ。
-カテゴリ見出しは UI に直接出る（「設定・管理」のような大階層は挟まない）。
-group 内の visible items が 0 件のときは group ごと非表示。
+サイドバーは [`adminPagesRegistry.ts`](src/lib/admin/adminPagesRegistry.ts) を正本とし、
+desktop/mobileとも [`AdminSidebarContent`](src/components/admin/AdminSidebarContent.tsx) を再利用する。
+日常ナビは「ダッシュボード」「対応」「分析」「管理」に限定し、設定と開発者ツールは
+下部の設定launcherから開く。下部常設操作はアプリ切替・設定・ログアウトの3 iconだけで、
+ログイン中のユーザー情報は表示しない。
 
-### 5-1. 確認・分析
+### 5-1. ダッシュボード・対応・分析
 
-確認・分析カテゴリは「読むだけ」の画面群。書き込みを伴うマスタや権限とは切り離す。
-売上統計はこのカテゴリの独立ページとして扱う（マスタ・料金カテゴリには入れない）。
+例外操作レビューは承認待ちを完了する「対応」に置く。売上とスタッフ実績は「分析」に置く。
+ダッシュボードは既存readによる現在値、要対応、現場対応待ち、各詳細画面への入口を示す。
 
 | 画面 | URL | ファイル |
 |---|---|---|
@@ -187,27 +189,33 @@ group 内の visible items が 0 件のときは group ごと非表示。
 | 売上統計 | `/admin/sales` | [`src/app/admin/sales/page.tsx`](src/app/admin/sales/page.tsx) |
 | スタッフ実績 | `/admin/staff-analytics` | [`src/app/admin/staff-analytics/page.tsx`](src/app/admin/staff-analytics/page.tsx) |
 
-### 5-2. 顧客・請求
+### 5-2. 取引先
 
 | 画面 | URL | ファイル |
 |---|---|---|
-| 顧客管理 | `/admin/customers` | [`src/app/admin/customers/page.tsx`](src/app/admin/customers/page.tsx) |
+| 顧客 | `/admin/customers` | [`src/app/admin/customers/page.tsx`](src/app/admin/customers/page.tsx) |
 | ポータル利用者 | `/admin/customers/users` | [`src/app/admin/customers/users/page.tsx`](src/app/admin/customers/users/page.tsx) |
-| 請求書発行 | `/admin/billing` | [`src/app/admin/billing/page.tsx`](src/app/admin/billing/page.tsx) |
 
-### 5-3. スタッフ・権限
+両routeは [`CustomerManagementPage`](src/features/admin-customers/CustomerManagementPage.tsx) の
+統合tab領域を使う。サイドバー上は「取引先」1項目だけ表示する。
+
+### 5-3. スタッフ
 
 | 画面 | URL | ファイル | 表示条件 |
 |---|---|---|---|
-| 担当者 | `/admin/staff` | [`src/app/admin/staff/page.tsx`](src/app/admin/staff/page.tsx) | 権限設定に従う |
-| ページ権限 | `/admin/permissions` | [`src/app/admin/permissions/page.tsx`](src/app/admin/permissions/page.tsx) | `adminOnly`（管理者のみ） |
+| 担当者 | `/admin/staff` | [`src/app/admin/staff/page.tsx`](src/app/admin/staff/page.tsx) | `staff.view` |
+| 権限 | `/admin/permissions` | [`src/app/admin/permissions/page.tsx`](src/app/admin/permissions/page.tsx) | `staffPermissions.view` |
+| 報酬・ランク | `/admin/money` | [`src/app/admin/money/page.tsx`](src/app/admin/money/page.tsx) | `staffCompensation.view` |
 
-### 5-4. マスタ・料金
+3 routeは共通の [`AdminStaffTabs`](src/components/admin/AdminStaffTabs.tsx) を使う。
+サイドバー上は「スタッフ」1項目だけ表示する。
+
+### 5-4. その他の管理・対応
 
 | 画面 | URL | ファイル |
 |---|---|---|
-| 金銭・ランク | `/admin/money` | [`src/app/admin/money/page.tsx`](src/app/admin/money/page.tsx) |
 | 発注品目 | `/admin/order-master` | [`src/app/admin/order-master/page.tsx`](src/app/admin/order-master/page.tsx) |
+| 請求 | `/admin/billing` | [`src/app/admin/billing/page.tsx`](src/app/admin/billing/page.tsx) |
 
 ### 5-5. 設定・通知
 
@@ -227,9 +235,10 @@ group 内の visible items が 0 件のときは group ごと非表示。
 | Security Rules | `/admin/security-rules` | [`src/app/admin/security-rules/page.tsx`](src/app/admin/security-rules/page.tsx) |
 
 権限制御: [`AdminAuthGuard`](src/components/AdminAuthGuard.tsx) が
-Firestore `settings/adminPermissions` を見て、ログインスタッフのロールに応じて表示可否を決める。
-- `管理者`: 全カテゴリ・全 item を表示（`adminOnly` 含む）
-- `準管理者`: `allowedPaths` に含まれる href のみ。group 内の visible items が 0 件なら group ごと非表示
+Firestore `settings/adminPermissions.capabilities` を見て、route直アクセスを含めて機能単位で判定する。
+旧 `pages` はread時だけ決定的に変換し、新規保存は `capabilities` のみに行う。
+詳細は [Admin capability権限モデル](docs/design/admin-capability-permissions.md) と
+[Admin情報設計](docs/design/admin-information-architecture.md) を参照する。
 
 ### 5-7. 将来構想（未実装）
 
