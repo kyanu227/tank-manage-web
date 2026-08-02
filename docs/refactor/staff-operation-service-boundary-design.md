@@ -1,5 +1,7 @@
 # Staff Operation Service Boundary Design
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 作成日: 2026-05-04
 
 対象:

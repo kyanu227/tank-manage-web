@@ -1,5 +1,7 @@
 # タンクID利用箇所と正本モデル監査
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 ## 1. 目的
 
 このドキュメントは、タンクIDの source of truth を決める前段階として、現行コードで `tankId` がどこで入力・生成・加工・保存・検索・表示・ソート・履歴化されているかを棚卸しする docs-only audit である。

@@ -1,5 +1,7 @@
 # Implementation Roadmap
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](architecture/README.md)。内容は当時の記録として残す。
+
 ## Purpose
 
 この文書は、今後の実装順序を固定する。

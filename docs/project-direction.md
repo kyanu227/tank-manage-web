@@ -8,47 +8,37 @@
 
 判断基準は「今動くか」だけではなく、次の変更で壊れにくいか、影響範囲を追えるか、業務上の正本がどこか説明できるかに置く。
 
-## 2. Current Focus
+## 2. Current Status
 
-現在の重点は以下。
+**architecture 設計は確定済み**（[docs/architecture/](architecture/README.md)、PR #183）。
 
-- `tanks` データ整理
-- 返却フローの見直し
-- `tanks` / `logs` / `transactions` の責務分離
-- 返却タグ、`condition`、`logNote` の扱いの明確化
-- 直接 Firestore 書き込み経路の整理準備
+```text
+Architecture design:          approved
+Clean-break implementation:   not started
+Firestore reset:              not executed
+Rules cutover:                not executed
+```
 
-ただし、最初の実装で `tanks.customerId` を追加したり、`tanks.location` の意味を変えたりしない。現行ポータルは `tanks.location == customerName` に依存しているため、ここから正規化に入ると返却、顧客画面、請求系の読み込みを壊しやすい。
+構造化リファクタ（PR-01〜12）と staff 画面の ja/en 対応（PR #176〜#182）は完了済み。
+次の実装順序は [clean-break-cutover-plan.md](architecture/clean-break-cutover-plan.md) が正本。
 
 ## 3. Long-Term Goals
 
-- コード構造化を完成させる
 - Firestore に保持するデータを簡素化する
 - 状態遷移を一貫させる
 - 返却フローを安定させる
 - 管理画面を業務領域ごとに再編し、画面定義の重複を減らす
 - Firebase Auth の永続認証を前提に、認証復元と権限確認を安全かつ高速にする
 - 現場アプリを App Shell と共有 read model により高速表示する
-- 日本語文字列や表示名に依存しない構成へ移行する
-- 英語で基本操作できる多言語対応を実装する
 - 共同作業者と報酬分割を実装する
 - 操作履歴、売上、請求、スタッフ実績を安定して集計できるようにする
 
-## 4. Non-Goals for the First Phase
+## 4. 設計原則はここでは規定しない
 
-最初のフェーズでは以下を行わない。
+依存方向・source of truth・write ownership・identity・atomicity・test戦略・禁止事項は
+[docs/architecture/design-principles.md](architecture/design-principles.md) が正本。
 
-- `src` 配下の大規模リファクタリング
-- Firestore schema の実変更
-- `tanks.customerId` の追加
-- `tanks.location` の意味変更
-- `logs` / `transactions` の書き込み形式変更
-- 多言語対応の実装コード追加
-- 共同作業者・報酬分割の実装コード追加
-- migration / backfill script の作成
-- Security Rules や Firebase 設定の変更
-
-このプロジェクトは実運用前のため、最終的な正しい schema に寄せる段階では不要な legacy backfill を前提にしなくてよい。ただし、既存コード依存を無視して一括変更してよいという意味ではない。現行依存を把握し、壊れやすい場所を避けて段階的に進める。
+本文書は**業務目的と長期ゴール**のみを扱う。
 
 ## 5. Data Design Principles
 
@@ -142,26 +132,6 @@ repository に業務判断を入れない。page や hook から Firestore へ�
 
 ## 9. Implementation Order
 
-順序は以下を原則にする。
+実装順序の正本は [docs/architecture/clean-break-cutover-plan.md](architecture/clean-break-cutover-plan.md)。
 
-1. 方針 docs を固定する
-2. 返却タグと `condition` の変換を純粋関数へ集約する
-3. 返却申請と返却確定の境界を明確にする
-4. actor / customer / action / status の identity context を安定させる
-5. `logs` / `transactions` の actor field を名前だけにしない
-6. 内部ロジックを action code / status code へ寄せる
-7. 英語対応を実装する
-8. 共同作業者・報酬分割を設計する
-9. 旧 field 依存や不要 helper を掃除する
-
-この順序にする理由は、返却フローと identity が安定しないまま多言語化や報酬分割へ進むと、表示名・日本語ラベル・`location` 文字列に依存した設計が固定化されるため。
-
-この実装順序と、`docs/architecture/refactor-sequence.md` の構造化 sequence は役割が異なる。構造化 sequence の PR-01〜PR-12 を完了した後、§8 の長期目標を個別 PR へ分解して着手する。UI 変更、認証変更、read model 変更、schema 整理を同一 PR にまとめない。
-
-関連する詳細文書:
-
-- `docs/firestore-data-model-policy.md`
-- `docs/return-flow-policy.md`
-- `docs/implementation-roadmap.md`
-- `docs/design/data-model-source-of-truth.md`
-- `docs/refactor/firestore-write-boundary-audit.md`
+旧 Phase 0〜9 の順序は、構造化リファクタと英語化の完了により前提が変化したため廃止した。

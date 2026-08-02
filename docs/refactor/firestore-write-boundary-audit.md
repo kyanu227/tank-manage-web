@@ -1,5 +1,7 @@
 # Firestore 書き込み境界 監査
 
+> **[SUPERSEDED 2026-08-02]** 本文書は historical。現行の architecture 正本は [docs/architecture/README.md](../architecture/README.md)。内容は当時の記録として残す。
+
 調査日: 2026-05-04
 更新日: 2026-05-05
 範囲: `src/**`

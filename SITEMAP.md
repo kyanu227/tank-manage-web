@@ -2,6 +2,8 @@
 
 このドキュメントは「どの画面が、どのファイルから作られているか」を把握するための地図です。
 新規参加者（人間・AI 双方）が最初に読む想定。CLAUDE.md と併読してください。
+>
+> 設計の「なぜ」は [docs/architecture/README.md](./docs/architecture/README.md)。ここは「どこ」だけを扱う。
 
 ---
 
@@ -316,7 +318,7 @@ Firebase Auth と Firestore を直接確認し、localStorage は画面セッシ
        │ いずれも必ず
        ▼
   tanks/{id}.status + location 更新  ＆  logs/{id} 追加 を
-  writeBatch で原子的に実行（ログなしの状態変更は構造的に不可能）
+  runTransaction で原子的に実行（ログなしの状態変更は構造的に不可能）
 ```
 
 | ファイル | 役割 |
