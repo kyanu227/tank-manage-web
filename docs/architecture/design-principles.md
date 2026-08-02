@@ -4,6 +4,7 @@
 - **第二稿: 2026-08-02（基準 `6c1d4c5` = origin/main、PR #182まで。working tree clean）**
 - **第三稿: 2026-08-02（独立レビュー3件を反映）**
 - **確定版: 2026-08-02（ユーザー最終判断により正式正本化）**
+- **第四稿: 2026-08-03（main `71c191c` で gap を再監査し、ADR-007 を反映）**
 - **Status: Approved / Authoritative**
 - 位置づけ: **architecture設計判断の規範正本**
 - 注意: **設計の承認であって実装の完了ではない。** clean-break implementation は未着手（§0.3）
@@ -112,6 +113,7 @@ Hosting deploy:               not executed
 | stale操作の拒否 | 古い画面から現在cycleを壊す。二重返却・誤請求の原因 | `expectedCycle` / `StaleTankCycleError` |
 | cycle binding | どの貸出に対する返却かが確定しないと請求が対応付かない | `customerId` + `latestLogId` |
 | revision / void の監査可能性 | 訂正の事実自体が監査対象 | 追記型revisionチェーン |
+| staff log correction の 72h 共通制限 | 直近の入力ミス訂正に限定し、role による監査期限の回避を許さない | UI・domain・Rules で同じ 72h 条件（[ADR-007](./adr/ADR-007-staff-log-correction-authority.md)） |
 | actor identity の記録 | 実績・報酬・責任追跡の根拠 | `OperationContext.actor` |
 | 部分成功の禁止 | 一括操作の途中失敗で在庫が不整合になる | 単一transaction + 件数上限 |
 | 不明・欠損時のfail-closed | 推測writeは誤請求を生み事後検出できない | `assertOfficialAggregationSchemaReady` |
@@ -656,17 +658,18 @@ domain enum の網羅性は TypeScript の exhaustive check で、辞書の完�
 
 ### 12.7 role code（確定）
 
-**現行の問題**: 日本語文字列が permission code として機能している。
+Staff dashboard のログ訂正・取消については、role を code 化して分岐を残すのではなく、**権限次元としての role 自体を廃止する**。全 active staff に同じ 72 時間制限と訂正・取消条件を適用し、`StaffCorrectionRole` は削除する（[ADR-007](./adr/ADR-007-staff-log-correction-authority.md)）。staff log correction には role 次元が存在しない。
+
+一方、admin アクセス制御・`settings/adminPermissions`・`operation-review-service` には role が必要である。現行はこれらの permission code に日本語文字列を使っている。
 
 ```text
-tank-operation.ts:165   StaffCorrectionRole = "管理者" | "準管理者" | "一般"
-tank-operation.ts:379   PRIVILEGED_CORRECTION_ROLES = ["管理者", "準管理者"]
 operation-review-service.ts:212,231   role !== "管理者"   ← runTransaction 内
+firestore.rules:44,48   staffRole() == "管理者" / "準管理者"
 ```
 
-値は `staff.role` / `staffByEmail.role` に**永続化**され、`settings/adminPermissions` の role 配列にも使われる。**schema 問題なので data reset 前に解消が必要**。
+値は `staff.role` / `staffByEmail.role` に**永続化**され、`settings/adminPermissions` の role 配列にも使われる。admin 側の role code 化は**schema 問題なので data reset 前に解消が必要**。
 
-**target code**:
+**admin access control の target code**:
 
 ```ts
 type StaffRole = "admin" | "assistant_admin" | "staff";
@@ -676,7 +679,9 @@ type StaffRole = "admin" | "assistant_admin" | "staff";
 
 - 日本語 role 文字列を permission code として使用しない
 - 表示は ja/en dictionary で行う
-- application code / Rules / permission settings / tests が**最終的に同じ role code** を使う
+- admin access control・`settings/adminPermissions`・`operation-review-service`・Rules・tests が**最終的に同じ role code**（`admin` / `assistant_admin` / `staff`）を使う
+- staff log correction / void に role 判定を再導入しない
+- admin operation review（`/admin/operation-reviews`）の管理者制限は維持する
 
 ### 12.8 保存する機械判定値は locale 非依存 code のみ（確定）
 
@@ -922,20 +927,63 @@ event schema が不正なら**0円として続行せず、集計を停止する*
 
 新しい architecture 規則を文書に追加するときは、**同じPRで強制手段（lint / test）も追加する**。強制手段のない規則は、規則ではなく願望として扱う。
 
-### 21.4 現行mainで検出した依存方向の違反
+### 21.4 現行mainで検出した設計 gap
 
-| # | 違反 | 証拠 | 影響 |
+2026-08-03 に main `71c191c` を再監査した。V1〜V6 / G2 / G3 / G10 の未解消箇所は次のとおり。
+
+| # | 違反 / gap | 証拠 | 影響 / 是正方針 |
 |---|---|---|---|
-| **V1** | **domain/atomic writer が React hook module を import** | `src/lib/tank-operation.ts:63` → `import { getStaffLocale } from "@/hooks/useStaffSession"` | `useStaffSession.ts` は `react`（`useMemo` / `useSyncExternalStore`）と `localStorage` に依存する。結果として `tank-operation.ts` が **React と browser API を推移的に取り込む**。§5.2 / §12.4 違反 |
-| **V2** | domain が locale を暗黙に読む | `tank-operation.ts:776` `const locale = getStaffLocale()` | 表示都合が atomic writer の内部に入り込む。test で locale を制御するには hook のmockが必要になり、pure test性が下がる |
-| **V3** | domain module にハードコード日本語（表示文言） | `customer-identity-read.ts` の `"不明な顧客"` / `"不明"`、`order-fulfillment-service.ts:38` の承認エラー文 | display boundary の外に表示文言がある。**`scripts/staff-i18n-scan.ts` は `src/lib` を7ファイルのallowlistでしか見ておらず、この2つは検査対象外** |
-| **V4** | **日本語文字列が permission code として機能している** | `tank-operation.ts:165` `StaffCorrectionRole = "管理者" \| "準管理者" \| "一般"`、`:379` `PRIVILEGED_CORRECTION_ROLES`、`operation-review-service.ts:212,231` `role !== "管理者"`（**runTransaction 内**） | §8.1「権限判定に表示文字列を使わない」への直接違反。値は `staff.role` / `staffByEmail.role` に**永続化**され、`settings/adminPermissions` のrole配列にも使われる。**schema問題なので data reset 前に解消が必要** |
-| **V5** | **保存値が日本語文字列** | `order-fulfillment-service.ts:108` `logAction: "受注貸出"`、`return-tag-processing-service.ts:156` `location: "倉庫"` | §12.1「保存値は locale-independent」への違反。`transitionAction` は code なのに `logAction` は日本語label を永続化している。**表示の問題ではなく schema の問題** |
-| **V6** | **`tanks` への非transactional write が stale guard を迂回する** | `tank-tag-service.ts:9` `updateDoc(doc(db,"tanks",tankId), { logNote })` — `runTransaction` なし・`expectedCycle` なし。呼び出し元は `bulk-return-workflow.ts:79` / `inhouse-return-workflow.ts:50` | §2.2「stale操作の拒否」を迂回する経路。さらに一括返却では tag write が transaction 外にあるため、**部分成功が発生しうる**（§15「partial success を許さない」への違反） |
+| **V1** | **domain/atomic writer が React hook module と browser API に依存** | `src/lib/tank-operation.ts:63` `import { getStaffLocale } from "@/hooks/useStaffSession"`、同 `:789` `window.confirm(buildTankRecoveryConfirmationMessage(...))` | §5.2 / §12.4 違反。domain から hook / locale / `window` を排除し、ADR-006 の confirmation resolver port へ移す |
+| **V2** | domain が locale を暗黙に読む | `src/lib/tank-operation.ts:776` `const locale = getStaffLocale()` | 表示都合が atomic writer 内部に入り、pure test 性を下げる |
+| **V3** | domain module にハードコード日本語（表示文言） | `src/lib/customer-identity-read.ts:40` `?? "不明な顧客"` / 同 `:53` `?? "不明"` | display boundary の外に表示文言がある |
+| **V4-a** | **Staff dashboard correction role** | `src/app/staff/dashboard/page.tsx:7,78-79,188-190,195,205,222,240,267,336,368,470,473,767,783,787,802` / `src/features/staff-dashboard/services/log-correction-workflow.ts:8,23,30,39,46,63,75,86,93,107,123,141,151` / `firestore.rules:110-116` | ADR-007 により**削除する。code 化しない**。page から可否判定を pure policy へ移し、Rules の role bypass は別 PR で削除する |
+| **V4-b** | **admin role の日本語文字列が permission code として機能** | `src/lib/firebase/operation-review-service.ts:212,231` `role !== "管理者"`、`staff.role` / `staffByEmail.role` の永続値、`settings/adminPermissions`、`firestore.rules:44,48` `staffRole() == "管理者"` / `"準管理者"` | §8.1 違反。admin access control に必要な role は code 化する。schema 問題なので data reset 前に解消する |
+| **V5** | **保存値が日本語文字列** | `src/features/maintenance/services/damage-workflow.ts:26` `location: "倉庫"` ほか | §12.1 違反。表示ではなく保存 schema の問題 |
+| **V6** | **`tanks` への非transactional write が stale guard を迂回** | `src/lib/firebase/tank-tag-service.ts` が `runTransaction` 外で `updateDoc`。caller は `src/features/staff-operations/services/bulk-return-workflow.ts:1` / `src/features/inhouse/services/inhouse-return-workflow.ts:3` | §2.2 の stale 操作拒否と §15 の partial success 禁止を迂回する |
+| **G2** | legacy customer identity fallback | `src/features/staff-dashboard/queries/dashboard-read-model.ts:74,83,182,210` / `src/features/staff-operations/types.ts:70` / `src/features/staff-operations/queries/bulk-return-candidates.ts:98` | `isLegacy` / `legacy-location:` が残る。clean-break 後に strict resolver へ置換する |
+| **G3** | 顧客名による単価解決 fallback | 根本: `src/lib/billing/invoice-candidate.ts:83,110,254,257` の `customersByName` / `resolvePricing`。表示への伝播先: `src/app/admin/billing/page.tsx:323` | `customerId` を持たない log に対する名前一致 fallback を削除する。ただし legacy log が存在する間は請求額を変えうるため、**P3-B（data reset）完了後の P4-B で実施する** |
+| **G10** | error message の ja 優先経路 | `src/lib/staff-operation-error.ts:153,159` `locale === "ja"` | error catalog を display boundary へ移し、ja 優先経路を削除する |
 
-**V1/V2 の是正方針**: `getStaffLocale()` を domain 内部で呼ばず、**`OperationContext` または引数で locale を受け取る**（§17 の「locale解決は引数で受ける」）。これは §10.3 の分割条件を満たす純粋な依存是正であり、clean-break campaign の早い段階で実施する。
+**V1/V2 の是正方針**: [ADR-006](./adr/ADR-006-recovery-confirmation-port.md) のとおり confirmation resolver port を採用する。`getStaffLocale()` と `window.confirm()` を domain から排除し、resolver 未注入時は fail-closed とする。
 
-**注**: これは i18n 実装の欠陥ではなく、**recovery確認ダイアログという「domain の途中でユーザーへ問い合わせる」処理**が持つ本質的な難しさに起因する。是正案は §25 の意図的例外として残すか、確認処理自体を domain の外へ出すかの2択であり、実装時に判断する。
+**V4 の是正方針**: Staff dashboard correction role は廃止する（V4-a、[ADR-007](./adr/ADR-007-staff-log-correction-authority.md)）。admin access control に必要な role だけを code 化する（V4-b）。admin operation review の管理者制限は維持する。
+
+### 21.4.1 再監査 2026-08-03（main `71c191c`）
+
+計測対象 SHA は `71c191c`。ベースラインは `npx tsc --noEmit` PASS、`npm test` は 88 files passed / 1 skipped、858 tests passed / 1 skipped。次の「解消済み」は**再実装しない**。
+
+#### 解消済み（再実装不要）
+
+| 項目 | 実測 |
+|---|---|
+| feature 間の直接 import | **0件** |
+| operation → billing 依存 | **0件** |
+| billing / analytics → write service 依存 | **0件** |
+| `src/app/**` / `src/components/**` / `src/hooks/**` からの Firestore write SDK（`setDoc` / `updateDoc` / `addDoc` / `deleteDoc` / `runTransaction` / `writeBatch`） | **0件**。`src/components/StaffAuthGuard.tsx:14` は `collection, getDocs, query, where` の **read のみ**。`src/app/staff/mypage/page.tsx:5` は `import type { Timestamp }` の型のみ |
+| action / status の code 化 | 済 |
+
+#### 未解消（clean-break 実装は1つも着手されていない）
+
+| Gap | 実測証拠（file:line） |
+|---|---|
+| P0-B enforcement | `eslint.config.mjs` は `nextVitals` + `nextTs` + `globalIgnores` のみ。`no-restricted-imports` 設定 **0件** |
+| P0-C dev/prod 分離 | `.firebaserc` は `{"projects":{"default":"okmarine-tankrental"}}` のみ。`src/lib/firebase/config.ts` に emulator 接続（`connectFirestoreEmulator` 等）**なし** → **dev が本番 Firestore 直結** |
+| P0-D supersede banner | `docs/**` の `.md` は 98件。うち約30件が冒頭6行に正本/supersede/historical 表記を持たない |
+| V1 | `src/lib/tank-operation.ts:63` `import { getStaffLocale } from "@/hooks/useStaffSession"` |
+| V2 | `src/lib/tank-operation.ts:776` `const locale = getStaffLocale()` |
+| V1 本体 | `src/lib/tank-operation.ts:789` `window.confirm(buildTankRecoveryConfirmationMessage(...))` |
+| V3 | `src/lib/customer-identity-read.ts:40` `?? "不明な顧客"` / `:53` `?? "不明"` |
+| V4 | `StaffCorrectionRole = "管理者" \| "準管理者" \| "一般"`。参照: `src/app/staff/dashboard/page.tsx:7,78-79,188-190,195,205,222,240,267,336,368,470,473,767,783,787,802` / `src/features/staff-dashboard/services/log-correction-workflow.ts:8,23,30,39,46,63,75,86,93,107,123,141,151`。Rules: `firestore.rules:110-116` `correctionWindowAllows()` が `isAdminStaff()` を or 条件に持つ（＝管理者・準管理者は 72h 制限を bypass） |
+| V5 | `src/features/maintenance/services/damage-workflow.ts:26` `location: "倉庫"` ほか |
+| V6 | `src/lib/firebase/tank-tag-service.ts` が `runTransaction` 外 `updateDoc`。caller: `src/features/staff-operations/services/bulk-return-workflow.ts:1` / `src/features/inhouse/services/inhouse-return-workflow.ts:3` |
+| G2 | `isLegacy` / `legacy-location:` が `src/features/staff-dashboard/queries/dashboard-read-model.ts:74,83,182,210` / `src/features/staff-operations/types.ts:70` / `src/features/staff-operations/queries/bulk-return-candidates.ts:98` に残存 |
+| G3 | `src/lib/billing/invoice-candidate.ts:83` `const customersByName = buildCustomerNameIndex(customers);` / `:110` `resolvePricing(..., customersByName)` / `:254` `customersByName: Map<string, BillingCustomerMaster[]>` / `:257` `customersByName.get(displayName)` に名前一致の単価 fallback が残存。`src/app/admin/billing/page.tsx:323` は `bill.isLegacy` の表示への伝播先 |
+| G10 | `src/lib/staff-operation-error.ts:153,159` `locale === "ja"` 優先経路 |
+| custody model | `grep -rn "custody\|TankCustody" src/` = **0件**（未着手） |
+| schemaVersion | `grep -rn "schemaVersion" src/` = **0件**（未着手）。`assertOfficialAggregationSchemaReady` は `src/lib/tank-transition-projections.ts:46` に存在 |
+| P1-D inspection 制限 | `src/lib/tank-rules.ts` の `OP_RULES[ACTION.INSPECTION].allowedPrev = []`（コメント「リストから選択するため制限なし」）。`CODE_OP_RULES.inspection.allowedPrev = []` も同様で、**貸出中タンクへの耐圧検査が通る** |
+
+再監査により、[clean-break-cutover-plan.md](./clean-break-cutover-plan.md) の Status ブロック（`Clean-break implementation: not started` 等）は main `71c191c` でも正しいことを確認した。
 
 ---
 
@@ -969,12 +1017,12 @@ event schema が不正なら**0円として続行せず、集計を停止する*
 | 対象 | 場所 | 内容 |
 |---|---|---|
 | `location` → customer identity fallback | `customer-identity-read.ts` | `isLegacy` 分岐と `legacy-location:` グループ |
-| 顧客名による単価解決 | `invoice-candidate.ts` `resolvePricing` | `customersByName` 名前一致検索 |
+| 顧客名による単価解決 | `src/lib/billing/invoice-candidate.ts:83,110,254,257`（`customersByName` / `resolvePricing`） | `customerId` を持たない legacy log の名前一致検索。削除は請求額に影響しうるため、P3-B（data reset）完了後の P4-B で実施 |
 | `isLegacy` の伝播 | `invoice-candidate.ts` / `dashboard-read-model.ts` / `bulk-return-candidates.ts` / `admin/billing/page.tsx` | 「旧形式」警告表示を含む |
 | error message の ja 優先経路 | `staff-operation-error.ts:153,159` | catalog一本化（§12.3） |
 | `location` field 自体 | schema全体 | custody model へ置換（§8.5） |
 | Japanese な保存値 | `logAction: "受注貸出"` / `location: "倉庫"` 等 | code化（§12.1）。**表示ではなく保存値である点に注意** |
-| Japanese な role 値 | `staff.role` / `staffByEmail.role` | code化（§8.7 V4） |
+| Japanese な admin role 値 | `staff.role` / `staffByEmail.role` / `settings/adminPermissions` | code化（§12.7 V4-b）。staff log correction role は code 化せず削除（ADR-007） |
 
 ### 22.1 削除対象**ではない**もの（誤削除の防止）
 

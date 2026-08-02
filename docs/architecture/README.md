@@ -1,6 +1,7 @@
 # Architecture 文書の入口
 
 - 確定版: 2026-08-02（基準 `6c1d4c5` = origin/main。独立レビュー3件を反映）
+- 再監査: 2026-08-03（main `71c191c`。implementation / reset / cutover が未着手であることを実測確認）
 - **Status: Authoritative index**
 
 ```text
@@ -60,6 +61,7 @@ Clean-break implementation:   not started
 | [ADR-004](./adr/ADR-004-return-tag-draft.md) return tag draft | **UI local state**。`tanks.logNote` への draft 保存は廃止 |
 | [ADR-005](./adr/ADR-005-billing-finalization.md) billing finalization | preview は再計算可能、確定・発行済み請求書は immutable snapshot。**実装は deferred** |
 | [ADR-006](./adr/ADR-006-recovery-confirmation-port.md) recovery confirmation | **confirmation resolver port** を採用。domain から React / localStorage / `window` を排除 |
+| [ADR-007](./adr/ADR-007-staff-log-correction-authority.md) staff log correction authority | Staff dashboard の訂正・取消から role 次元を廃止し、全 active staff に 72h 共通制限を適用 |
 
 あわせて確定した業務判断: **貸出中の耐圧検査は認めない**（design-principles §8.8）。
 

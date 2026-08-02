@@ -3,6 +3,7 @@
 - 第二稿: 2026-08-02（基準 `6c1d4c5` = origin/main）
 - 第三稿: 2026-08-02（独立レビュー3件を反映。順序を **reset-first** へ変更）
 - **確定版: 2026-08-02（ユーザー最終判断により計画を承認）**
+- **第四稿: 2026-08-03（main `71c191c` で再監査。Status ブロックの記述が正しいことを実測確認）**
 - **Status: Approved plan / Implementation not started**
 
 ```text
@@ -55,7 +56,7 @@ Hosting deploy:               not executed
 - [ ] 実利用者が存在しないことの再確認（Firestore を read-only で確認）
 - [ ] reset 前の完全バックアップ（既存 `cutover:snapshot:create`）
 - [ ] 停止条件の合意（§7）
-- [x] **ADR-001〜006 確定済み**（§5）
+- [x] **ADR-001〜007 確定済み**（§5）
 
 ---
 
@@ -67,7 +68,7 @@ Hosting deploy:               not executed
 
 | PR | 目的 | 変更責務 | 変更ファイル候補 | 完了条件 | deploy |
 |---|---|---|---|---|---|
-| ~~**P0-A**~~ docs 正本化 | ~~設計文書の確定~~ | **完了** | `docs/architecture/**` + `adr/` | ✅ 独立レビュー3件反映・ADR 6件 Accepted・正本化済み | なし |
+| ~~**P0-A**~~ docs 正本化 | ~~設計文書の確定~~ | **完了** | `docs/architecture/**` + `adr/` | ✅ 独立レビュー3件反映・ADR 7件 Accepted・正本化済み | なし |
 | **P0-B** enforcement（宣言的のみ） | 依存方向の回帰を止める | **lint 設定のみ** | `eslint.config.mjs` | `no-restricted-imports` zone で5規則（domain→React/locale、operation→billing、billing→write service、feature↔feature、app/component/hookからwrite SDK）を強制。**現行違反 V1/V2 を検出してFAILすること**を確認後、allowlist登録 | なし |
 | **P0-C** dev / production 分離 | 検証を本番から隔離 | **環境のみ** | dev Firebase project、`.env` 系 | dev が本番projectを向いていない | dev project作成のみ |
 | **P0-D** document authority 発効 + supersede注記 | 正本順位を確定し、死んだ文書を死んだと分かる状態にする | docs のみ | `document-authority.md`、supersede判定の全文書へ1行banner、`AGENTS.md` / `CLAUDE.md` 修正（要ユーザー承認） | Proposed order 発効。**supersede判定の約20文書すべてに banner** | なし |
@@ -80,13 +81,14 @@ Hosting deploy:               not executed
 
 ### Phase 1 — 依存是正（互換性ではない。現行の設計違反の修正）
 
-| PR | 目的 | 完了条件 |
-|---|---|---|
-| **P1-A** domain の UI 対話・locale 依存の除去（V1/V2） | atomic writer から React / browser / locale 依存を切る | ①**`tank-operation.ts` 内の `window.` / `document.` 参照が0件**（←これが本体。locale importの除去だけでは不十分） ②`@/hooks/useStaffSession` を import しない ③payload・確認文言・エラー文言が現行と完全一致（characterization test） ④P0-B の allowlist から V1/V2 を削除 |
-| **P1-B** display 文言の boundary 移動（V3） | domain のハードコード日本語を display boundary へ | 表示結果が現行と一致。**`scripts/staff-i18n-scan.ts` の `STAFF_I18N_SOURCE_ROOTS` に `src/lib` を追加**し、既存違反を baseline 登録（これをしないとV3の完了を検証できない） |
-| **P1-C** role code 化（V4） | 日本語文字列を permission code から外す | `StaffCorrectionRole` が code（`admin` / `assistant_admin` / `staff`）。`operation-review-service` の `role !== "管理者"` が code比較。表示labelは display boundary。**schema変更を含むため Rules と `staff` / `staffByEmail` の値も対象** |
-
-| **P1-D** inspection の allowedPrev 制限 | 貸出中の耐圧検査を禁止する（業務判断） | `inspection.allowedPrev` を `["empty","filled","damaged","defective"]` へ。customer custody / in_house / disposed から実行不可。transition policy test で固定。**`rentalCycleId` を導入しない**（ADR-003） |
+| PR | 目的 | 完了条件 | deploy |
+|---|---|---|---|
+| **P1-A** domain の UI 対話・locale 依存の除去（V1/V2） | atomic writer から React / browser / locale 依存を切る | ①**`tank-operation.ts` 内の `window.` / `document.` 参照が0件**（←これが本体。locale importの除去だけでは不十分） ②`@/hooks/useStaffSession` を import しない ③payload・確認文言・エラー文言が現行と完全一致（characterization test） ④P0-B の allowlist から V1/V2 を削除 | なし |
+| **P1-B** display 文言の boundary 移動（V3） | domain のハードコード日本語を display boundary へ | 表示結果が現行と一致。**`scripts/staff-i18n-scan.ts` の `STAFF_I18N_SOURCE_ROOTS` に `src/lib` を追加**し、既存違反を baseline 登録（これをしないとV3の完了を検証できない） | なし |
+| **P1-C1** Staff dashboard role 廃止（application、V4-a） | correction / void の role 次元を削除する | `StaffCorrectionRole` / `editedByRole` / `voidedByRole` / `PRIVILEGED_CORRECTION_ROLES` / `normalizeCorrectionRole` / `correctionRole` を削除。全 active staff 共通の 72h・最新 active tank log・recovery / review 状態・理由必須の可否判定を page から feature-local な pure policy へ移す。UI は role 差以外の見た目・挙動を維持 | なし |
+| **P1-C2** Staff dashboard role bypass 削除（Rules-only PR、V4-a） | Rules を application と同じ 72h 共通制限にする | **P1-C1 の後**に `correctionWindowAllows()` から `isAdminStaff()` の or 条件を削除。Rules による actor 照合、最新 log、revision / snapshot / transaction の不変条件を維持し、Rules test で全 active staff に同じ 72h 条件を固定。§6 に従い application 変更を混ぜない | なし（deploy は Rules-only の専用 operation） |
+| **P1-C3** admin role code 化（V4-b） | admin access control に必要な日本語 role code を置換する | `operation-review-service` / `staff` / `staffByEmail` / `settings/adminPermissions` / Rules の `staffRole()` 比較を `admin` / `assistant_admin` / `staff` へ統一。admin operation review の管理者制限は維持。schema を含むため data reset 前に完了し、application / data / Rules は §6 に従って混在させない | なし（Rules deploy / data reset は専用 gate） |
+| **P1-D** inspection の allowedPrev 制限 | 貸出中の耐圧検査を禁止する（業務判断） | `inspection.allowedPrev` を `["empty","filled","damaged","defective"]` へ。customer custody / in_house / disposed から実行不可。transition policy test で固定。**`rentalCycleId` を導入しない**（ADR-003） | なし |
 
 **P1-A の設計**（ADR-006）: `TankRecoveryConfirmationRequiredError` は既に caller へ throw される構造を持つ。ただし公開writerの呼び出し元は**9箇所**あるため、確認ループを各callerへ複製するのは §18 に反する。**resolver を注入するport**（design-principles §17）を採り、未注入時は fail-closed（確認が必要になったら例外）とする。`TankRecoveryConfirmationRequiredError` に `code` を付与すること（現在 plain `Error` 継承で code を持たない唯一のdomain errorであり、§12.3 違反）。
 
@@ -119,7 +121,7 @@ Hosting deploy:               not executed
 | PR | 目的 | 前提 | 完了条件 |
 |---|---|---|---|
 | **P4-A** custody write / read 切替 | `location` を廃止 | P2-A, P3-B | **write と read を同一PRで切り替える**（変更理由が1つ「`location` の二重意味を分ける」であり、分けると窓が開く）。`location` という名前のfieldが存在しない。**logs の当時snapshotは維持** |
-| **P4-B** legacy identity fallback 削除 | G2 / G3 | P4-A | `isLegacy` / `legacy-location:` / `customersByName` が消滅。`customerId` を持たない log は**集計対象外として明示検出**。strict resolver へ置換（削除ではない） |
+| **P4-B** legacy identity fallback 削除 | G2 / G3 | P4-A | `isLegacy` / `legacy-location:` / `customersByName` が消滅。`customerId` を持たない log は**集計対象外として明示検出**。strict resolver へ置換（削除ではない）。**名前 fallback の削除は legacy log が存在する間は請求額を変えうるため、P3-B（data reset）完了後にのみ実施する。reset 後は該当 log が0件となるため安全に削除できる** |
 | **P4-C** 保存値の code 化（V5） | `logAction` / `location` の日本語保存値 | P4-A | 保存値が locale-independent。表示は display boundary |
 | **P4-D** error catalog 一本化（G10） | ja優先経路の削除 | — | `locale === "ja"` の message 優先経路を削除。**catalog を `staff-operation-error.ts` から display boundary module へ分離**（domain error code と翻訳は変更理由が異なる） |
 
@@ -152,7 +154,9 @@ Hosting deploy:               not executed
 ```text
 P0-A (docs保存) ─ P0-B (lint) ─ P0-C (env) ─ P0-D (authority + banner)
                         ↓
-        P1-A (UI対話除去) / P1-B (文言) / P1-C (role code)
+        P1-A (UI対話除去) / P1-B (文言) / P1-C1 (dashboard role廃止) / P1-D (inspection)
+                                              ├→ P1-C2 (dashboard Rules bypass削除)
+                                              └→ P1-C3 (admin role code)
                         ↓
    ADR-002 → P2-A (custody型 + Rules field list) / P2-B (schemaVersion)
                         ↓
@@ -177,6 +181,7 @@ P0-A (docs保存) ─ P0-B (lint) ─ P0-C (env) ─ P0-D (authority + banner)
 | [ADR-004](./adr/ADR-004-return-tag-draft.md) return tag draft | UI local state | P5-A / P5-B |
 | [ADR-005](./adr/ADR-005-billing-finalization.md) billing finalization | 原則確定・実装 deferred | P6-A（必須経路外） |
 | [ADR-006](./adr/ADR-006-recovery-confirmation-port.md) recovery confirmation | resolver port | P1-A |
+| [ADR-007](./adr/ADR-007-staff-log-correction-authority.md) staff log correction authority | Staff dashboard の correction / void から role 次元を廃止し、全 active staff に 72h 共通制限 | P1-C1 / P1-C2 |
 
 業務判断: **貸出中の耐圧検査は認めない** → P1-D。
 
@@ -203,6 +208,7 @@ P0-A (docs保存) ─ P0-B (lint) ─ P0-C (env) ─ P0-D (authority + banner)
 - 請求額・税・丸めの意味変更が必要になる
 - 1PR内で複数機能の挙動が変わる
 - **新旧schemaの dual read が避けられない**（→ 順序設計の誤り。順序を見直す）
+- **72h 共通制限を Rules と application の両方で一致させられない**
 - ADR未確定のまま schema を決めようとしている
 
 ---

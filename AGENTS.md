@@ -479,9 +479,14 @@ architecture 設計は確定済み（PR #183）。次は [clean-break-cutover-pl
 - P0-B: architecture enforcement（ESLint `no-restricted-imports`）
 - P0-C: dev / production Firebase 分離
 - P0-D: supersede 注記の付与
-- P1-A〜D: 依存是正（domain の `window`/locale 排除、表示文言の移動、role code 化、`inspection.allowedPrev` 制限）
+- P1-A: domain の `window` / locale 依存排除（ADR-006）
+- P1-B: 表示文言の display boundary への移動
+- P1-C1: Staff dashboard の correction / void から role 次元を廃止し、可否判定を pure policy 化（[ADR-007](docs/architecture/adr/ADR-007-staff-log-correction-authority.md)）
+- P1-C2: `correctionWindowAllows()` の管理者・準管理者 bypass 削除（P1-C1 後の Rules-only PR）
+- P1-C3: admin access control に必要な role の code 化（`operation-review-service` / `staff` / `staffByEmail` / `settings/adminPermissions` / Rules）
+- P1-D: `inspection.allowedPrev` 制限
 
-**実装は明示指示があるまで行わない。** Firestore reset / Rules cutover / deploy はいずれも未実施。
+**構造改善キャンペーンは承認済みで進行中。** 各PRは [clean-break-cutover-plan.md](docs/architecture/clean-break-cutover-plan.md) の責務境界と順序に従う。Firestore reset / Rules cutover / deploy はいずれも未実施で、実行にはユーザー承認 gate が必要。
 
 完了済み（再着手不要）:
 
