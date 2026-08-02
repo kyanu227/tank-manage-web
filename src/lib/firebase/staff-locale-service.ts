@@ -4,7 +4,7 @@ import { doc, getDoc, writeBatch } from "firebase/firestore";
 import {
   getStaffSession,
   updateStoredStaffSessionLocale,
-} from "@/hooks/useStaffSession";
+} from "@/lib/staff-session-store";
 import { normalizeLocale, type Locale } from "@/lib/locale";
 import {
   STAFF_BY_EMAIL_COLLECTION,
