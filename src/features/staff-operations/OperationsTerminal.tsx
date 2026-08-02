@@ -8,7 +8,7 @@ import type { Locale } from "@/lib/locale";
 import { DEFAULT_OP_STYLE, getOperationModeLabel, MODE_CONFIG } from "./constants";
 import { useBulkReturnByLocation } from "./hooks/useBulkReturnByLocation";
 import { formatBulkReturnCustomerTankCount } from "./bulk-return-display";
-import { useDestinations } from "./hooks/useDestinations";
+import { useCustomerOptions } from "./hooks/useCustomerOptions";
 import { useManualTankOperation } from "./hooks/useManualTankOperation";
 import { useOperationSwipe } from "./hooks/useOperationSwipe";
 import { useOrderFulfillment } from "./hooks/useOrderFulfillment";
@@ -131,16 +131,16 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     loadFailed: tanksLoadFailed,
     refetch: refetchTanks,
   } = useTanks();
-  const destinations = useDestinations();
+  const customerOptionsState = useCustomerOptions();
 
   // 返却モード: 手動返却画面の表示フラグ
   const [showManualReturn, setShowManualReturn] = useState(false);
   const [activeReturnSegment, setActiveReturnSegment] = useState<ReturnSegmentKey | null>(null);
 
-  // 操作完了後は tanks と destinations を両方再取得する（旧 fetchData 互換）。
+  // 操作完了後は tanks と customer options を両方再取得する（旧 fetchData 互換）。
   // これを怠ると allTanks が古いまま続けて validateTransition が走り、誤判定の原因になる。
   const fetchData = async () => {
-    await Promise.all([refetchTanks(), destinations.fetchDestinations()]);
+    await Promise.all([refetchTanks(), customerOptionsState.fetchCustomerOptions()]);
   };
 
   // 各業務フックの組み立て
@@ -159,7 +159,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     config,
     locale: staffLocale,
     allTanks,
-    selectedCustomer: destinations.selectedCustomer,
+    selectedCustomer: customerOptionsState.selectedCustomer,
     fetchData,
   });
 
@@ -271,12 +271,12 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
           operationLabel={modeLabel}
           locale={staffLocale}
           prefixes={prefixes}
-          customerOptions={destinations.customerSelectOptions}
-          selectedCustomerId={destinations.selectedCustomerId}
-          setSelectedCustomerId={destinations.setSelectedCustomerId}
+          customerOptions={customerOptionsState.customerSelectOptions}
+          selectedCustomerId={customerOptionsState.selectedCustomerId}
+          setSelectedCustomerId={customerOptionsState.setSelectedCustomerId}
           manual={manual}
-          dataLoading={tanksLoading || destinations.loading}
-          dataLoadFailed={tanksLoadFailed || destinations.loadFailed}
+          dataLoading={tanksLoading || customerOptionsState.loading}
+          dataLoadFailed={tanksLoadFailed || customerOptionsState.loadFailed}
           retryData={fetchData}
         />
       )}
