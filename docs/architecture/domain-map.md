@@ -204,7 +204,7 @@ domain名は英語だが業務用語は日本語なので、対応表を先に�
 
 > **これは TARGET であって現状の記述ではない。** 特に `src/app/**` を「route の薄い殻のみ」と書いているが、**現状は違う** — `src/app/staff/dashboard/page.tsx`（877行）は `normalizeCorrectionRole` / `canModifyLog` / `canCorrectLogReason` 等の**権限判定述語**を持ち、§5.1 が page 層に禁じる業務判断に当たる（gap G11）。`src/app/admin/billing/page.tsx` は1307行。
 >
-> ただし `feature-boundaries.md` §4.8 の「行数を理由に再構造化しない」は正しい判断であり、維持する。G11 は V4（role code化）と**同じコード**なので、両者は同時に直る。
+> ただし `feature-boundaries.md` §4.8 の「行数を理由に再構造化しない」は正しい判断であり、維持する。G11 は V4-a（Staff dashboard correction role の廃止）で可否判定を pure policy へ移すと同時に解消する（ADR-007）。
 
 **現行構造からの変更は最小**。clean-break は再配置ではなく削除・依存是正・schema変更として実行する。
 
@@ -264,7 +264,7 @@ src/
 + custody model の型と構築ヘルパー（ADR-002 確定後）
 + tests/architecture/*.test.ts      # 全体横断の依存検証
 + eslint.config.mjs の no-restricted-imports
-+ docs/architecture/adr/            # ADR-001〜006
++ docs/architecture/adr/            # ADR-001〜007
 ```
 
 ### 6.3 clean-break で**是正**されるもの
@@ -327,10 +327,11 @@ src/
 | G8 | dev が本番Firestore直結 | DB分離なし | dev project 分離 | 環境 | 全 |
 | ~~G9~~ | ~~`logKind` 欠落の推測処理~~ | **撤回**。当該コードは推測ではなく **fail-closed guard**。削除対象ではない（design-principles §22.1） | — | — | — |
 | G10 | error message の ja 優先経路 | `locale === "ja"` 分岐 | catalog一本化 | **互換性** | 15 |
-| **V4** | 日本語文字列が permission code | `StaffCorrectionRole = "管理者"…`、`role !== "管理者"` を transaction 内で比較 | code化 | **依存是正 + schema** | 1,8,12,13 |
+| **V4-a** | Staff dashboard correction role と page 層の可否判定 | `StaffCorrectionRole = "管理者"…`、管理者・準管理者の 72h bypass | role 次元を削除し pure policy 化（ADR-007） | **依存是正** | 1,12,13 |
+| **V4-b** | admin role の日本語文字列が permission code | `operation-review-service` / `staff` / `staffByEmail` / `settings/adminPermissions` / Rules | admin access control の role を code 化 | **依存是正 + schema** | 8,12,13 |
 | **V5** | 保存値が日本語文字列 | `logAction: "受注貸出"` / `location: "倉庫"` | code化 | **依存是正 + schema** | 1,2,3 |
 | **V6** | 非transactional な `tanks` write が stale guard を迂回 | `tank-tag-service.ts:9` の bare `updateDoc` | draft移設で削除 | **設計** | 1,3,5 |
-| **G11** | page 層に権限判定述語 | `staff/dashboard/page.tsx` の `canModifyLog` 等 | V4 と同時に解消 | 設計 | 12 |
+| **G11** | page 層に訂正・取消の可否判定述語 | `staff/dashboard/page.tsx` の `canModifyLog` 等 | V4-a で feature-local な pure policy へ移す | 設計 | 12 |
 | **G12** | Rules に deny-by-default でない blanket allow | `!isTankProjectionChanged()` で未知fieldが無制限に書ける | `hasOnly()` へ反転 | **安全性** | 1 |
 | **G13** | billing の fail-closed が全社停止 + 全log読み | 1件のmalformed logで全顧客の請求が停止。`getActiveLogs()` は無制限 | 影響範囲報告 + quarantine + 読み取り範囲限定 | 設計 | 9 |
 

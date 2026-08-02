@@ -337,6 +337,7 @@ Firestore Rules も read / write を拒否する。
 - ログ状態は `logStatus` に統一：`active` / `superseded` / `voided` のみ（旧 `voided: boolean` は廃止）
 - 新規ログ作成は `appendTankOperation()` / `applyTankOperation()` 経由、編集・取消は `applyLogCorrection()` 経由（すべて `src/lib/tank-operation.ts`）
 - 編集可は対象 tankId の最新 active ログのみ。途中ログは自動編集不可
+- Staff dashboard の訂正・取消は role に依存せず、全 active staff 共通で作成後 72 時間以内のみ可（管理者・準管理者の期限 bypass なし）
 - `editReason` は編集・取消時に必須
 - 詳細フィールドは実装時に `tank-operation.ts` のコメントに記載（重複記述を避ける）
 

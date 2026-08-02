@@ -2,6 +2,7 @@
 
 - 作成日: 2026-07-19
 - 対象commit: 7a118a4c1bce2b12bd272a6de8a69291e9d8d2ef（main HEAD）
+- 再監査: 2026-08-03、main `71c191c`。§1 の page / hook / component からの Firestore write SDK 直接呼び出し 0件が維持されていることを実測確認
 - 入力: [residual-structure-audit-2026-07-19.md](../refactor/residual-structure-audit-2026-07-19.md) §4（collection別write経路一覧）。R-xx は同監査の項目ID
 - 位置づけ: collection / document / field 単位の write owner の正本。「owner」= そのfieldを書いてよい唯一の経路群
 
@@ -11,6 +12,8 @@
 2. 既存tankの状態遷移（tanks + logs + tankAggregationRevision）は `src/lib/tank-operation.ts` のみが書く。新規tankと初期logの作成は procurement の `submitTankEntryBatch` が唯一の例外
 3. 新しいwrite経路を作る場合は、実装前に本表へownerを追記する
 4. 複数機能が同じfieldを異なる意味で書く構造は作らない。既知の例外は §2 の `tanks.logNote` のみ（暫定容認・解消は別設計）
+
+2026-08-03 の main `71c191c` 再監査でも、`src/app/**` / `src/components/**` / `src/hooks/**` から write SDK を直接呼ぶ箇所は **0件**だった。この解消済み境界を再実装せず、enforcement で回帰を止める。
 
 ## 2. tanks
 
@@ -27,12 +30,16 @@
 
 | 区分 | owner |
 |---|---|
-| tank lifecycle log（作成・訂正revision・取消） | tank-operation.ts（作成 :624-660 / 訂正 :969-1020 / 取消 :1076-1081） |
+| tank lifecycle log（作成） | tank-operation.ts（作成 :624-660） |
+| log correction revision | `applyLogCorrection`（tank-operation.ts:817-1030）が唯一の owner |
+| log void | `voidLog`（tank-operation.ts:1036-1095）が唯一の owner |
 | recovery review | `reviewOperationLogs`（operation-review-service.ts:164-312） |
 | procurement log（logKind分離済み R-31） | `submitTankEntryBatch` |
 | 資材発注 log | `submitSupplyOrder`（supply-order.ts:33-50） |
 
 禁止: 上記以外のlogs write。既存logsの一括書き換え（AGENTS.md）。
+
+log correction / void の write owner は role に依存しない。全 active staff に作成後 72 時間以内という同じ条件を適用し、管理者・準管理者の期限 bypass は設けない（[ADR-007](./adr/ADR-007-staff-log-correction-authority.md)）。この方針は owner を増やすものではなく、actor identity の記録・Rules 照合、revision chain、tank snapshot 復元、transaction atomicity を変更しない。admin operation review の管理者制限は対象外であり維持する。
 
 ## 4. transactions
 

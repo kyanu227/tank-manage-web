@@ -192,7 +192,7 @@ approved architecture は **target 設計**である。現在のコードがそ�
 | 5 | `AGENTS.md` / `CLAUDE.md` | Project direction / Core principles / Architecture direction の節 | `design-principles.md` と**内容が重複**。二重管理 | 節を削り参照1行へ置換 |
 | 6 | `CLAUDE.md` | ディレクトリ構造図 | i18n module 群が未記載 | 現行化 |
 | 7 | `AGENTS.md` | 「`destinations` は廃止済み」 | `firestore.rules` に match ブロックが残存 | Rules cutover の削除対象に含める |
-| 8 | `AGENTS.md` | 「多言語対応は業務ロジックから日本語文字列依存を外した後に進める」 | **完了扱いにできない**。`action` の日本語判定は0件だが、**`role` は日本語文字列のまま permission code として機能**（V4）。英語化は表示層のみ完了 | 「表示の英語化は完了。ただし `role` の code化は未了（V4）」へ |
+| 8 | `AGENTS.md` | 「多言語対応は業務ロジックから日本語文字列依存を外した後に進める」 | **完了扱いにできない**。`action` の日本語判定は0件だが、Staff dashboard correction role は廃止対象（V4-a）、admin role の日本語 permission code は未解消（V4-b） | 「表示の英語化は完了。Staff dashboard correction role は削除し、admin role は code 化する（ADR-007 / V4-b）」へ |
 | 9 | `README.md`（root） | `create-next-app` の初期テンプレートのまま | **新規参加者が最初に開くファイルが、どこも指していない**。`docs/architecture/README.md` への流入経路が実質存在しない | 3行の入口（SITEMAP / architecture / AGENTS）へ差し替え |
 | 10 | `SITEMAP.md` §8-1 | 「tank write は `writeBatch` で原子的に実行」 | **事実誤り**。`tank-operation.ts` は `runTransaction` 4箇所、`writeBatch` 0箇所。順位7の「事実記述」正本が、最重要ファイルについて誤った事実を述べている | `runTransaction` へ訂正 |
 | 11 | `SITEMAP.md` §9 rule 4 | 「`batch.set(..., {merge:true})` は幽霊ドキュメントを作るため原則禁止」 | この規則は**具体的で理由もあるのに `design-principles.md` §24 に無い**。一方 `{merge:true}` は10ファイル以上で実際に使われている | 規則が有効なら §24 へ移し違反を棚卸し。obsolete なら SITEMAP から削除 |
