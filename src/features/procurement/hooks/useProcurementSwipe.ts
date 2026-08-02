@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
   PROCUREMENT_MODES,
@@ -13,14 +13,29 @@ import {
   dispatchStaffSectionSwipeProgress,
   shouldIgnoreSwipeStart,
 } from "@/components/staff-section-tabs-events";
+import {
+  reconcileStaffSectionSwipePendingTarget,
+  resolveStaffSectionSwipeBase,
+  selectNextStaffSectionSwipeMode,
+} from "@/lib/staff-section-swipe-selection";
 
 export function useProcurementSwipe(mode: ProcurementMode) {
   const router = useRouter();
+  const currentModeRef = useRef(mode);
+  const pendingTargetRef = useRef<ProcurementMode | null>(null);
   const swipeRef = useRef<{
     startX: number;
     startY: number;
     horizontalSwipeStarted: boolean;
   } | null>(null);
+
+  useLayoutEffect(() => {
+    currentModeRef.current = mode;
+    pendingTargetRef.current = reconcileStaffSectionSwipePendingTarget(
+      mode,
+      pendingTargetRef.current,
+    );
+  }, [mode]);
 
   useEffect(() => {
     const onTouchStart = (e: TouchEvent) => {
@@ -50,7 +65,11 @@ export function useProcurementSwipe(mode: ProcurementMode) {
         swipe.horizontalSwipeStarted = true;
       }
 
-      const idx = PROCUREMENT_MODES.indexOf(mode);
+      const { index: idx } = resolveStaffSectionSwipeBase(
+        PROCUREMENT_MODES,
+        currentModeRef.current,
+        pendingTargetRef.current,
+      );
       const offsetTabs = Math.max(-1, Math.min(1, -dx / (window.innerWidth / PROCUREMENT_MODES.length)));
       dispatchStaffSectionSwipeProgress({
         key: "procurement",
@@ -74,17 +93,20 @@ export function useProcurementSwipe(mode: ProcurementMode) {
         return;
       }
 
-      const idx = PROCUREMENT_MODES.indexOf(mode);
-      const nextMode = dx < 0
-        ? PROCUREMENT_MODES[(idx + 1) % PROCUREMENT_MODES.length]
-        : PROCUREMENT_MODES[(idx - 1 + PROCUREMENT_MODES.length) % PROCUREMENT_MODES.length];
+      const selection = selectNextStaffSectionSwipeMode(
+        PROCUREMENT_MODES,
+        currentModeRef.current,
+        pendingTargetRef.current,
+        dx < 0 ? "left" : "right",
+      );
+      pendingTargetRef.current = selection.nextMode;
 
       dispatchStaffSectionSwipeEnd({
         key: "procurement",
         committed: true,
-        settledIndex: PROCUREMENT_MODES.indexOf(nextMode),
+        settledIndex: selection.settledIndex,
       });
-      router.replace(PROCUREMENT_ROUTE_BY_MODE[nextMode]);
+      router.replace(PROCUREMENT_ROUTE_BY_MODE[selection.nextMode]);
     };
 
     const onTouchCancel = () => {
@@ -101,10 +123,14 @@ export function useProcurementSwipe(mode: ProcurementMode) {
     document.addEventListener("touchend", onTouchEnd, { passive: true });
     document.addEventListener("touchcancel", onTouchCancel, { passive: true });
     return () => {
+      if (swipeRef.current?.horizontalSwipeStarted) {
+        dispatchStaffSectionSwipeEnd({ key: "procurement", committed: false });
+      }
+      swipeRef.current = null;
       document.removeEventListener("touchstart", onTouchStart);
       document.removeEventListener("touchmove", onTouchMove);
       document.removeEventListener("touchend", onTouchEnd);
       document.removeEventListener("touchcancel", onTouchCancel);
     };
-  }, [mode, router]);
+  }, [router]);
 }
