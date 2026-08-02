@@ -2,21 +2,25 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Shield, Save, RefreshCw, Check } from "lucide-react";
-import type { AdminPermissionPages } from "@/lib/admin/admin-permissions";
-import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
+import type { AdminCapabilityGrants } from "@/lib/admin/admin-permissions";
+import {
+  ADMIN_CAPABILITY_DEFINITIONS,
+  type AdminCapability,
+} from "@/lib/admin/adminCapabilities";
+import { useAdminCapabilities } from "@/hooks/useAdminCapabilities";
 import {
   getAdminPermissions,
-  savePermissions,
+  saveAdminPermissions,
 } from "@/lib/firebase/admin-permissions-service";
-
-const PERMISSION_CONTROLLED_ADMIN_PAGES = ADMIN_PAGES.filter(
-  (page) => !page.adminOnly && !page.devOnly && !page.hidden
-);
 
 const ROLES = ["管理者", "準管理者"] as const;
 
 export default function PermissionsPage() {
-  const [permissions, setPermissions] = useState<AdminPermissionPages>({});
+  const { can, role: actorRole } = useAdminCapabilities();
+  const canManage = can("staffPermissions.manage");
+  const [permissions, setPermissions] = useState<AdminCapabilityGrants>({});
+  const [legacySource, setLegacySource] = useState(false);
+  const [ignoredLegacyPaths, setIgnoredLegacyPaths] = useState<readonly string[]>([]);
   const [malformedReason, setMalformedReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -26,14 +30,14 @@ export default function PermissionsPage() {
     setLoading(true);
     setMalformedReason(null);
     try {
-      const result = await getAdminPermissions(
-        PERMISSION_CONTROLLED_ADMIN_PAGES.map((page) => page.path),
-      );
+      const result = await getAdminPermissions();
       if (result.kind === "malformed") {
         setMalformedReason(result.reason);
         return;
       }
-      setPermissions(result.pages);
+      setPermissions(result.capabilities);
+      setLegacySource(result.kind === "valid" && result.source === "legacy-paths");
+      setIgnoredLegacyPaths(result.kind === "valid" ? result.ignoredLegacyPaths : []);
     } catch (e) {
       console.error("Failed to fetch permissions:", e);
     } finally {
@@ -45,26 +49,30 @@ export default function PermissionsPage() {
     fetchPermissions();
   }, [fetchPermissions]);
 
-  const toggleRole = (path: string, role: string) => {
+  const toggleRole = (capability: AdminCapability, role: string) => {
     // 管理者 is always checked and cannot be toggled
-    if (role === "管理者") return;
+    const definition = ADMIN_CAPABILITY_DEFINITIONS.find((item) => item.key === capability);
+    if (role === "管理者" || !canManage || !definition?.assignableToSubAdmin) return;
 
     setPermissions((prev) => {
-      const current = prev[path] || ["管理者"];
+      const current = prev[capability] || ["管理者"];
       const has = current.includes(role);
       return {
         ...prev,
-        [path]: has ? current.filter((r) => r !== role) : [...current, role],
+        [capability]: has ? current.filter((r) => r !== role) : [...current, role],
       };
     });
     setSaved(false);
   };
 
   const handleSave = async () => {
+    if (!canManage) return;
     if (!confirm("権限設定を保存しますか？")) return;
     setSaving(true);
     try {
-      await savePermissions(permissions);
+      await saveAdminPermissions({ capabilities: permissions, actorRole });
+      setLegacySource(false);
+      setIgnoredLegacyPaths([]);
       setSaved(true);
       setTimeout(() => setSaved(false), 3000);
     } catch (e: unknown) {
@@ -80,10 +88,10 @@ export default function PermissionsPage() {
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
           <div>
             <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
-              ページ権限設定
+              機能権限設定
             </h1>
             <p style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>
-              準管理者がアクセスできる管理ページを設定します
+              準管理者が利用できる機能単位の権限を設定します
             </p>
           </div>
           <button
@@ -132,10 +140,10 @@ export default function PermissionsPage() {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
-            ページ権限設定
+            機能権限設定
           </h1>
           <p style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>
-            準管理者がアクセスできる管理ページを設定します
+            URLではなく、準管理者が利用できる機能を設定します
           </p>
         </div>
         <button
@@ -154,6 +162,13 @@ export default function PermissionsPage() {
         </button>
       </div>
 
+      {legacySource && (
+        <div role="status" style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 12, padding: "12px 16px", marginBottom: 16, color: "#92400e", fontSize: 13, lineHeight: 1.6 }}>
+          旧path権限を決定的にcapabilityへ変換して表示しています。次回保存時はcapabilityだけを保存します。
+          {ignoredLegacyPaths.length > 0 && ` 未登録path ${ignoredLegacyPaths.length}件は安全のため権限へ変換していません。`}
+        </div>
+      )}
+
       {/* Info banner */}
       <div style={{
         background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 12,
@@ -163,7 +178,7 @@ export default function PermissionsPage() {
         <Shield size={20} color="#6366f1" style={{ flexShrink: 0 }} />
         <p style={{ fontSize: 13, color: "#4338ca", fontWeight: 500, lineHeight: 1.5 }}>
           「管理者」は常に全ページにアクセスできます（変更不可）。<br />
-          ここでは「準管理者」のアクセス権限のみ設定できます。
+          ここでは「準管理者」のcapabilityだけを設定します。Rules上管理者限定の更新権限は固定です。
         </p>
       </div>
 
@@ -186,7 +201,7 @@ export default function PermissionsPage() {
                   color: "#94a3b8", textAlign: "left", textTransform: "uppercase",
                   letterSpacing: "0.05em",
                 }}>
-                  ページ
+                  機能
                 </th>
                 {ROLES.map((role) => (
                   <th key={role} style={{
@@ -200,25 +215,27 @@ export default function PermissionsPage() {
               </tr>
             </thead>
             <tbody>
-              {PERMISSION_CONTROLLED_ADMIN_PAGES.map((page) => {
-                const roles = permissions[page.path] || ["管理者"];
+              {ADMIN_CAPABILITY_DEFINITIONS.map((definition) => {
+                const roles = permissions[definition.key] || ["管理者"];
                 return (
-                  <tr key={page.path} style={{ borderBottom: "1px solid #f1f5f9" }}>
+                  <tr key={definition.key} style={{ borderBottom: "1px solid #f1f5f9" }}>
                     <td style={{ padding: "14px 20px" }}>
                       <div style={{ fontWeight: 700, fontSize: 14, color: "#1e293b" }}>
-                        {page.label}
+                        {definition.label}
                       </div>
                       <div style={{ fontSize: 11, color: "#94a3b8", fontFamily: "monospace", marginTop: 2 }}>
-                        {page.path}
+                        {definition.key} ・ {definition.group}
                       </div>
                     </td>
                     {ROLES.map((role) => {
                       const checked = role === "管理者" || roles.includes(role);
-                      const disabled = role === "管理者"; // 管理者 is always on
+                      const disabled = role === "管理者"
+                        || !canManage
+                        || !definition.assignableToSubAdmin;
                       return (
                         <td key={role} style={{ padding: "14px 20px", textAlign: "center" }}>
                           <button
-                            onClick={() => toggleRole(page.path, role)}
+                            onClick={() => toggleRole(definition.key, role)}
                             disabled={disabled}
                             style={{
                               width: 36, height: 36, borderRadius: 10,
@@ -250,13 +267,14 @@ export default function PermissionsPage() {
       <div style={{ marginTop: 24, display: "flex", alignItems: "center", gap: 12 }}>
         <button
           onClick={handleSave}
-          disabled={saving || loading}
+          disabled={saving || loading || !canManage}
           style={{
             display: "inline-flex", alignItems: "center", gap: 8,
             padding: "12px 24px", borderRadius: 12, border: "none",
             background: saved ? "#10b981" : "#6366f1",
             color: "#fff", fontSize: 15, fontWeight: 800,
-            cursor: (saving || loading) ? "not-allowed" : "pointer",
+            cursor: (saving || loading || !canManage) ? "not-allowed" : "pointer",
+            opacity: canManage ? 1 : 0.6,
             transition: "all 0.2s",
           }}
         >
@@ -265,7 +283,7 @@ export default function PermissionsPage() {
           ) : saving ? (
             <><RefreshCw size={16} style={{ animation: "spin 1s linear infinite" }} /> 保存中…</>
           ) : (
-            <><Save size={18} /> 権限設定を保存</>
+            <><Save size={18} /> {canManage ? "権限設定を保存" : "閲覧のみ"}</>
           )}
         </button>
       </div>

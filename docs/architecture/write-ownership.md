@@ -59,7 +59,7 @@
 
 | document / collection | owner |
 |---|---|
-| settings/adminPermissions | `savePermissions`（admin-permissions-service.ts:17-24） |
+| settings/adminPermissions | `saveAdminPermissions`（admin-permissions-service.ts）。`capabilities`だけを保存し、旧`pages`はread時変換のみ |
 | settings/portal | `savePortalSettings`（admin-settings.ts:59-68） |
 | settings/inspection | `saveInspectionSettings`（admin-settings.ts:85-94） |
 | settings/billingInvoice | `saveBillingInvoiceSettings`（billing-settings-service.ts:16-31） |

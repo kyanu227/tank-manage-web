@@ -1,5 +1,9 @@
 # adminPermissions の decode 経路統一 — 設計note（F7）
 
+> **Superseded (2026-08-02):** 実装済みの現行正本は
+> [admin-capability-permissions.md](./admin-capability-permissions.md)。本書はpath権限時代の
+> 問題分析を残すhistorical noteであり、現在のschemaや実装手順の正本ではない。
+
 - 作成日: 2026-07-29
 - 対象commit: `ddb2e8fc81e92c0c0ef2c3ab591562c18ad5d0ce`
 - 位置づけ: **設計note。実装は含まない。挙動変更を伴うため人間判断が必須**

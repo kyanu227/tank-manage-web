@@ -2,59 +2,55 @@ import { describe, expect, it, vi } from "vitest";
 import { decodeAdminPermissions } from "@/lib/admin/admin-permissions";
 
 vi.mock("next/navigation", () => ({ usePathname: () => "/admin/sales" }));
-vi.mock("@/lib/firebase/config", () => ({ auth: {}, db: {} }));
-vi.mock("@/lib/firebase/staff-auth", () => ({
-  findActiveStaffByEmail: vi.fn(),
-}));
+vi.mock("@/lib/firebase/config", () => ({ auth: {} }));
+vi.mock("@/lib/firebase/staff-auth", () => ({ findActiveStaffByEmail: vi.fn() }));
+vi.mock("@/lib/firebase/admin-permissions-service", () => ({ getAdminPermissions: vi.fn() }));
 
 import { resolveAdminPermissionAccess } from "@/components/AdminAuthGuard";
 
-describe("AdminAuthGuard permission resolution", () => {
-  it("pages[path] が string の malformed data では準管理者を許可しない", () => {
+describe("AdminAuthGuard capability resolution", () => {
+  it("malformed dataでは準管理者を全拒否する", () => {
+    const access = resolveAdminPermissionAccess(
+      "準管理者",
+      "/admin/sales",
+      decodeAdminPermissions({ capabilities: null }),
+    );
+    expect(access).toEqual({ hasAccess: false, capabilities: [] });
+  });
+
+  it("missing documentでは準管理者を全拒否する", () => {
+    expect(resolveAdminPermissionAccess(
+      "準管理者",
+      "/admin/sales",
+      { kind: "missing" },
+    )).toEqual({ hasAccess: false, capabilities: [] });
+  });
+
+  it("許可されたcapabilityで直接URLアクセスを許可する", () => {
     const decoded = decodeAdminPermissions({
-      pages: { "/admin/sales": "準管理者" },
+      capabilities: { "analytics.sales.view": ["管理者", "準管理者"] },
     });
-
-    expect(resolveAdminPermissionAccess("準管理者", "/admin/sales", decoded)).toEqual({
-      hasAccess: false,
-      allowedPaths: [],
-    });
-  });
-
-  it("malformed data では準管理者を全拒否する", () => {
-    const decoded = decodeAdminPermissions({ pages: null });
-
-    expect(resolveAdminPermissionAccess("準管理者", "/admin/sales", decoded)).toEqual({
-      hasAccess: false,
-      allowedPaths: [],
-    });
-  });
-
-  it("missing document では準管理者を全拒否する", () => {
-    const decoded = decodeAdminPermissions(undefined);
-
-    expect(resolveAdminPermissionAccess("準管理者", "/admin/sales", decoded)).toEqual({
-      hasAccess: false,
-      allowedPaths: [],
-    });
-  });
-
-  it("正常な data では従来どおり準管理者を許可する", () => {
-    const decoded = decodeAdminPermissions({
-      pages: { "/admin/sales": ["管理者", "準管理者"] },
-    });
-
-    expect(resolveAdminPermissionAccess("準管理者", "/admin/sales", decoded)).toEqual({
-      hasAccess: true,
-      allowedPaths: ["/admin/sales"],
-    });
-  });
-
-  it("管理者は decode 結果にかかわらず全権を持つ", () => {
-    const decoded = decodeAdminPermissions({ pages: null });
-    const access = resolveAdminPermissionAccess("管理者", "/admin/sales", decoded);
+    const access = resolveAdminPermissionAccess("準管理者", "/admin/sales", decoded);
 
     expect(access.hasAccess).toBe(true);
-    expect(access.allowedPaths).toContain("/admin/sales");
+    expect(access.capabilities).toEqual(["analytics.sales.view"]);
+  });
+
+  it("別capabilityの直接URLアクセスを拒否する", () => {
+    const decoded = decodeAdminPermissions({
+      capabilities: { "dashboard.view": ["準管理者"] },
+    });
+
+    expect(resolveAdminPermissionAccess("準管理者", "/admin/sales", decoded).hasAccess).toBe(false);
+  });
+
+  it("管理者は全登録routeへアクセスできる", () => {
+    const access = resolveAdminPermissionAccess("管理者", "/admin/security-rules", { kind: "missing" });
+    expect(access.hasAccess).toBe(true);
+    expect(access.capabilities).toContain("developer.securityRules.view");
+  });
+
+  it("registry未登録routeは管理者でもgateを通さない", () => {
+    expect(resolveAdminPermissionAccess("管理者", "/admin/unknown", { kind: "missing" }).hasAccess).toBe(false);
   });
 });

@@ -42,6 +42,7 @@ Clean-break implementation:   not started
 | errorはどう表現するか | code + params（design-principles §12.3） |
 | **業務用語（貸出・返却・充填…）から探したい** | [domain-map.md §2.0](./domain-map.md) の対応表 |
 | **画面から探したい** | [SITEMAP.md](../../SITEMAP.md) |
+| Adminの権限モデルはどこか | [Admin capability権限モデル](../design/admin-capability-permissions.md) |
 
 ---
 
