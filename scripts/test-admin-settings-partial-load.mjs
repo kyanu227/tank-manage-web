@@ -11,8 +11,6 @@ import {
 
 const notifySettings = {
   emails: ["ops@example.com"],
-  alertMonths: 4,
-  validityYears: 5,
 };
 const lineConfigs = [{ uid: "line-1" }];
 
@@ -69,8 +67,6 @@ test("document不存在defaultとread errorを区別する", async () => {
   assert.equal(missingDocument.source, "default");
   assert.deepEqual(missingDocument.settings, {
     emails: [],
-    alertMonths: 6,
-    validityYears: 3,
   });
 
   const [loadedDefault, readError] = await loadIndependentSettingsSections(

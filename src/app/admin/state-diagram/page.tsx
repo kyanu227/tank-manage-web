@@ -20,11 +20,11 @@ import {
 } from "@/lib/tank-rules";
 import { isRewardEligible } from "@/lib/incentive-rules";
 import { isBillable } from "@/lib/billing-rules";
+import AdminDeveloperPageShell from "@/components/admin/AdminDeveloperPageShell";
 import {
   Workflow,
   Coins,
   Receipt,
-  Check,
   Minus,
   ArrowRight,
   Info,
@@ -565,7 +565,7 @@ function SummaryCards() {
 /* ══════════════════════════════════
    メインページ
    ══════════════════════════════════ */
-export default function StateDiagramPage() {
+function StateDiagramContent() {
   const [hoveredStatus, setHoveredStatus] = useState<string | null>(null);
 
   return (
@@ -759,6 +759,14 @@ export default function StateDiagramPage() {
         </ul>
       </div>
     </div>
+  );
+}
+
+export default function StateDiagramPage() {
+  return (
+    <AdminDeveloperPageShell activeTab="stateDiagram">
+      <StateDiagramContent />
+    </AdminDeveloperPageShell>
   );
 }
 

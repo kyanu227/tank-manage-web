@@ -44,6 +44,15 @@ describe("AdminAuthGuard capability resolution", () => {
     expect(resolveAdminPermissionAccess("準管理者", "/admin/sales", decoded).hasAccess).toBe(false);
   });
 
+  it("設定の直接URLを各view capabilityでのみ許可する", () => {
+    const decoded = decodeAdminPermissions({
+      capabilities: { "settings.notifications.view": ["準管理者"] },
+    });
+    expect(resolveAdminPermissionAccess("準管理者", "/admin/notifications", decoded).hasAccess).toBe(true);
+    expect(resolveAdminPermissionAccess("準管理者", "/admin/settings", decoded).hasAccess).toBe(false);
+    expect(resolveAdminPermissionAccess("準管理者", "/admin/settings/tank-operations", decoded).hasAccess).toBe(false);
+  });
+
   it("管理者は全登録routeへアクセスできる", () => {
     const access = resolveAdminPermissionAccess("管理者", "/admin/security-rules", { kind: "missing" });
     expect(access.hasAccess).toBe(true);
