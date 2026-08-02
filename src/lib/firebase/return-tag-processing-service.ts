@@ -22,8 +22,10 @@ import {
 
 type PendingReturnRequestItem = {
   id: string;
+  customerId: string;
   tankId: string;
   condition: ReturnCondition;
+  expectedLatestLogId?: unknown;
 };
 
 type PendingReturnRequestGroup = {
