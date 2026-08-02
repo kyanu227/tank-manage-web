@@ -79,21 +79,6 @@ Clean-break implementation:   not started
 
 ---
 
-## 未確定の設計判断（ADR候補）
-
-詳細は [clean-break-cutover-plan.md §5](./clean-break-cutover-plan.md)。
-
-| ADR | 論点 | 種別 |
-|---|---|---|
-| ADR-001 | tank identity（surrogate要否） | 業務確認（上表 Q1） |
-| ADR-002 | custody model と値域 | 業務確認（上表 Q2, Q3） |
-| ADR-003 | rental cycle identity | 業務確認（上表 Q3） |
-| ADR-004 | return tag draft の置き場所 | 業務確認（上表 Q4） |
-| ADR-005 | billing finalization | 業務確認（上表 Q5） |
-| ADR-006 | domain の UI対話・locale 依存の是正 | **技術判断。resolver port を推奨。確認不要** |
-
----
-
 ## Domain-local 設計文書
 
 固有のinvariantが十分にあるdomainだけに置く（空の雛形は作らない）。
