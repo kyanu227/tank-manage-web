@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { Shield, Save, RefreshCw, Check } from "lucide-react";
+import type { AdminPermissionPages } from "@/lib/admin/admin-permissions";
 import { ADMIN_PAGES } from "@/lib/admin/adminPagesRegistry";
 import {
   getAdminPermissions,
@@ -14,21 +15,25 @@ const PERMISSION_CONTROLLED_ADMIN_PAGES = ADMIN_PAGES.filter(
 
 const ROLES = ["管理者", "準管理者"] as const;
 
-type PermMap = Record<string, string[]>;
-
 export default function PermissionsPage() {
-  const [permissions, setPermissions] = useState<PermMap>({});
+  const [permissions, setPermissions] = useState<AdminPermissionPages>({});
+  const [malformedReason, setMalformedReason] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
   const fetchPermissions = useCallback(async () => {
     setLoading(true);
+    setMalformedReason(null);
     try {
-      const permissions = await getAdminPermissions(
+      const result = await getAdminPermissions(
         PERMISSION_CONTROLLED_ADMIN_PAGES.map((page) => page.path),
       );
-      setPermissions(permissions as PermMap);
+      if (result.kind === "malformed") {
+        setMalformedReason(result.reason);
+        return;
+      }
+      setPermissions(result.pages);
     } catch (e) {
       console.error("Failed to fetch permissions:", e);
     } finally {
@@ -68,6 +73,58 @@ export default function PermissionsPage() {
       setSaving(false);
     }
   };
+
+  if (malformedReason) {
+    return (
+      <div>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 24, flexWrap: "wrap", gap: 12 }}>
+          <div>
+            <h1 style={{ fontSize: 24, fontWeight: 800, color: "#0f172a", letterSpacing: "-0.02em" }}>
+              ページ権限設定
+            </h1>
+            <p style={{ fontSize: 14, color: "#94a3b8", marginTop: 4 }}>
+              準管理者がアクセスできる管理ページを設定します
+            </p>
+          </div>
+          <button
+            onClick={fetchPermissions}
+            disabled={loading}
+            style={{
+              display: "inline-flex", alignItems: "center", gap: 6,
+              padding: "8px 14px", borderRadius: 8,
+              border: "1px solid #e2e8f0", background: "#fff",
+              color: "#64748b", fontSize: 13, fontWeight: 600,
+              cursor: "pointer",
+            }}
+          >
+            <RefreshCw size={14} style={{ animation: loading ? "spin 1s linear infinite" : undefined }} />
+            再読込
+          </button>
+        </div>
+        <div
+          role="alert"
+          style={{
+            background: "#fef2f2", border: "1px solid #fecaca", borderRadius: 12,
+            padding: "18px", display: "flex", alignItems: "flex-start", gap: 12,
+          }}
+        >
+          <Shield size={20} color="#dc2626" style={{ flexShrink: 0 }} />
+          <div>
+            <h2 style={{ fontSize: 15, fontWeight: 800, color: "#991b1b", marginBottom: 4 }}>
+              権限設定データが壊れています
+            </h2>
+            <p style={{ fontSize: 13, color: "#b91c1c", lineHeight: 1.6 }}>
+              安全のため権限設定の表示と保存を停止しました。設定データを確認してください。
+            </p>
+            <p style={{ fontSize: 12, color: "#b91c1c", marginTop: 8, fontFamily: "monospace" }}>
+              {malformedReason}
+            </p>
+          </div>
+        </div>
+        <style>{`@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }`}</style>
+      </div>
+    );
+  }
 
   return (
     <div>
