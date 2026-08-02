@@ -23,7 +23,7 @@ describe("submitDamageReport", () => {
     applyBulkTankOperationsMock.mockResolvedValue([]);
   });
 
-  it("複数タンクと入力済みnoteを従来どおりのpayloadで一括送信する", async () => {
+  it("複数タンクと入力済みnoteをdamage provenance付きで一括送信する", async () => {
     await submitDamageReport({
       tankIds: ["A01", "B02"],
       note: "バルブ不良、タンク凹み",
@@ -36,19 +36,30 @@ describe("submitDamageReport", () => {
         {
           tankId: "A01",
           transitionAction: "破損報告",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "damage",
+          },
           location: "倉庫",
           logNote: "バルブ不良、タンク凹み",
         },
         {
           tankId: "B02",
           transitionAction: "破損報告",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "damage",
+          },
           location: "倉庫",
           logNote: "バルブ不良、タンク凹み",
         },
       ],
     ]);
+
+    const operations = applyBulkTankOperationsMock.mock.calls[0][0];
+    expect(operations.every((operation) => operation.context.actor === ACTOR)).toBe(true);
   });
 
   it("空のnoteも省略せず従来どおり空文字で送信する", async () => {
@@ -64,7 +75,11 @@ describe("submitDamageReport", () => {
         {
           tankId: "C03",
           transitionAction: "破損報告",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "damage",
+          },
           location: "倉庫",
           logNote: "",
         },

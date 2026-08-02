@@ -16,7 +16,11 @@ export async function submitRepairCompletion(
   input: SubmitRepairCompletionInput,
 ): Promise<void> {
   const { tanks, actor } = input;
-  const context = { actor };
+  const context = {
+    actor,
+    source: "maintenance" as const,
+    workflow: "repair" as const,
+  };
 
   await applyBulkTankOperations(
     tanks.map(({ tankId, currentStatus }) => ({

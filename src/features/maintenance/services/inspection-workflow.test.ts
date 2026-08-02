@@ -23,7 +23,7 @@ describe("submitInspectionCompletion", () => {
     applyBulkTankOperationsMock.mockResolvedValue([]);
   });
 
-  it("異なるcurrentStatusの複数タンクを入力順のpayloadで一括送信する", async () => {
+  it("異なるcurrentStatusの複数タンクをinspection provenance付きで一括送信する", async () => {
     await submitInspectionCompletion({
       tanks: [
         { tankId: "A01", currentStatus: "filled" },
@@ -42,7 +42,11 @@ describe("submitInspectionCompletion", () => {
           tankId: "A01",
           transitionAction: "耐圧検査完了",
           currentStatus: "filled",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "inspection",
+          },
           location: "倉庫",
           tankExtra: {
             maintenanceDate: "2026/07/25",
@@ -53,7 +57,11 @@ describe("submitInspectionCompletion", () => {
           tankId: "B02",
           transitionAction: "耐圧検査完了",
           currentStatus: "lent",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "inspection",
+          },
           location: "倉庫",
           tankExtra: {
             maintenanceDate: "2026/07/25",
@@ -69,14 +77,13 @@ describe("submitInspectionCompletion", () => {
       ["context", "currentStatus", "location", "tankExtra", "tankId", "transitionAction"],
     ]);
     expect(operations.map((operation) => Object.keys(operation.context))).toEqual([
-      ["actor"],
-      ["actor"],
+      ["actor", "source", "workflow"],
+      ["actor", "source", "workflow"],
     ]);
+    expect(operations.every((operation) => operation.context.actor === ACTOR)).toBe(true);
     expect(operations.some((operation) => (
       "logNote" in operation
       || "tankNote" in operation
-      || "source" in operation.context
-      || "workflow" in operation.context
       || "returnCondition" in operation.context
       || "provenance" in operation
       || "provenance" in operation.context
@@ -99,7 +106,11 @@ describe("submitInspectionCompletion", () => {
           tankId: "C03",
           transitionAction: "耐圧検査完了",
           currentStatus: "damaged",
-          context: { actor: ACTOR },
+          context: {
+            actor: ACTOR,
+            source: "maintenance",
+            workflow: "inspection",
+          },
           location: "倉庫",
           tankExtra: {
             maintenanceDate: "2026/07/25",
@@ -118,12 +129,10 @@ describe("submitInspectionCompletion", () => {
       "tankId",
       "transitionAction",
     ]);
-    expect(Object.keys(operation.context)).toEqual(["actor"]);
+    expect(Object.keys(operation.context)).toEqual(["actor", "source", "workflow"]);
     expect(
       "logNote" in operation
       || "tankNote" in operation
-      || "source" in operation.context
-      || "workflow" in operation.context
       || "returnCondition" in operation.context
       || "provenance" in operation
       || "provenance" in operation.context,
