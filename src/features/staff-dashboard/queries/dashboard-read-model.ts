@@ -12,7 +12,10 @@ import {
 } from "@/lib/tank-action-status-codes";
 import type { TankSnapshot } from "@/lib/tank-operation";
 import type { TankDoc } from "@/lib/tank-types";
-import { formatDashboardActionLabel } from "@/features/staff-dashboard/i18n";
+import {
+  formatDashboardActionLabel,
+  getDashboardText,
+} from "@/features/staff-dashboard/i18n";
 import { timestampToMillis } from "@/features/staff-dashboard/timestamp";
 
 type DashboardDateValue =
@@ -166,6 +169,8 @@ export function buildStaffDashboardReadModel(
         currentCustomerName: customerId
           ? customerNameById.get(customerId)
           : undefined,
+        unknownCustomerLabel: getDashboardText("unknownCustomer", "ja"),
+        legacyUnknownLabel: getDashboardText("unknown", "ja"),
       },
     );
 

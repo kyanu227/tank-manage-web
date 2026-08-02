@@ -107,6 +107,29 @@ describe("buildStaffDashboardReadModel tank summary", () => {
   });
 });
 
+describe("buildStaffDashboardReadModel customer identity fallback", () => {
+  it("customerId付きunknown表示はlocaleにかかわらず既存の日本語snapshotを維持する", () => {
+    const result = buildReadModel({
+      staffLocale: "en",
+      tanks: [makeTank({
+        id: "A-01",
+        status: "lent",
+        customerId: "customer-unknown",
+      })],
+    });
+
+    expect(result.byLocation).toStrictEqual([{
+      key: "customer:customer-unknown",
+      customerId: "customer-unknown",
+      displayName: "不明な顧客",
+      lent: 1,
+      unreturned: 0,
+      total: 1,
+      isLegacy: false,
+    }]);
+  });
+});
+
 describe("buildStaffDashboardReadModel byLocation", () => {
   it("customerId正本・master名優先・legacy fallback・unknownを現行groupへ集計する", () => {
     const tanks = Object.freeze([

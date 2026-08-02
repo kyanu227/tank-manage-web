@@ -68,9 +68,45 @@ export const STAFF_OPERATION_ERROR_TEXT = {
   recovery_browser_required: TANK_RECOVERY_CONFIRMATION_TEXT.browserRequired,
   recovery_previous_customer_missing:
     TANK_RECOVERY_CONFIRMATION_TEXT.missingPreviousCustomer,
+  recovery_source_log_required: {
+    ja: "復元元ログが指定されていません",
+    en: "A source log is required for recovery.",
+  },
+  recovery_source_log_not_found: {
+    ja: "復元元ログが存在しません",
+    en: "The recovery source log does not exist.",
+  },
+  recovery_tank_log_required: {
+    ja: "タンク操作ログだけ復元できます",
+    en: "Only tank-operation logs can be restored.",
+  },
+  recovery_voided_revision_forbidden: {
+    ja: "取消済み revision には戻せません",
+    en: "A voided revision cannot be restored.",
+  },
+  recovery_generated_revision_forbidden: {
+    ja: "自動補完されたrevisionへは直接復元できません",
+    en: "An automatically generated recovery revision cannot be restored directly.",
+  },
+  recovery_unofficial_revision_forbidden: {
+    ja: "正式集計状態を確認できないrevisionへは復元できません",
+    en: "A revision whose official aggregation state cannot be verified cannot be restored.",
+  },
+  recovery_chain_mismatch: {
+    ja: "同一チェーン内のログだけ復元できます",
+    en: "Only a log in the same revision chain can be restored.",
+  },
   target_log_not_found: {
     ja: "対象ログが存在しません",
     en: "The selected log no longer exists. Reload the activity log.",
+  },
+  target_log_transition_plan_unverifiable: {
+    ja: "対象ログのtransitionPlanを検証できません",
+    en: "The selected log's transition plan could not be verified.",
+  },
+  direct_log_aggregation_invalid: {
+    ja: "直接操作ログの集計状態が不正なため編集できません",
+    en: "This direct-operation log cannot be edited because its aggregation state is invalid.",
   },
   log_already_replaced: {
     ja: "このログはすでに置換されています",
@@ -91,6 +127,34 @@ export const STAFF_OPERATION_ERROR_TEXT = {
   recovery_log_not_editable: {
     ja: "自動補完ログは直接編集できません。取消後に正しい操作を再実行してください",
     en: "A recovery log cannot be edited directly. Void it, then run the correct operation.",
+  },
+  log_original_at_missing: {
+    ja: "対象ログのoriginalAtがありません",
+    en: "The selected log does not have originalAt.",
+  },
+  log_timestamp_missing: {
+    ja: "対象ログのtimestampがありません",
+    en: "The selected log does not have a timestamp.",
+  },
+  ordered_lend_transaction_required: {
+    ja: "受注貸出は受注transactionの完了処理でだけ実行できます",
+    en: "An order-based lend operation can only run when completing its order transaction.",
+  },
+  inspection_date_update_forbidden: {
+    ja: "耐圧日情報は耐圧検査操作でだけ更新できます",
+    en: "Pressure-test date fields can only be updated by an inspection operation.",
+  },
+  carry_over_previous_customer_projection_invalid: {
+    ja: "持ち越し前の顧客projectionが不正です",
+    en: "The customer projection before carry-over is invalid.",
+  },
+  log_transition_plan_unverifiable: {
+    ja: "transitionPlanを検証できないログは編集・取消できません",
+    en: "Logs whose transition plan cannot be verified cannot be edited or voided.",
+  },
+  log_revision_created_at_missing: {
+    ja: "対象ログの作成日時を確認できません",
+    en: "The selected log's creation time could not be verified.",
   },
   correction_window_expired: {
     ja: "一般スタッフは72時間を過ぎたログを編集・取消できません",

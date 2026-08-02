@@ -37,6 +37,7 @@ export const STAFF_I18N_SHARED_FILES = [
   "src/lib/staff-session-store.ts",
   "src/lib/staff-operation-error.ts",
   "src/lib/tank-action-status-labels.ts",
+  "src/lib/tank-operation.ts",
   "src/lib/tank-recovery-confirmation-message.ts",
 ] as const;
 
@@ -83,10 +84,12 @@ export function scanStaffJapanese(
 
   listStaffI18nSourceFiles(repositoryRoot).forEach((absolutePath) => {
     const repositoryPath = toRepositoryPath(repositoryRoot, absolutePath);
-    const lines = readFileSync(absolutePath, "utf8").split(/\r?\n/u);
+    const sourceText = readFileSync(absolutePath, "utf8");
+    const lines = sourceText.split(/\r?\n/u);
+    const commentFreeLines = stripTypeScriptComments(sourceText).split(/\r?\n/u);
 
     lines.forEach((lineText, index) => {
-      if (!JAPANESE_TEXT_PATTERN.test(lineText)) return;
+      if (!JAPANESE_TEXT_PATTERN.test(commentFreeLines[index] ?? "")) return;
       const text = lineText.trim().replace(/\s+/gu, " ");
       const stableText = `${repositoryPath}\0${text}`;
       const duplicateIndex = seenByStableText.get(stableText) ?? 0;
@@ -105,6 +108,114 @@ export function scanStaffJapanese(
   });
 
   return occurrences;
+}
+
+/** 文字列内のcomment markerを維持し、comment tokenだけを空白化する。 */
+export function stripTypeScriptComments(sourceText: string): string {
+  type LexicalMode =
+    | "code"
+    | "single_quote"
+    | "double_quote"
+    | "template"
+    | "line_comment"
+    | "block_comment";
+
+  const output: string[] = [];
+  const templateExpressionDepths: number[] = [];
+  let mode: LexicalMode = "code";
+
+  for (let index = 0; index < sourceText.length; index += 1) {
+    const character = sourceText[index];
+    const nextCharacter = sourceText[index + 1];
+
+    if (mode === "line_comment") {
+      if (character === "\n" || character === "\r") {
+        output.push(character);
+        mode = "code";
+      } else {
+        output.push(" ");
+      }
+      continue;
+    }
+
+    if (mode === "block_comment") {
+      if (character === "*" && nextCharacter === "/") {
+        output.push(" ", " ");
+        index += 1;
+      } else {
+        output.push(character === "\n" || character === "\r" ? character : " ");
+        continue;
+      }
+      mode = "code";
+      continue;
+    }
+
+    if (mode === "single_quote" || mode === "double_quote") {
+      output.push(character);
+      if (character === "\\" && nextCharacter !== undefined) {
+        output.push(nextCharacter);
+        index += 1;
+      } else if (
+        (mode === "single_quote" && character === "'")
+        || (mode === "double_quote" && character === '"')
+      ) {
+        mode = "code";
+      } else if (character === "\n" || character === "\r") {
+        mode = "code";
+      }
+      continue;
+    }
+
+    if (mode === "template") {
+      output.push(character);
+      if (character === "\\" && nextCharacter !== undefined) {
+        output.push(nextCharacter);
+        index += 1;
+      } else if (character === "`") {
+        mode = "code";
+      } else if (character === "$" && nextCharacter === "{") {
+        output.push(nextCharacter);
+        index += 1;
+        templateExpressionDepths.push(1);
+        mode = "code";
+      }
+      continue;
+    }
+
+    if (character === "/" && nextCharacter === "/") {
+      output.push(" ", " ");
+      index += 1;
+      mode = "line_comment";
+      continue;
+    }
+    if (character === "/" && nextCharacter === "*") {
+      output.push(" ", " ");
+      index += 1;
+      mode = "block_comment";
+      continue;
+    }
+
+    output.push(character);
+    if (character === "'") {
+      mode = "single_quote";
+    } else if (character === '"') {
+      mode = "double_quote";
+    } else if (character === "`") {
+      mode = "template";
+    } else if (character === "{" && templateExpressionDepths.length > 0) {
+      const lastIndex = templateExpressionDepths.length - 1;
+      templateExpressionDepths[lastIndex] += 1;
+    } else if (character === "}" && templateExpressionDepths.length > 0) {
+      const lastIndex = templateExpressionDepths.length - 1;
+      templateExpressionDepths[lastIndex] -= 1;
+      if (templateExpressionDepths[lastIndex] === 0) {
+        templateExpressionDepths.pop();
+        mode = "template";
+      }
+    }
+  }
+
+  return output.join("");
 }
 
 export function readStaffI18nBaseline(repositoryRoot: string): StaffI18nBaseline {

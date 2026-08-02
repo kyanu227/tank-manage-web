@@ -28,6 +28,19 @@ const GENERATED_UNKNOWN_CUSTOMER_LABEL = {
   en: "Unknown customer",
 } satisfies Record<Locale, string>;
 
+const LEGACY_UNKNOWN_CUSTOMER_LABEL = {
+  ja: "不明",
+  en: "Unknown",
+} satisfies Record<Locale, string>;
+
+export function getGeneratedUnknownCustomerLabel(locale: Locale): string {
+  return GENERATED_UNKNOWN_CUSTOMER_LABEL[locale];
+}
+
+export function getLegacyUnknownCustomerLabel(locale: Locale): string {
+  return LEGACY_UNKNOWN_CUSTOMER_LABEL[locale];
+}
+
 const BULK_RETURN_POOL_LABELS = {
   today_lent: {
     ja: "本日貸出",

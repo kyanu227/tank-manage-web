@@ -24,7 +24,114 @@ type SuppliedErrorParam = Readonly<{
   param: string;
 }>;
 
+const PR10_TANK_OPERATION_ERROR_TEXT = {
+  recovery_source_log_required: {
+    ja: "復元元ログが指定されていません",
+    en: "A source log is required for recovery.",
+    throwCount: 1,
+  },
+  target_log_transition_plan_unverifiable: {
+    ja: "対象ログのtransitionPlanを検証できません",
+    en: "The selected log's transition plan could not be verified.",
+    throwCount: 1,
+  },
+  direct_log_aggregation_invalid: {
+    ja: "直接操作ログの集計状態が不正なため編集できません",
+    en: "This direct-operation log cannot be edited because its aggregation state is invalid.",
+    throwCount: 1,
+  },
+  recovery_source_log_not_found: {
+    ja: "復元元ログが存在しません",
+    en: "The recovery source log does not exist.",
+    throwCount: 1,
+  },
+  recovery_tank_log_required: {
+    ja: "タンク操作ログだけ復元できます",
+    en: "Only tank-operation logs can be restored.",
+    throwCount: 1,
+  },
+  recovery_voided_revision_forbidden: {
+    ja: "取消済み revision には戻せません",
+    en: "A voided revision cannot be restored.",
+    throwCount: 1,
+  },
+  recovery_generated_revision_forbidden: {
+    ja: "自動補完されたrevisionへは直接復元できません",
+    en: "An automatically generated recovery revision cannot be restored directly.",
+    throwCount: 1,
+  },
+  recovery_unofficial_revision_forbidden: {
+    ja: "正式集計状態を確認できないrevisionへは復元できません",
+    en: "A revision whose official aggregation state cannot be verified cannot be restored.",
+    throwCount: 1,
+  },
+  recovery_chain_mismatch: {
+    ja: "同一チェーン内のログだけ復元できます",
+    en: "Only a log in the same revision chain can be restored.",
+    throwCount: 1,
+  },
+  log_original_at_missing: {
+    ja: "対象ログのoriginalAtがありません",
+    en: "The selected log does not have originalAt.",
+    throwCount: 1,
+  },
+  log_timestamp_missing: {
+    ja: "対象ログのtimestampがありません",
+    en: "The selected log does not have a timestamp.",
+    throwCount: 1,
+  },
+  ordered_lend_transaction_required: {
+    ja: "受注貸出は受注transactionの完了処理でだけ実行できます",
+    en: "An order-based lend operation can only run when completing its order transaction.",
+    throwCount: 1,
+  },
+  inspection_date_update_forbidden: {
+    ja: "耐圧日情報は耐圧検査操作でだけ更新できます",
+    en: "Pressure-test date fields can only be updated by an inspection operation.",
+    throwCount: 1,
+  },
+  carry_over_previous_customer_projection_invalid: {
+    ja: "持ち越し前の顧客projectionが不正です",
+    en: "The customer projection before carry-over is invalid.",
+    throwCount: 2,
+  },
+  log_transition_plan_unverifiable: {
+    ja: "transitionPlanを検証できないログは編集・取消できません",
+    en: "Logs whose transition plan cannot be verified cannot be edited or voided.",
+    throwCount: 1,
+  },
+  log_revision_created_at_missing: {
+    ja: "対象ログの作成日時を確認できません",
+    en: "The selected log's creation time could not be verified.",
+    throwCount: 1,
+  },
+} as const;
+
 describe("staff operation error localization", () => {
+  it("keeps all 17 PR-10 guards as coded throws with exact ja/en catalog text", () => {
+    const tankOperationSource = readFileSync(
+      join(process.cwd(), "src/lib/tank-operation.ts"),
+      "utf8",
+    );
+    let throwCount = 0;
+
+    Object.entries(PR10_TANK_OPERATION_ERROR_TEXT).forEach(([
+      code,
+      expected,
+    ]) => {
+      const typedCode = code as keyof typeof STAFF_OPERATION_ERROR_TEXT;
+      expect(STAFF_OPERATION_ERROR_TEXT[typedCode].ja, `${code}.ja`).toBe(expected.ja);
+      expect(STAFF_OPERATION_ERROR_TEXT[typedCode].en, `${code}.en`).toBe(expected.en);
+      const codedThrow = `throw new StaffOperationError("${code}")`;
+      const occurrences = tankOperationSource.split(codedThrow).length - 1;
+      expect(occurrences, `${code} throw count`).toBe(expected.throwCount);
+      throwCount += occurrences;
+    });
+
+    expect(throwCount).toBe(17);
+    expect(tankOperationSource).not.toContain('throw new Error("');
+  });
+
   it("keeps complete ja/en text and matching placeholders for every code", () => {
     Object.entries(STAFF_OPERATION_ERROR_TEXT).forEach(([code, text]) => {
       expect(Object.keys(text).sort(), code).toEqual(["en", "ja"]);
