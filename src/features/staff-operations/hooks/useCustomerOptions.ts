@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { CustomerSnapshot } from "@/lib/operation-context";
 import { listActiveCustomerSnapshots } from "@/lib/firebase/customers-service";
 
-export function useDestinations() {
+export function useCustomerOptions() {
   const [customerOptions, setCustomerOptions] = useState<CustomerSnapshot[]>([]);
   const [selectedCustomerId, setSelectedCustomerId] = useState<string>("");
   const [loading, setLoading] = useState(true);
@@ -20,7 +20,7 @@ export function useDestinations() {
     [customerOptions]
   );
 
-  const fetchDestinations = useCallback(async () => {
+  const fetchCustomerOptions = useCallback(async () => {
     setLoading(true);
     setLoadFailed(false);
     try {
@@ -42,8 +42,8 @@ export function useDestinations() {
   }, []);
 
   useEffect(() => {
-    fetchDestinations();
-  }, [fetchDestinations]);
+    fetchCustomerOptions();
+  }, [fetchCustomerOptions]);
 
   return {
     customerOptions,
@@ -54,6 +54,6 @@ export function useDestinations() {
     setSelectedCustomerId,
     loading,
     loadFailed,
-    fetchDestinations,
+    fetchCustomerOptions,
   };
 }
