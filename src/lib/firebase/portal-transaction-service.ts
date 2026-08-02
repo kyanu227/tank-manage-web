@@ -24,6 +24,8 @@ export type CreatePortalReturnRequestsInput = {
   items: Array<{
     tankId: string;
     condition: PortalReturnCondition;
+    customerId: string;
+    expectedLatestLogId: string;
   }>;
   source: PortalReturnSource;
 };
@@ -37,6 +39,8 @@ export type CreatePortalUnfilledReportsInput = {
 type PendingPortalReturnRequestItem = {
   tankId: string;
   condition: PortalReturnCondition;
+  customerId: string;
+  expectedLatestLogId: string;
 };
 
 export async function createPortalOrder(
@@ -73,6 +77,7 @@ export async function createPortalOrder(
 export async function createPortalReturnRequests(
   input: CreatePortalReturnRequestsInput,
 ): Promise<string[]> {
+  input.items.forEach((item) => assertValidPortalReturnRequestItem(input, item));
   const items = normalizePortalReturnRequestItems(input.items);
 
   if (items.length === 0) {
@@ -141,6 +146,8 @@ function normalizePortalReturnRequestItems(
     .map((item) => ({
       tankId: item.tankId.trim(),
       condition: item.condition,
+      customerId: item.customerId,
+      expectedLatestLogId: item.expectedLatestLogId,
     }))
     .filter((item) => item.tankId);
 }
@@ -149,15 +156,36 @@ function createPendingPortalReturnRequest(
   input: CreatePortalReturnRequestsInput,
   item: PendingPortalReturnRequestItem,
 ): Promise<string> {
+  assertValidPortalReturnRequestItem(input, item);
   // ポータル返却は申請作成のみ。tanks/logs の更新はスタッフ返却確定側で行う。
   return transactionsRepository.createTransaction({
     type: "return",
     status: "pending_return",
     tankId: item.tankId,
     condition: item.condition,
-    customerId: input.identity.customerId,
+    customerId: item.customerId,
+    expectedLatestLogId: item.expectedLatestLogId,
     customerName: input.identity.customerName,
     createdByUid: input.identity.customerUserUid,
     source: input.source,
   });
+}
+
+function assertValidPortalReturnRequestItem(
+  input: CreatePortalReturnRequestsInput,
+  item: CreatePortalReturnRequestsInput["items"][number],
+): void {
+  if (!isNonEmptyString(item.expectedLatestLogId)) {
+    throw new Error("Portal return requires a valid expectedLatestLogId.");
+  }
+  if (!isNonEmptyString(item.customerId)) {
+    throw new Error("Portal return requires a valid customerId.");
+  }
+  if (item.customerId !== input.identity.customerId) {
+    throw new Error("Portal return customerId must match the linked identity.");
+  }
+}
+
+function isNonEmptyString(value: unknown): value is string {
+  return typeof value === "string" && value.trim() !== "";
 }
