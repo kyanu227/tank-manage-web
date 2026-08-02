@@ -106,11 +106,8 @@ service cloud.firestore {
     }
 
     function correctionWindowAllows(data) {
-      return isAdminStaff()
-        || (
-          data.get("revisionCreatedAt", null) is timestamp
-          && request.time <= data.get("revisionCreatedAt", null) + duration.value(72, "h")
-        );
+      return data.get("revisionCreatedAt", null) is timestamp
+        && request.time <= data.get("revisionCreatedAt", null) + duration.value(72, "h");
     }
 
     function isTankStatusCode(status) {
