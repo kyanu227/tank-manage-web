@@ -8,6 +8,11 @@ import { getPortalAutoReturnSchedule } from "@/lib/firebase/admin-settings";
 import { createPortalReturnRequests } from "@/lib/firebase/portal-transaction-service";
 import { getPortalCurrentLentTanks } from "@/lib/portal/customer-reads";
 import { getPortalIdentityFromStorage, isLinkedPortalIdentity, type PortalIdentity } from "@/lib/portal";
+import {
+  getPortalReturnGroupReadiness,
+  getPortalReturnObservedCycleMarkers,
+  type PortalReturnCycleReadinessIssue,
+} from "@/lib/portal/return-cycle-readiness";
 
 type Condition = ReturnTagValue;
 
@@ -15,6 +20,8 @@ interface TankItem {
   id: string;          // Firestore doc id (= tankId)
   lentAt: Date | null;
   condition: Condition;
+  customerId: unknown;
+  latestLogId: unknown;
 }
 
 function fmtDate(d: Date | null): string {
@@ -32,6 +39,25 @@ function timestampToDate(value: unknown): Date | null {
     return value.toDate();
   }
   return null;
+}
+
+function getCycleIssueMessage(
+  issues: readonly PortalReturnCycleReadinessIssue[],
+): string {
+  const reasons = new Set(issues.map((issue) => issue.reason));
+  if (reasons.has("customer_id_mismatch")) {
+    return "貸出先情報が現在の顧客と一致しません";
+  }
+  if (
+    reasons.has("invalid_customer_id")
+    && reasons.has("invalid_latest_log_id")
+  ) {
+    return "顧客IDと最新操作IDがありません";
+  }
+  if (reasons.has("invalid_customer_id")) {
+    return "顧客IDがありません";
+  }
+  return "最新操作IDがありません";
 }
 
 export default function CustomerReturnPage() {
@@ -63,7 +89,14 @@ export default function CustomerReturnPage() {
 
       const items: TankItem[] = tankDocs.map((t) => {
         const lentAt = timestampToDate(t.updatedAt);
-        return { id: t.id, lentAt, condition: "normal" };
+        const observedCycle = getPortalReturnObservedCycleMarkers(t);
+        return {
+          id: t.id,
+          lentAt,
+          condition: "normal",
+          customerId: observedCycle.customerId,
+          latestLogId: observedCycle.latestLogId,
+        };
       });
       // Sort by lent date ascending (oldest first)
       items.sort((a, b) => (a.lentAt?.getTime() ?? 0) - (b.lentAt?.getTime() ?? 0));
@@ -93,6 +126,8 @@ export default function CustomerReturnPage() {
     const todayKey = `autoReturn_${identity.customerId}_${now.toDateString()}`;
     const alreadyDone = localStorage.getItem(todayKey) === "1";
     if (alreadyDone) return;
+    const readiness = getPortalReturnGroupReadiness(tanks, identity.customerId);
+    if (!readiness.ready) return;
 
     const scheduled = new Date(now);
     scheduled.setHours(h, m, 0, 0);
@@ -120,13 +155,17 @@ export default function CustomerReturnPage() {
       if (!auto) alert("返却申請は顧客紐付け後に利用できます。");
       return;
     }
+    const readiness = getPortalReturnGroupReadiness(submitItems, identity.customerId);
+    if (!readiness.ready) return;
     setIsSubmitting(true);
     try {
       await createPortalReturnRequests({
         identity,
-        items: submitItems.map((tank) => ({
+        items: readiness.cycles.map(({ tank, customerId, latestLogId }) => ({
           tankId: tank.id,
           condition: tank.condition,
+          customerId,
+          expectedLatestLogId: latestLogId,
         })),
         source: auto ? "auto_schedule" : "customer_portal",
       });
@@ -144,6 +183,13 @@ export default function CustomerReturnPage() {
   const keepCount = tanks.filter((t) => t.condition === "keep").length;
   const submitCount = tanks.length;
   const isLinked = isLinkedPortalIdentity(identity);
+  const cycleReadiness = isLinked
+    ? getPortalReturnGroupReadiness(tanks, identity.customerId)
+    : null;
+  const isCycleBlocked = cycleReadiness?.ready === false;
+  const blockedTankIds = cycleReadiness && !cycleReadiness.ready
+    ? Array.from(new Set(cycleReadiness.issues.map((issue) => issue.tankId)))
+    : [];
 
   if (isSuccess) {
     return (
@@ -267,6 +313,9 @@ export default function CustomerReturnPage() {
             const isKeep = tank.condition === "keep";
             const conditionStyle = getReturnTagStyle(tank.condition);
             const isSpecial = tank.condition !== "normal";
+            const cycleIssues = cycleReadiness && !cycleReadiness.ready
+              ? cycleReadiness.issues.filter((issue) => issue.tankId === tank.id)
+              : [];
             return (
               <div
                 key={tank.id}
@@ -305,6 +354,18 @@ export default function CustomerReturnPage() {
                   )}
                 </div>
 
+                {cycleIssues.length > 0 && (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 6,
+                    margin: "-4px 0 12px", padding: "8px 10px", borderRadius: 10,
+                    background: "#fef2f2", color: "#b91c1c",
+                    fontSize: 12, fontWeight: 700,
+                  }}>
+                    <AlertCircle size={14} />
+                    <span>{getCycleIssueMessage(cycleIssues)}</span>
+                  </div>
+                )}
+
                 {/* Condition selector */}
                 <ReturnTagSelector<Condition>
                   value={tank.condition}
@@ -339,16 +400,31 @@ export default function CustomerReturnPage() {
               持ち越し {keepCount}本 を記録します
             </div>
           )}
+          {isCycleBlocked && (
+            <div
+              role="alert"
+              style={{
+                marginBottom: 10, padding: "10px 12px", borderRadius: 12,
+                background: "#fef2f2", border: "1px solid #fecaca",
+                color: "#991b1b", fontSize: 12, fontWeight: 700,
+                lineHeight: 1.55, textAlign: "center",
+              }}
+            >
+              <div>返却申請できないタンクが含まれています。</div>
+              <div>対象: {blockedTankIds.join("、")}</div>
+              <div>お手数ですが担当者へご連絡ください。</div>
+            </div>
+          )}
           <button
             onClick={() => submitReturn(false)}
-            disabled={isSubmitting || submitCount === 0}
+            disabled={isSubmitting || submitCount === 0 || isCycleBlocked}
             style={{
               width: "100%", padding: "16px 0", borderRadius: 18, border: "none",
-              background: submitCount > 0 ? "#0f172a" : "#e2e8f0",
-              color: submitCount > 0 ? "#fff" : "#94a3b8",
+              background: submitCount > 0 && !isCycleBlocked ? "#0f172a" : "#e2e8f0",
+              color: submitCount > 0 && !isCycleBlocked ? "#fff" : "#94a3b8",
               fontSize: 16, fontWeight: 800,
               display: "flex", alignItems: "center", justifyContent: "center", gap: 10,
-              cursor: submitCount > 0 && !isSubmitting ? "pointer" : "default",
+              cursor: submitCount > 0 && !isSubmitting && !isCycleBlocked ? "pointer" : "default",
               transition: "all 0.15s",
             }}
           >

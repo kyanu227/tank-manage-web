@@ -76,7 +76,13 @@ const LINKED_IDENTITY = {
 } as const;
 
 const READY_STATE_VALUES = [
-  [{ id: "tank-1", lentAt: null, condition: "normal" }],
+  [{
+    id: "tank-1",
+    lentAt: null,
+    condition: "normal",
+    customerId: LINKED_IDENTITY.customerId,
+    latestLogId: "log-1",
+  }],
   false,
   false,
   false,
