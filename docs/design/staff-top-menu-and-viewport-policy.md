@@ -521,7 +521,7 @@ StaffSectionTabs 既存の reduced 分岐はそのまま維持する。
 | sheet | `role="dialog"` / `aria-modal` / `aria-label` |
 | 閉時 | `aria-hidden` + `inert` |
 | Escape | 閉じる |
-| focus | 開いたら sheet 自体（`tabindex=-1` / `outline:none`）へ移動して trap する。閉じたときは **Escape のときだけ** Chevron へ返す（§8.1） |
+| focus | 開いたら sheet 自体（`tabindex=-1` / `outline:none`）へ移動して trap する。閉じたときは **キーボード起点のときだけ** Chevron へ返す（§8.1） |
 | active | `aria-current="page"` |
 | header chip | `aria-pressed` + 切替先を述べる `aria-label`（受注件数を含める） |
 | キーボード | Tab / Shift+Tab / Enter / Space で全操作が可能 |
@@ -538,10 +538,31 @@ menu の開閉ではフォーカスを機械的に動かすため、そのまま
 
 - 開いたときは最初の操作要素ではなく **sheet 自体**（`tabindex="-1"` / `outline:none`）へ移す。
   Tab を押した時点で通常どおり内部の先頭要素へ入る
-- 閉じたときに Chevron へ戻すのは **Escape で閉じた場合だけ**。
-  backdrop タップ・ジェスチャー・ナビゲーション選択では focus を動かさない
+- 閉じたときに Chevron へ戻すのは **キーボード起点で閉じた場合だけ**
 
 リング自体は残す（色は accent ではなく `rgba(15,23,42,0.32)`）。
+
+#### close の理由でフォーカス復帰を分ける
+
+「Escape のときだけ戻す」では不十分だった。sheet 内の close ボタンを Enter / Space で
+押した場合も通常の close に入り、**閉じた直後に `aria-hidden` + `inert` になる領域へ
+フォーカスが取り残される**。close は理由を受け取る形にする。
+
+```ts
+close(options?: { restoreFocus?: boolean })
+```
+
+| 閉じ方 | restoreFocus | 理由 |
+|---|---|---|
+| Escape | **true** | キーボード文脈を Chevron へ戻す |
+| close ボタンを Enter / Space | **true** | ボタンが inert になるため、戻さないと行き場を失う |
+| close ボタンをポインターでタップ | false | プログラム的 focus がリングを出す |
+| backdrop をポインターでタップ | false | 同上 |
+| 上スワイプ | false | 同上 |
+| ナビゲーション選択 | false | 遷移先へ委ねる |
+
+キーボードかポインターかは close ボタンの `click` イベントで判別する
+（Enter / Space 由来の click は `event.detail === 0`）。
 
 **スワイプを唯一の操作方法にしない。**
 

@@ -69,7 +69,12 @@ export interface StaffMenuSheetProps {
   readonly localeStatus: StaffLocaleStatus;
   readonly localeErrorMessage?: string;
   readonly onLocaleChange: (locale: Locale) => void;
-  readonly onClose: () => void;
+  /**
+   * `restoreFocus` はキーボード起点の close（close ボタンの Enter・Space）でのみ true。
+   * close ボタンは閉じた直後に inert になるため、返さないとフォーカスが行き場を失う。
+   * ポインター・ジェスチャー起点では渡さない（プログラム的な focus がリングを出すため）。
+   */
+  readonly onClose: (options?: { restoreFocus?: boolean }) => void;
   /** ナビゲーション選択時に menu を閉じるための通知 */
   readonly onNavigate: () => void;
   readonly sheetRef?: React.Ref<HTMLDivElement>;

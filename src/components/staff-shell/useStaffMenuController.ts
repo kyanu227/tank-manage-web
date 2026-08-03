@@ -5,11 +5,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 const FOCUSABLE_SELECTOR =
   "a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex='-1'])";
 
+export interface StaffMenuCloseOptions {
+  /**
+   * 閉じたあと header の Chevron へフォーカスを戻すか。
+   * キーボード起点の close（Escape / close ボタンの Enter・Space）でのみ true。
+   */
+  readonly restoreFocus?: boolean;
+}
+
 export interface StaffMenuController {
   readonly open: boolean;
   readonly openMenu: () => void;
   readonly toggle: () => void;
-  readonly close: () => void;
+  readonly close: (options?: StaffMenuCloseOptions) => void;
   readonly triggerRef: React.RefObject<HTMLButtonElement | null>;
   readonly sheetRef: React.RefObject<HTMLDivElement | null>;
   readonly closeButtonRef: React.RefObject<HTMLButtonElement | null>;
@@ -34,12 +42,18 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
   const scrollRegionRef = useRef<HTMLElement | null>(null);
   const shouldRestoreFocusRef = useRef(false);
 
-  // Escape で閉じたときだけ Chevron へフォーカスを返す。
-  // ポインター・ジェスチャーで閉じたときに返すと、プログラム的な focus() が
+  // キーボード起点で閉じたときだけ Chevron へフォーカスを返す。
+  //
+  // close ボタンは閉じた直後に aria-hidden + inert になるため、
+  // 返さないとキーボード利用者のフォーカスが行き場を失う。
+  // 一方ポインター・ジェスチャーで返すと、プログラム的な focus() が
   // :focus-visible を立てて Chevron にリングが出てしまう。
   const restoreFocusOnCloseRef = useRef(false);
 
-  const close = useCallback(() => setOpen(false), []);
+  const close = useCallback((options?: StaffMenuCloseOptions) => {
+    if (options?.restoreFocus) restoreFocusOnCloseRef.current = true;
+    setOpen(false);
+  }, []);
   const openMenu = useCallback(() => setOpen(true), []);
   const toggle = useCallback(() => setOpen((value) => !value), []);
 
@@ -53,7 +67,7 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
 
   useEffect(() => {
     if (!open) {
-      // Escape で閉じた場合だけ Chevron へ戻す（キーボード利用者の文脈を保つ）。
+      // キーボード起点（Escape / close ボタンの Enter・Space）でだけ Chevron へ戻す。
       // ポインター操作では focus を動かさず、リングを出さない
       if (shouldRestoreFocusRef.current && restoreFocusOnCloseRef.current) {
         triggerRef.current?.focus();
@@ -75,8 +89,7 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
-        restoreFocusOnCloseRef.current = true;
-        setOpen(false);
+        close({ restoreFocus: true });
         return;
       }
       if (event.key !== "Tab") return;
@@ -102,7 +115,7 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
 
     document.addEventListener("keydown", handleKeyDown);
     return () => document.removeEventListener("keydown", handleKeyDown);
-  }, [open]);
+  }, [close, open]);
 
   return {
     open,

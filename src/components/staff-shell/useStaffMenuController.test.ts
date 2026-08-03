@@ -190,11 +190,30 @@ describe("useStaffMenuController", () => {
     controller = renderController();
     expect(controller.open).toBe(true);
 
-    // backdrop タップ / ジェスチャー / ナビゲーション選択に相当
+    // backdrop タップ / 上スワイプ / ナビゲーション選択に相当
     controller.close();
     controller = renderController();
     expect(controller.open).toBe(false);
     // プログラム的 focus() は :focus-visible を立ててリングを出すため戻さない
     expect(trigger.focus).not.toHaveBeenCalled();
+  });
+
+  it("close ボタンをキーボードで実行したときは Chevron へ focus を戻す", () => {
+    const { trigger, sheet } = buildRefs();
+
+    let controller = renderController();
+    controller.triggerRef.current = trigger as unknown as HTMLButtonElement;
+    controller.sheetRef.current = sheet as unknown as HTMLDivElement;
+
+    controller.openMenu();
+    controller = renderController();
+    expect(controller.open).toBe(true);
+
+    // sheet 内の close ボタンは閉じた直後に inert になるため、
+    // 戻さないとキーボード利用者の focus が行き場を失う
+    controller.close({ restoreFocus: true });
+    controller = renderController();
+    expect(controller.open).toBe(false);
+    expect(trigger.focus).toHaveBeenCalledOnce();
   });
 });

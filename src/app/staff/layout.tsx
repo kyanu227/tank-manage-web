@@ -114,7 +114,8 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             localeErrorMessage={localeSetting.errorMessage}
             onLocaleChange={localeSetting.save}
             onClose={menu.close}
-            onNavigate={menu.close}
+            /* 遷移先へフォーカスを委ねるため、ここでは Chevron へ戻さない */
+            onNavigate={() => menu.close()}
             sheetRef={menu.sheetRef}
             closeButtonRef={menu.closeButtonRef}
             backdropRef={menu.backdropRef}

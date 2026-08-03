@@ -47,7 +47,7 @@ export default function StaffMenuSheet({
         data-staff-swipe-surface="menu-backdrop"
         tabIndex={-1}
         aria-hidden="true"
-        onClick={onClose}
+        onClick={() => onClose()}
       />
 
       <div
@@ -72,7 +72,12 @@ export default function StaffMenuSheet({
               type="button"
               className={styles.sheetClose}
               aria-label={getStaffShellText("closeMenu", locale)}
-              onClick={onClose}
+              /*
+                Enter / Space による click は detail === 0。
+                キーボード起点のときだけ Chevron へフォーカスを返す
+                （このボタンは閉じた直後に inert になるため）
+              */
+              onClick={(event) => onClose({ restoreFocus: event.detail === 0 })}
               data-swipe-ignore="true"
             >
               <span className={`${styles.chevron} ${styles.chevronUp}`}>
