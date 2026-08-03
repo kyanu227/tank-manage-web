@@ -82,7 +82,7 @@ export default function OrderFulfillmentScreen({
     <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", background: "#f8fafc" }}>
       {/* 統合ヘッダー（1行・Packageアイコン無し） */}
       <div style={{ padding: "10px 16px", background: "#fff", borderBottom: "1px solid #e2e8f0", display: "flex", alignItems: "center", gap: 10, flexShrink: 0 }}>
-        <button type="button" aria-label={getStaffOperationText("back", locale)} onClick={closeFulfillment} style={{ width: 32, height: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b" }}>
+        <button type="button" data-swipe-ignore="true" aria-label={getStaffOperationText("back", locale)} onClick={closeFulfillment} style={{ width: 32, height: 32, flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", borderRadius: 8, border: "none", background: "#f1f5f9", cursor: "pointer", color: "#64748b" }}>
           <ArrowLeft size={16} />
         </button>
         {/* 顧客名 */}
@@ -113,7 +113,7 @@ export default function OrderFulfillmentScreen({
         <div role="alert" style={{ padding: "8px 16px", background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
           <span>{getStaffOperationText("operationDataLoadFailure", locale)}</span>
           {retryData && (
-            <button type="button" onClick={() => void retryData()} style={{ flexShrink: 0, border: "none", borderRadius: 8, padding: "6px 10px", background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+            <button type="button" data-swipe-ignore="true" onClick={() => void retryData()} style={{ flexShrink: 0, border: "none", borderRadius: 8, padding: "6px 10px", background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
               {getStaffOperationText("retry", locale)}
             </button>
           )}
@@ -175,7 +175,10 @@ export default function OrderFulfillmentScreen({
             style={{ position: "absolute", opacity: 0, width: 1, height: 1, overflow: "hidden", pointerEvents: "none", caretColor: "transparent" }}
           />
           {/* OKボタン */}
-          <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
+          <div
+            data-staff-swipe-surface="confirm"
+            style={{ padding: "16px 16px 0", flexShrink: 0 }}
+          >
             <button
               type="button"
               onClick={handleOrderOkTrigger}
@@ -219,7 +222,7 @@ export default function OrderFulfillmentScreen({
                       <span style={{ fontSize: 18, fontWeight: 900, fontFamily: "monospace", color: "#0f172a" }}>{item.id}</span>
                       <div style={{ fontSize: 11, color: item.valid ? "#64748b" : "#ef4444", fontWeight: 600, marginTop: 4 }}>{item.valid ? "OK" : item.error}</div>
                     </div>
-                    <button type="button" aria-label={getStaffOperationText("removeTank", locale, { tankId: item.id })} onClick={() => removeScannedTank(item.id)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer" }}><X size={18} /></button>
+                    <button type="button" data-swipe-ignore="true" aria-label={getStaffOperationText("removeTank", locale, { tankId: item.id })} onClick={() => removeScannedTank(item.id)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer" }}><X size={18} /></button>
                   </div>
                 ))}
               </div>

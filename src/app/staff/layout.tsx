@@ -13,6 +13,7 @@ import {
   resolveStaffSection,
 } from "@/components/staff-shell/staff-nav-items";
 import { useStaffLocaleSetting } from "@/components/staff-shell/useStaffLocaleSetting";
+import { useStaffMenuGesture } from "@/components/staff-shell/useStaffMenuGesture";
 import { useStaffMenuController } from "@/components/staff-shell/useStaffMenuController";
 import {
   useStaffHeaderElevation,
@@ -44,6 +45,12 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
   const viewportMode = resolveStaffViewportMode(pathname);
   const section = resolveStaffSection(pathname);
   const menu = useStaffMenuController(pathname);
+  useStaffMenuGesture({
+    menuOpen: menu.open,
+    onOpen: menu.openMenu,
+    onClose: menu.close,
+    scrollRegionRef: menu.scrollRegionRef,
+  });
   const localeSetting = useStaffLocaleSetting(locale);
   const elevated = useStaffHeaderElevation(viewportMode);
   useStaffViewportLock(viewportMode);
@@ -109,6 +116,9 @@ export default function StaffLayout({ children }: { children: React.ReactNode })
             onClose={menu.close}
             onNavigate={menu.close}
             sheetRef={menu.sheetRef}
+            closeButtonRef={menu.closeButtonRef}
+            backdropRef={menu.backdropRef}
+            scrollRegionRef={menu.scrollRegionRef}
           />
         }
       >

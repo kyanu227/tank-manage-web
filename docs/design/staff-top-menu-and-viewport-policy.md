@@ -37,11 +37,17 @@ F1〜F11 が、この設計が解く問題のすべてである。
 
 ## 1. 最終的なユーザー体験
 
-方向性は **「静かな精度」**。面は増やさず、既存の indigo `#6366F1` / slate 階調をそのまま継承する。
-ヘッダーは硬い 1px 線を捨てて**半透明面 + 10px の gradient fade** だけで浮かせ、
-メニューは**ヘッダーがそのまま右上から下へ伸びた一枚の面**として扱う。カードは増やさない。
+方向性は **「静かな精度」**。既存の indigo `#6366F1` / slate 階調をそのまま継承する。
+ヘッダーは硬い 1px 線を捨てて**半透明面 + 10px の gradient fade** だけで浮かせる。
 
-1. 画面右上の Chevron を親指で押す、または header の余白／タブ帯を**下へ払う**とメニューが上から降りてくる
+メニューは**ヘッダーが右上から下へ伸びた面**として現れるが、その面は情報を直接載せる
+キャンバスではなく**器**として扱う。器の上に **2 つの箱**を置いて情報を束ねる（§2.5）:
+**箱A = 自分（名前・言語設定）／箱B = 行き先（navigation + 主要操作）**。
+
+**箱の囲いは線ではなく影で示す。** border も divider も持たない。
+カードは 2 枚まで。要素ごとにカードを増やさない。
+
+1. 画面右上の Chevron を親指で押す、または header の余白／タブ帯／上部 A-OK 確定ブロックを**下へ払う**とメニューが上から降りてくる
 2. **Chevron は開閉で位置が動かない**。sheet 上部 56px 行に同座標で再出現し、そのまま閉じるボタンになる
 3. メニュー上部で「自分が誰としてログインしているか」と「表示言語」を確認・変更できる
 4. メニュー中央に低頻度の遷移先（発注・メンテナンス・マイページ・ダッシュボード）が並ぶ
@@ -57,26 +63,28 @@ F1〜F11 が、この設計が解く問題のすべてである。
 右寄せトップシート。階調は **account（弱） → navigation（中） → primary actions（強）の一方向だけ。**
 
 ```text
-┌──────────────────────────────┐  ← 画面上端・右端に密着（上2角は角丸なし）
+┌──────────────────────────────┐  ← 器。上端・右端に密着（上2角は角丸なし）
 │  STAFF MENU              ⌃  │   header と同じ 56px 行。Chevron は同座標
-│   (木)  木村 慧               │
-│         kimura@example.co.jp │   account zone（情報。操作優先度 最低）
-│   スタッフ · ランク A          │
-│        表示言語 [ 日本語 ▾ ]   │   locale select（選択時保存）
-│           保存中… / ✓ 保存     │
-├ ─ ─ ─ ─ ─ ─ ─                ┤  ← 右へ消える hairline（全幅の線を引かない）
-│      🛒  発注・タンク登録      │
-│      🔧  メンテナンス          │   navigation zone（低頻度の遷移先）
-│      👤  マイページ            │   44px 行 / scroll する側
-│      ▦   ダッシュボード        │
-│                              │  ← 僅かに沈んだ面（0.015 → 0.05）
-│    ┌──────────────────┐    │
-│    │ ✋ 貸出・返却・充填 ③ │    │   primary zone（56px 塗り潰し）
-│    └──────────────────┘    │
-│    ┌──────────────────┐    │
-│    │ 🏢 自社管理          │    │   primary zone（50px 輪郭）
-│    └──────────────────┘    │
-│              ▬▬              │   grabber（上スワイプで閉じる手がかり）
+│  ╭──────────────────────────╮ │
+│  │ (木)  木村 慧             │ │
+│  │       kimura@example.co.jp│ │  箱A = 自分
+│  │ スタッフ · ランク A        │ │  名前・メール・role・rank + 言語設定
+│  │     表示言語 [ 日本語 ▾ ]  │ │  角丸 18px / 線なし / 影で囲いを示す
+│  │        保存中… / ✓ 保存    │ │
+│  ╰──────────────────────────╯ │
+│  ╭──────────────────────────╮ │
+│  │    🛒  発注・タンク登録    │ │
+│  │    🔧  メンテナンス        │ │  箱B = 行き先
+│  │    👤  マイページ          │ │  navigation（44px 行 / scroll する側）
+│  │    ▦   ダッシュボード      │ │
+│  │  ┌──────────────────┐  │ │  ＋ 主要操作（同じ箱の中に入れる）
+│  │  │ ✋ 貸出・返却・充填 ③│  │ │  56px 塗り潰し
+│  │  └──────────────────┘  │ │
+│  │  ┌──────────────────┐  │ │
+│  │  │ 🏢 自社管理         │  │ │  50px 淡い塗り（線を持たない）
+│  │  └──────────────────┘  │ │
+│  ╰──────────────────────────╯ │
+│              ▬▬              │   grabber（箱の外。上スワイプの手がかり）
 └──────────────────────────────┘  ← 角丸 bottom 24 / 24
 ```
 
@@ -84,11 +92,36 @@ F1〜F11 が、この設計が解く問題のすべてである。
 
 | zone | 強度の作り方 | 使わないもの |
 |---|---|---|
-| 弱 account | 1日1回も触らない。枠・カード・アイコン枠を持たず面に直接置く。操作要素は言語 select だけ | カード枠、影、アイコン枠 |
-| 中 navigation | 44px 行・背景なし・アイコンは muted。active のみ**右へ向かう indigo gradient**（0% → 11%）で「右端＝現在地」を示す | 行ごとの枠、行の塗り分け |
-| 強 primary | **塗りの重さと寸法**（塗り潰し 56px > 輪郭 50px > 素の行 44px）。幅 196px・中央寄せ。影は 1 本だけ | glow、複数の影、floating card |
+| 弱 account | 1日1回も触らない。**箱A** にまとめる。操作要素は言語 select だけ | アイコン枠、行ごとの装飾 |
+| 中 navigation | **箱B** の上段。44px 行・行背景なし・アイコンは muted。active のみ**右へ向かう indigo gradient**（0% → 11%）で「右端＝現在地」を示す | 行ごとの枠、行の塗り分け |
+| 強 primary | **箱B** の下段。**塗りの重さと寸法**（塗り潰し 56px > 淡い塗り 50px > 素の行 44px）。幅 196px・中央寄せ。影は 1 本だけ | glow、複数の影、border |
 
-「全部を白いカードで囲む」「全行にアイコン枠を付ける」を明示的に禁止する。
+**箱は 2 つまで。**「要素ごとに白いカードで囲む」「全行にアイコン枠を付ける」は禁止する。
+グルーピングは *情報のまとまり*（**自分は誰か／どこへ行けるか**）に対してだけ行い、
+個々の行や操作に対しては行わない。navigation と主要操作は「行き先」という同じまとまりなので、
+**同じ箱に入れる**。
+
+### 2.5 器と箱の関係（承認済みの視覚改訂）
+
+初版は sheet 1 枚の面に account / navigation / primary を直接載せていたが、
+名前・言語・ナビが同じ平面で競合して読みにくいという判断により、器 + 箱2つへ改訂した。
+
+**囲いは線ではなく影で示す。** この UI は線をできるだけ減らす方針のため、
+箱は border も divider も持たず、器の透過はそのまま維持する。
+
+| 層 | 役割 | 値 |
+|---|---|---|
+| 器（sheet） | 背面をぼかすだけ。情報を直接載せない | `rgba(255,255,255,0.80)` + `blur(32px) saturate(180%)` / 非対応時 `#FBFCFE`（初版から不変） |
+| 箱（account / menu） | 情報のまとまり。**面はごく僅かに持ち上げ、囲いは影が担う** | `rgba(255,255,255,0.50)` / radius 18 / `0 6px 16px -6px rgba(15,23,42,0.16), 0 2px 5px -2px rgba(15,23,42,0.08)` / border なし |
+
+改訂に伴う削除:
+
+- account と navigation の間の hairline（箱の境界が役割を引き継ぐため不要）
+- primary zone の沈んだ面 gradient（箱と競合するため）
+- 自社管理ボタンの `1px solid #E2E8F0`（箱の中で線を持たせない。`rgba(15,23,42,0.05)` の淡い塗りへ置換）
+
+grabber は箱の外、器の最下部に置く。
+`STAFF MENU` ラベルは `rgba(15,23,42,0.34)`。
 
 ### 2.2 各要素の出所
 
@@ -113,20 +146,20 @@ F1〜F11 が、この設計が解く問題のすべてである。
 
 ### 2.4 受注件数の置き場所（役割重複を作らない）
 
-受注件数は **menu の「貸出・返却・充填」ボタン内の chip** を正位置とする。
+受注件数は **menu の「貸出・返却・充填」ボタン内の chip** を正位置として維持する。
 
-header 側の chip は**操作スタイルの切替**が主目的で、貸出画面でのみ出す:
+header 側の chip は、貸出画面では**操作スタイルの切替**、貸出以外では**貸出画面への導線**を担う:
 
 | 画面 / 状態 | header chip | 意味 |
 |---|---|---|
 | 貸出・手動モード・未処理受注あり | 琥珀色 `受注 N` | 押すと受注モードへ切り替わる（通知と入口を兼ねる） |
 | 貸出・受注モード | indigo `手動` | 押すと手動モードへ戻る |
 | 貸出・手動モード・受注なし | なし | 出すものがない |
-| 貸出以外 | なし | 件数は menu の chip が持つ |
+| 貸出以外・未処理受注あり | 琥珀色 `受注 N` | 貸出画面への Link。受注の存在を知らせ、処理入口を維持する |
+| 貸出以外・未処理受注なし | なし | 出すものがない |
 
-**意図した変更**: 現行は全画面の header に受注バッジを出しているが、新設計では貸出以外の画面で
-件数を見るには menu を開く。ヘッダー通知と操作スタイル切替の役割重複を解消するための判断であり、
-受注通知そのものは維持される（貸出画面の chip + menu の chip）。
+承認済みの現行実装どおり、貸出以外でも未処理受注があれば header chip を表示する。
+menu 内の件数 chip も残し、どの画面からでも通知と貸出画面への入口を失わない。
 
 ---
 
@@ -149,7 +182,7 @@ header 側の chip は**操作スタイルの切替**が主目的で、貸出画
 
 ```text
 [ 余白（下スワイプの起点。操作要素を置かない） ]  [受注 N / 手動]  [ ⌄ ]
-                                                    貸出のみ      常時
+                                             受注:全画面／切替:貸出  常時
 ```
 
 ハンバーガーは廃止。自社管理リンクは header から削除し、menu の primary zone へ移す（F10 の解消）。
@@ -198,7 +231,15 @@ header 側の chip は**操作スタイルの切替**が主目的で、貸出画
 
 実装契約: 各 wrapper へ touch handler を複製しない。`StaffSectionTabs` が
 `data-staff-swipe-surface="tabs"` を出力し、**単一の gesture coordinator** がそれを起点として扱う。
-header も同様に `data-staff-swipe-surface="header"` を出力する。
+open surface は次の3種類とする。
+
+- header の非操作領域: `data-staff-swipe-surface="header"`
+- StaffSectionTabs のタブ帯: `data-staff-swipe-surface="tabs"`
+- 上部 A-OK 確定ブロック（button と周囲の padding を含む wrapper）:
+  `data-staff-swipe-surface="confirm"`
+
+送信リスト・スキャン済みリスト・queue 等の scrollable 領域は confirm の sibling とし、
+open surface に含めない。confirm 内の通常の A-OK `button` から始めた下スワイプも許可する。
 
 タブ帯上の操作:
 
@@ -231,20 +272,27 @@ touchend
 **規則**:
 
 - 1つの gesture で 2つの操作を commit しない（axis lock により構造的に不可能）
-- 下スワイプが commit したら、直後の `click` を 1回だけ抑止する（タブリンクの誤発火防止）
+- 明示 surface 内の `a` / `button` から始まった swipe が commit したら、直後の `click` を1回だけ抑止する
 - 閾値は既存定数を再利用する: axis lock 10px、commit 40px（`STAFF_SECTION_SWIPE_COMMIT_DISTANCE_PX`）
 - 右端 80px の edge guard（`STAFF_SECTION_SWIPE_EDGE_GUARD_PX`）は横方向にのみ適用する
 
 ### 4.3 除外契約（DrumRoll ほか）
 
-次の領域から**始まった**操作は、メニュー開閉ジェスチャーとして扱わない。
+touchstart の target から祖先を辿り、次の優先順位で判定する。
 
-- `[data-swipe-ignore="true"]`（DrumRoll のルートが既に付与）
-- `[data-drum-roll-option="true"]`
-- `QuickSelect`
-- `select` / `input` / `textarea` / `[role="listbox"]` / `button` / `a`
-- 独自タッチ操作を持つ領域
-- **その方向へまだスクロールできる**スクロール領域（scroll chaining 規則）
+1. `[data-swipe-ignore="true"]` / `[data-drum-roll-option="true"]` は常に除外する。
+   明示 surface の内側でも ignore が優先する
+2. `select` / `input` / `textarea` / `[role="listbox"]` / 独自 touch UI は常に除外する。
+   QuickSelect は既存の `data-swipe-ignore="true"` 契約を使う
+3. `[data-staff-swipe-surface]` に到達したら、その surface として許可する。
+   内部 target が通常の `a` / `button` でも一律除外しない
+4. どれにも一致しなければ menu open / close gesture の対象外とする
+
+明示 surface 内の `a` / `button` から始めた gesture が commit した場合だけ、
+直後に生成される click を capture phase で1回抑止する。short tap と commit 閾値未満では抑止しない。
+
+この起点判定に加え、上スワイプ時は**その方向へまだスクロールできる**領域を
+scroll chaining 規則で優先する。
 
 既存の `isSwipeIgnoredTarget` / `STAFF_SECTION_SWIPE_IGNORE_SELECTOR`
 （`components/staff-section-tabs-events.ts`）を**再利用する**。新しい除外語彙を作らない。
@@ -262,7 +310,7 @@ scroll chaining 規則の帰結:
 
 ### 4.4 スワイプは唯一の手段ではない
 
-開く: Chevron タップ / header 下スワイプ / タブ帯 下スワイプ
+開く: Chevron タップ / header 下スワイプ / タブ帯 下スワイプ / A-OK 確定ブロック 下スワイプ
 閉じる: 同座標の Chevron / backdrop タップ / Escape / ナビゲーション選択 / 上スワイプ
 
 ---
@@ -387,8 +435,10 @@ sheet width（250–330 の範囲）、backdrop opacity、fade strength、blur �
 | app base | `#F4F6FA` | html / body / shell / 上下 safe-area / overscroll / manifest `background_color` |
 | chrome surface | `rgba(252,253,255,0.78)` + `blur(20px) saturate(180%)` | header / StaffSectionTabs（同一面） |
 | chrome fallback | `#FAFBFD` | blur 非対応時 / `theme-color` |
-| sheet surface | `rgba(255,255,255,0.80)` + `blur(32px) saturate(180%)` | menu sheet |
+| sheet surface（器） | `rgba(255,255,255,0.80)` + `blur(32px) saturate(180%)` | menu sheet |
 | sheet fallback | `#FBFCFE` | blur 非対応時 |
+| 箱 surface | `rgba(255,255,255,0.50)` / radius 18 / border なし | 箱A（account）/ 箱B（menu）。§2.5 |
+| 箱 shadow | `0 6px 16px -6px rgba(15,23,42,0.16), 0 2px 5px -2px rgba(15,23,42,0.08)` | 囲いはこの影だけが担う |
 | backdrop | `#0F172A` @ **0.32** / fade 200ms linear / **blur なし** | menu backdrop |
 | text | primary `#0F172A` / body `#475569` / sub `#64748B` / muted `#94A3B8` / icon idle `#9AA5B5` | |
 | accent | `#4F46E5`（文字）/ `#6366F1`（塗り）/ `#EEF2FF`（淡塗り）/ `#C7CBF7`（枠） | |
@@ -545,6 +595,8 @@ viewport policy / focus management / visual styles を**すべて直接詰め込
 - [ ] 下方向優勢で menu open、横方向優勢で section switch
 - [ ] 斜めでも二重 commit しない / lock 後に axis が変わらない
 - [ ] 下スワイプ後に タブリンクの click が発火しない
+- [ ] A-OK button / wrapper の下スワイプで menu が開き、commit 後に A-OK の click が発火しない
+- [ ] A-OK の short tap と commit 閾値未満の移動では従来どおり A-OK が実行される
 - [ ] 短いタップは従来どおり link として動く
 - [ ] operations / maintenance / procurement すべてで下スワイプが効く
 - [ ] DrumRoll / `data-swipe-ignore` / QuickSelect / select / input 起点では開閉しない

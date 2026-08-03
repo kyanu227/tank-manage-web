@@ -7,10 +7,14 @@ const FOCUSABLE_SELECTOR =
 
 export interface StaffMenuController {
   readonly open: boolean;
+  readonly openMenu: () => void;
   readonly toggle: () => void;
   readonly close: () => void;
   readonly triggerRef: React.RefObject<HTMLButtonElement | null>;
   readonly sheetRef: React.RefObject<HTMLDivElement | null>;
+  readonly closeButtonRef: React.RefObject<HTMLButtonElement | null>;
+  readonly backdropRef: React.RefObject<HTMLButtonElement | null>;
+  readonly scrollRegionRef: React.RefObject<HTMLElement | null>;
 }
 
 /**
@@ -25,9 +29,13 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const sheetRef = useRef<HTMLDivElement | null>(null);
+  const closeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const backdropRef = useRef<HTMLButtonElement | null>(null);
+  const scrollRegionRef = useRef<HTMLElement | null>(null);
   const shouldRestoreFocusRef = useRef(false);
 
   const close = useCallback(() => setOpen(false), []);
+  const openMenu = useCallback(() => setOpen(true), []);
   const toggle = useCallback(() => setOpen((value) => !value), []);
 
   // route が変われば閉じる（戻る・進むでも開いたまま残らない）。
@@ -80,5 +88,15 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [open]);
 
-  return { open, toggle, close, triggerRef, sheetRef };
+  return {
+    open,
+    openMenu,
+    toggle,
+    close,
+    triggerRef,
+    sheetRef,
+    closeButtonRef,
+    backdropRef,
+    scrollRegionRef,
+  };
 }
