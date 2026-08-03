@@ -316,13 +316,14 @@ export default function BulkReturnByLocationPanel({
   const hasSectionItems = sectionStat.customerCount > 0 || sectionStat.tankCount > 0;
 
   return (
-    <div style={{ position: "relative", marginBottom: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginBottom: 12 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 800, color: "#475569", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 4, height: 16, borderRadius: 2, background: sectionStat.color, display: "inline-block" }} />
+    <div style={{ position: "relative", marginBottom: 22 }}>
+      {/* 区分は見出しだけで表す。切替 UI としては現れない（切替は右端のジェスチャー） */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 10 }}>
+        <h3 style={{ fontSize: 12.5, fontWeight: 800, color: "#475569", margin: 0, display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 3, height: 13, borderRadius: 999, background: sectionStat.color, display: "inline-block" }} />
           {sectionStat.label}
         </h3>
-        <span style={{ fontSize: 11, color: hasSectionItems ? sectionStat.color : "#94a3b8", fontWeight: 900, border: "1px solid #e2e8f0", borderRadius: 999, padding: "3px 8px", background: "#fff" }}>
+        <span style={{ fontSize: 11, color: hasSectionItems ? sectionStat.color : "#a8b2c1", fontWeight: 800 }}>
           {formatBulkReturnCustomerTankCount(sectionStat.customerCount, sectionStat.tankCount, staffLocale)}
           {sectionStat.taggedCount > 0 ? ` / ${formatBulkReturnTaggedTankCount(sectionStat.taggedCount, staffLocale)}` : ""}
         </span>
@@ -375,17 +376,17 @@ export default function BulkReturnByLocationPanel({
               <section key={section.pool} style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, padding: "0 2px" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: 8, minWidth: 0 }}>
-                    <span style={{ width: 7, height: 22, borderRadius: 999, background: section.color, display: "inline-block", boxShadow: section.pool === "today_lent" ? `0 0 0 4px ${section.color}18` : "none" }} />
+                    <span style={{ width: 5, height: 18, borderRadius: 999, background: section.color, display: "inline-block", boxShadow: section.pool === "today_lent" ? `0 0 0 4px ${section.color}14` : "none" }} />
                     <div style={{ minWidth: 0 }}>
-                      <h4 style={{ margin: 0, fontSize: section.pool === "today_lent" ? 16 : 14, lineHeight: 1.25, fontWeight: 900, color: section.color }}>
+                      <h4 style={{ margin: 0, fontSize: section.pool === "today_lent" ? 14 : 12.5, lineHeight: 1.25, fontWeight: 800, color: section.color }}>
                         {section.label}
                       </h4>
-                      <p style={{ margin: "2px 0 0", fontSize: 11, lineHeight: 1.3, fontWeight: 700, color: "#64748b" }}>
+                      <p style={{ margin: "2px 0 0", fontSize: 10.5, lineHeight: 1.3, fontWeight: 600, color: "#8494ab" }}>
                         {section.description}
                       </p>
                     </div>
                   </div>
-                  <span style={{ flexShrink: 0, fontSize: 11, color: section.color, fontWeight: 900, border: `1px solid ${section.border}`, borderRadius: 999, padding: "4px 8px", background: section.background }}>
+                  <span style={{ flexShrink: 0, fontSize: 11, color: section.color, fontWeight: 800 }}>
                     {formatBulkReturnCustomerTankCount(sectionLocationCount, sectionTankCount, staffLocale)}
                   </span>
                 </div>
@@ -421,12 +422,12 @@ export default function BulkReturnByLocationPanel({
                     const statusLabel = meta?.pool === "long_term" ? BULK_RETURN_TEXT.longTermStatus[staffLocale] : BULK_RETURN_TEXT.lentStatus[staffLocale];
 
                     return (
-                      <div key={groupKey} style={{ background: "#fff", border: `1.5px solid ${section.pool === "today_lent" ? section.border : "#e8eaed"}`, borderRadius: 16, overflow: "hidden", boxShadow: section.pool === "today_lent" ? `0 8px 22px ${section.color}14` : "none" }}>
+                      <div key={groupKey} style={{ background: "rgba(255,255,255,0.74)", borderRadius: 14, overflow: "hidden", boxShadow: section.pool === "today_lent" ? `inset 0 0 0 1px ${section.color}33, 0 8px 22px -16px ${section.color}55` : "inset 0 0 0 1px rgba(15,23,42,0.07)" }}>
                         <div
                           style={{
-                            padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12,
-                            userSelect: "none", background: isExpanded ? section.background : "#fff",
-                            borderBottom: isExpanded ? "1px solid #e8eaed" : "none", transition: "background 0.2s",
+                            padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12,
+                            userSelect: "none", background: isExpanded ? section.background : "transparent",
+                            transition: "background 0.2s",
                           }}
                         >
                           <button
@@ -444,17 +445,17 @@ export default function BulkReturnByLocationPanel({
                             </span>
                             <span style={{ minWidth: 0 }}>
                               <span style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                                <span style={{ maxWidth: "100%", minWidth: 0, fontSize: 16, fontWeight: 800, color: "#0f172a", overflowWrap: "anywhere", wordBreak: "break-word" }}>
+                                <span style={{ maxWidth: "100%", minWidth: 0, fontSize: 13.5, fontWeight: 800, color: "#0f172a", overflowWrap: "anywhere", wordBreak: "break-word" }}>
                                   {displayLocation}
                                 </span>
-                                <span style={{ padding: "3px 7px", borderRadius: 999, background: section.background, color: section.color, border: `1px solid ${section.border}`, fontSize: 10, fontWeight: 900 }}>
+                                <span style={{ padding: "2px 6px", borderRadius: 5, background: section.background, color: section.color, fontSize: 9.5, fontWeight: 800 }}>
                                   {poolLabel}
                                 </span>
-                                <span style={{ padding: "3px 7px", borderRadius: 999, background: "#f8fafc", color: "#475569", border: "1px solid #e2e8f0", fontSize: 10, fontWeight: 900 }}>
+                                <span style={{ padding: "2px 6px", borderRadius: 5, background: "rgba(15,23,42,0.05)", color: "#475569", fontSize: 9.5, fontWeight: 800 }}>
                                   {dateLabel}
                                 </span>
                               </span>
-                              <span style={{ display: "block", fontSize: 13, color: "#64748b", marginTop: 4, fontWeight: 600 }}>
+                              <span style={{ display: "block", fontSize: 11.5, color: "#8494ab", marginTop: 3, fontWeight: 600 }}>
                                 {formatBulkReturnTankCountWithStatus(tanks.length, statusLabel, staffLocale)}
                               </span>
                               {taggedPreview.length > 0 && (

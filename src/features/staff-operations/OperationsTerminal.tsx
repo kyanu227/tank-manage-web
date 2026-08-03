@@ -7,7 +7,6 @@ import { useStaffLocale } from "@/hooks/useStaffSession";
 import type { Locale } from "@/lib/locale";
 import { DEFAULT_OP_STYLE, getOperationModeLabel, MODE_CONFIG } from "./constants";
 import { useBulkReturnByLocation } from "./hooks/useBulkReturnByLocation";
-import { formatBulkReturnCustomerTankCount } from "./bulk-return-display";
 import { useCustomerOptions } from "./hooks/useCustomerOptions";
 import { useManualTankOperation } from "./hooks/useManualTankOperation";
 import { useOperationSwipe } from "./hooks/useOperationSwipe";
@@ -20,17 +19,19 @@ import OrderFulfillmentScreen from "./components/OrderFulfillmentScreen";
 import OrderListPanel from "./components/OrderListPanel";
 import ReturnTagProcessingScreen from "./components/ReturnTagProcessingScreen";
 import ReturnRequestList from "./components/ReturnRequestList";
+import ReturnBoardEmpty from "./components/ReturnBoardEmpty";
 import ReturnSegmentGestureLauncher, {
   type ReturnSegmentKey,
   type ReturnSegmentStat,
 } from "./components/ReturnSegmentGestureLauncher";
+import { getStaffOperationText } from "./i18n";
+import { RETURN_SEGMENT_ORDER, resolveVisibleReturnSegments } from "./return-board-segments";
+import styles from "./styles/OperationsTerminal.module.css";
 import type { OpMode, OpStyle } from "./types";
 
 interface OperationsTerminalProps {
   initialMode: OpMode;
 }
-
-const RETURN_SEGMENT_ORDER: ReturnSegmentKey[] = ["normal", "customer_requests", "long_term"];
 
 const RETURN_UI_TEXT = {
   manualReturn: {
@@ -82,14 +83,6 @@ function getReturnSegmentConfig(
     ...RETURN_SEGMENT_CONFIG[segment],
     ...RETURN_SEGMENT_LABELS[segment][locale],
   };
-}
-
-function formatReturnSegmentCount(segment: ReturnSegmentStat, locale: Locale): string {
-  return formatBulkReturnCustomerTankCount(
-    segment.customerCount,
-    segment.tankCount,
-    locale,
-  );
 }
 
 export default function OperationsTerminal({ initialMode }: OperationsTerminalProps) {
@@ -189,6 +182,26 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
     return RETURN_SEGMENT_ORDER.map((segment) => stats[segment]);
   }, [bulk.groupMeta, bulk.groupKeys, bulk.groupedTanks, returnTagProcessing.returnGroups, staffLocale]);
 
+  /*
+    対象がゼロの区分は見出しごと描かない。
+    ただし読み込み中・失敗中は状態を伝えるために描き、
+    ジェスチャーで明示的に選ばれた区分も（対象ゼロでも）その区分の表示を残す。
+  */
+  const visibleReturnSegments = useMemo<ReturnSegmentKey[]>(() => resolveVisibleReturnSegments({
+    activeSegment: activeReturnSegment,
+    segments: returnSegmentStats,
+    bulkBusy: bulk.bulkLoading || bulk.bulkLoadFailed,
+    tagsBusy: returnTagProcessing.pendingReturnTagsLoading
+      || returnTagProcessing.pendingReturnTagsLoadFailed,
+  }), [
+    activeReturnSegment,
+    bulk.bulkLoadFailed,
+    bulk.bulkLoading,
+    returnSegmentStats,
+    returnTagProcessing.pendingReturnTagsLoadFailed,
+    returnTagProcessing.pendingReturnTagsLoading,
+  ]);
+
   const openManualReturn = () => {
     setActiveReturnSegment(null);
     setShowManualReturn(true);
@@ -213,7 +226,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   /* ─── 受注詳細画面（貸出・受注スタイル） ─── */
   if (mode === "lend" && opStyle === "order" && orders.selectedOrder) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden", overscrollBehavior: "contain" }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", overscrollBehavior: "contain" }}>
         <OperationModeTabs mode={mode} locale={staffLocale} />
         <OrderFulfillmentScreen
           selectedOrder={orders.selectedOrder}
@@ -233,7 +246,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   /* ─── 返却タグ処理画面 ─── */
   if (mode === "return" && returnTagProcessing.selectedReturnGroup) {
     return (
-      <div style={{ display: "flex", flexDirection: "column", flex: 1, background: "#f8fafc", overflow: "hidden", overscrollBehavior: "contain" }}>
+      <div style={{ display: "flex", flexDirection: "column", flex: 1, overflow: "hidden", overscrollBehavior: "contain" }}>
         <OperationModeTabs mode={mode} locale={staffLocale} />
         <ReturnTagProcessingScreen
           selectedReturnGroup={returnTagProcessing.selectedReturnGroup}
@@ -246,10 +259,14 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
   }
 
   return (
+    /*
+      面は 1 枚。ここで独自の背景色を敷くと、shell の面との間に帯が生まれる。
+      沈みは Input Workspace / 返却一覧の下部 gradient だけが持つ。
+    */
     <div
       style={{
         display: "flex", flexDirection: "column", flex: 1,
-        background: "#f8fafc", overflow: "hidden",
+        overflow: "hidden",
         overscrollBehavior: "contain",
       }}
     >
@@ -289,7 +306,7 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
 
       {/* 返却モード: 返却タグ処理待ち + 全貸出タンク */}
       {mode === "return" && !showManualReturn && (
-        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+        <div className={styles.returnBoard} data-mode="return">
           <ReturnSegmentGestureLauncher
             activeSegment={activeReturnSegment}
             segments={returnSegmentStats}
@@ -301,90 +318,45 @@ export default function OperationsTerminal({ initialMode }: OperationsTerminalPr
             onSelectManualReturn={openManualReturn}
           />
 
-          <div style={{ height: "100%", overflowY: "auto", padding: 16 }}>
+          <div className={styles.returnScroll}>
             <button
               type="button"
               onClick={openManualReturn}
-              style={{
-                width: "100%", padding: "10px", borderRadius: 12, border: "1.5px solid #e2e8f0",
-                background: "#fff", color: "#10b981", fontSize: 13, fontWeight: 800,
-                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                cursor: "pointer", marginBottom: 12, transition: "all 0.15s",
-              }}
+              className={styles.manualReturnRow}
             >
-              <ArrowDownToLine size={16} />
+              <ArrowDownToLine size={16} aria-hidden="true" />
               {RETURN_UI_TEXT.manualReturn[staffLocale]}
+              <span className={styles.manualReturnHint}>
+                {getStaffOperationText("manualReturnDialHint", staffLocale)}
+              </span>
             </button>
 
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr))", gap: 8, marginBottom: 12 }}>
-              {returnSegmentStats.map((segment) => {
-                const isActive = activeReturnSegment === segment.key;
-                const hasItems = segment.customerCount > 0 || segment.tankCount > 0;
-                return (
-                  <button
-                    key={segment.key}
-                    type="button"
-                    aria-pressed={isActive}
-                    onClick={() => setActiveReturnSegment(isActive ? null : segment.key)}
-                    style={{
-                      border: `1.5px solid ${isActive ? segment.color : hasItems ? `${segment.color}66` : "#e2e8f0"}`,
-                      background: isActive ? segment.background : "#fff",
-                      color: isActive || hasItems ? segment.color : "#94a3b8",
-                      borderRadius: 14,
-                      padding: "10px 8px",
-                      minHeight: 72,
-                      display: "flex",
-                      flexDirection: "column",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      gap: 6,
-                      textAlign: "left",
-                      cursor: "pointer",
-                      opacity: hasItems || isActive ? 1 : 0.58,
-                      boxShadow: isActive ? `0 8px 18px ${segment.color}22` : hasItems ? `0 0 0 3px ${segment.color}10` : "none",
-                      transform: isActive ? "translateY(-1px)" : "translateY(0)",
-                      transition: "transform 140ms cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 140ms, opacity 120ms",
-                    }}
-                  >
-                    <span style={{ fontSize: 12, fontWeight: 900, lineHeight: 1.2 }}>{segment.label}</span>
-                    <span style={{ fontSize: 11, fontWeight: 800, color: hasItems || isActive ? segment.color : "#cbd5e1" }}>
-                      {formatReturnSegmentCount(segment, staffLocale)}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-
-            {activeReturnSegment === null && (
-              <BulkReturnByLocationPanel
-                bulk={bulk}
-                activeSegment="normal"
-              />
-            )}
-
-            {(activeReturnSegment === null || activeReturnSegment === "customer_requests") && (
-              <ReturnRequestList
-                pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
-                loadFailed={returnTagProcessing.pendingReturnTagsLoadFailed}
-                returnGroups={returnTagProcessing.returnGroups}
-                openReturnTagGroup={returnTagProcessing.openReturnTagGroup}
-                locale={staffLocale}
-                retry={returnTagProcessing.fetchPendingReturnTags}
-              />
-            )}
-
-            {activeReturnSegment === null && (
-              <BulkReturnByLocationPanel
-                bulk={bulk}
-                activeSegment="long_term"
-              />
-            )}
-
-            {activeReturnSegment !== null && activeReturnSegment !== "customer_requests" && (
-              <BulkReturnByLocationPanel
-                bulk={bulk}
-                activeSegment={activeReturnSegment}
-              />
+            {/*
+              区分は見出しだけで表され、切替 UI としては現れない。
+              区分の切替は右端の既存ジェスチャーが持つ。
+            */}
+            {visibleReturnSegments.length === 0 ? (
+              <ReturnBoardEmpty locale={staffLocale} />
+            ) : (
+              visibleReturnSegments.map((segment) => (
+                segment === "customer_requests" ? (
+                  <ReturnRequestList
+                    key={segment}
+                    pendingReturnTagsLoading={returnTagProcessing.pendingReturnTagsLoading}
+                    loadFailed={returnTagProcessing.pendingReturnTagsLoadFailed}
+                    returnGroups={returnTagProcessing.returnGroups}
+                    openReturnTagGroup={returnTagProcessing.openReturnTagGroup}
+                    locale={staffLocale}
+                    retry={returnTagProcessing.fetchPendingReturnTags}
+                  />
+                ) : (
+                  <BulkReturnByLocationPanel
+                    key={segment}
+                    bulk={bulk}
+                    activeSegment={segment}
+                  />
+                )
+              ))
             )}
           </div>
         </div>

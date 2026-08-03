@@ -62,13 +62,14 @@ export default function ReturnRequestList({
   const totalTankCount = returnGroups.reduce((sum, group) => sum + group.items.length, 0);
 
   return (
-    <div style={{ marginBottom: 24 }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
-        <h3 style={{ fontSize: 14, fontWeight: 800, color: "#475569", margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
-          <span style={{ width: 4, height: 16, borderRadius: 2, background: "#10b981", display: "inline-block" }} />
+    <div style={{ marginBottom: 22 }}>
+      {/* 区分は見出しだけで表す。切替 UI としては現れない */}
+      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: 10, marginBottom: 10 }}>
+        <h3 style={{ fontSize: 12.5, fontWeight: 800, color: "#475569", margin: 0, display: "flex", alignItems: "center", gap: 7 }}>
+          <span style={{ width: 3, height: 13, borderRadius: 999, background: "#10b981", display: "inline-block" }} />
           {getStaffOperationText("pendingReturnTags", staffLocale)}
         </h3>
-        <span style={{ fontSize: 11, color: totalTankCount > 0 ? "#059669" : "#94a3b8", fontWeight: 900, border: "1px solid #e2e8f0", borderRadius: 999, padding: "3px 8px", background: "#fff" }}>
+        <span style={{ fontSize: 11, color: totalTankCount > 0 ? "#059669" : "#a8b2c1", fontWeight: 800 }}>
           {getStaffOperationText("returnGroupSummary", staffLocale, {
             customerCountLabel: formatStaffCount(returnGroups.length, staffLocale, {
               ja: "顧客", enSingular: "customer", enPlural: "customers",
@@ -122,9 +123,9 @@ export default function ReturnRequestList({
                 key={group.customerId}
                 onClick={() => openReturnTagGroup(group)}
                 style={{
-                  background: "#fff",
-                  border: "1px solid #e8eaed",
-                  borderRadius: 16,
+                  background: "rgba(255,255,255,0.74)",
+                  border: "none",
+                  borderRadius: 14,
                   padding: 0,
                   display: "flex",
                   alignItems: "center",
@@ -132,12 +133,12 @@ export default function ReturnRequestList({
                   cursor: "pointer",
                   textAlign: "left",
                   width: "100%",
-                  boxShadow: "0 1px 2px rgba(15, 23, 42, 0.03)",
+                  boxShadow: "inset 0 0 0 1px rgba(15,23,42,0.07)",
                   overflow: "hidden",
-                  transition: "border-color 0.15s, box-shadow 0.15s, transform 0.15s",
+                  transition: "box-shadow 0.15s, transform 0.15s",
                 }}
               >
-                <div style={{ padding: "16px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%" }}>
+                <div style={{ padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, width: "100%" }}>
                   <div style={{ display: "flex", alignItems: "flex-start", gap: 12, flex: 1, minWidth: 0 }}>
                     <div style={{ padding: 4, background: "#dcfce7", borderRadius: 8, color: "#059669", flexShrink: 0, marginTop: 1 }}>
                       <ChevronRight size={18} />
@@ -145,12 +146,12 @@ export default function ReturnRequestList({
 
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-                        <h3 style={{ fontSize: 16, fontWeight: 800, color: "#0f172a", margin: 0 }}>{group.customerName}</h3>
+                        <h3 style={{ fontSize: 13.5, fontWeight: 800, color: "#0f172a", margin: 0 }}>{group.customerName}</h3>
                         <span style={{ padding: "2px 7px", borderRadius: 999, background: "#ecfdf5", color: "#059669", fontSize: 10, fontWeight: 900 }}>
                           {formatStaffTankCount(group.items.length, staffLocale)}
                         </span>
                       </div>
-                      <p style={{ fontSize: 13, color: "#64748b", margin: "2px 0 0 0", fontWeight: 600 }}>
+                      <p style={{ fontSize: 11.5, color: "#8494ab", margin: "2px 0 0 0", fontWeight: 600 }}>
                         {getOperationMessage(
                           requestedAtLabel
                             ? "returnProcessing.pendingTagWithLatestHelper"
