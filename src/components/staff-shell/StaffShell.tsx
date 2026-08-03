@@ -32,7 +32,17 @@ export default function StaffShell({
       <div className={styles.headerFade} data-scrolled={scrolled} aria-hidden="true" />
       {banner}
       {menu}
-      <main ref={mainRef} className={styles.main} data-viewport={viewportMode}>
+      {/*
+        A-OK 確定ブロックを持たない画面でも上部から下スワイプできるようにする。
+        tabs / confirm が内側にある場合はそちらが優先されるため、
+        ここが起点になるのは「他に surface がない上部領域」だけになる。
+      */}
+      <main
+        ref={mainRef}
+        className={styles.main}
+        data-viewport={viewportMode}
+        data-staff-swipe-surface="content"
+      >
         {children}
       </main>
     </div>

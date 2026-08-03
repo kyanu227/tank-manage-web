@@ -546,7 +546,8 @@
   flex-direction: column;
   flex: 1;
   min-height: 0;
-  margin: 0 12px;
+  /* 下端は器の角丸に触れない最小限だけ空ける */
+  margin: 0 12px 12px;
   padding: 6px;
   border-radius: var(--staff-card-radius);
   background: var(--staff-card-sheen);
@@ -692,15 +693,6 @@
 
 .primarySoft[aria-current="page"] .primarySoftIcon {
   color: inherit;
-}
-
-/* 上スワイプで閉じられることの手がかり */
-.grabber {
-  width: 36px;
-  height: 4px;
-  margin: 10px auto 8px;
-  border-radius: 2px;
-  background: rgba(15, 23, 42, 0.14);
 }
 
 /* ============================================================

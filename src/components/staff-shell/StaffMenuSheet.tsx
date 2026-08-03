@@ -109,9 +109,6 @@ export default function StaffMenuSheet({
             onNavigate={onNavigate}
           />
         </div>
-
-        {/* 上スワイプで閉じられることの手がかり。箱の外に置く */}
-        <div className={styles.grabber} aria-hidden="true" />
       </div>
     </>
   );

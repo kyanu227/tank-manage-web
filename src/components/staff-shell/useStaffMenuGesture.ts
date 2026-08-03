@@ -2,9 +2,11 @@
 
 import { useEffect, useLayoutEffect, useRef } from "react";
 import {
+  canScrollStaffContentBackward,
   canScrollStaffMenuForward,
   resolveStaffSwipeStartTarget,
   suppressNextStaffSwipeClick,
+  STAFF_CONTENT_SWIPE_ZONE_PX,
   type StaffSwipeStartTarget,
 } from "@/components/staff-section-tabs-events";
 import {
@@ -28,8 +30,27 @@ interface StaffMenuGesture {
   axis: StaffGestureAxis;
 }
 
-const MENU_OPEN_SURFACES = new Set(["header", "tabs", "confirm"]);
+const MENU_OPEN_SURFACES = new Set(["header", "tabs", "confirm", "content"]);
 const MENU_CLOSE_SURFACES = new Set(["menu", "menu-backdrop"]);
+
+/**
+ * content surface だけは条件付きで受け付ける。
+ *
+ * - 起点が viewport 上端の帯の中にあること（本文の途中から開かない）
+ * - まだ上へスクロールできる状態では受け付けない（スクロール操作を奪わない）
+ * - 通常の a / button 上からは開始しない。本文には操作要素が多く、
+ *   header spacer と同じ「非操作領域から払う」感覚に揃える
+ */
+function acceptsContentStart(
+  target: StaffSwipeStartTarget,
+  startY: number,
+  startTarget: EventTarget | null,
+): boolean {
+  if (target.clickTarget) return false;
+  if (startY > STAFF_CONTENT_SWIPE_ZONE_PX) return false;
+  const element = startTarget instanceof Element ? startTarget : null;
+  return !canScrollStaffContentBackward(element);
+}
 
 /** 明示 surface の縦 gesture と menu open / close を接続する。 */
 export function useStaffMenuGesture({
@@ -64,6 +85,14 @@ export function useStaffMenuGesture({
         ? MENU_CLOSE_SURFACES
         : MENU_OPEN_SURFACES;
       if (!allowedSurfaces.has(target.surface)) {
+        gestureRef.current = null;
+        return;
+      }
+
+      if (
+        target.surface === "content"
+        && !acceptsContentStart(target, touch.clientY, event.target)
+      ) {
         gestureRef.current = null;
         return;
       }

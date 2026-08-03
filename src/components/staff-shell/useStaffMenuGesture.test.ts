@@ -14,10 +14,25 @@ type PendingEffect = {
 
 class FakeTarget {
   constructor(
-    readonly surface: "header" | "tabs" | "confirm" | "menu" | "menu-backdrop" | null,
+    readonly surface:
+      | "header"
+      | "tabs"
+      | "confirm"
+      | "content"
+      | "menu"
+      | "menu-backdrop"
+      | null,
     readonly clickable = false,
     readonly ignored = false,
+    /** canScrollStaffContentBackward 用。上へ戻す余地がある状態を作る */
+    readonly scrollTop = 0,
+    readonly scrollHeight = 0,
+    readonly clientHeight = 0,
   ) {}
+
+  get parentElement(): FakeTarget | null {
+    return null;
+  }
 }
 
 const mocks = vi.hoisted(() => {
@@ -154,10 +169,10 @@ function dispatchTouch(
   for (const handler of [...handlers]) handler(event);
 }
 
-function swipe(target: FakeTarget, dy: number, dx = 0) {
-  dispatchTouch("touchstart", touchEvent("start", 100, 100, target));
-  dispatchTouch("touchmove", touchEvent("move", 100 + dx, 100 + dy, target));
-  dispatchTouch("touchend", touchEvent("end", 100 + dx, 100 + dy, target));
+function swipe(target: FakeTarget, dy: number, dx = 0, startY = 100) {
+  dispatchTouch("touchstart", touchEvent("start", 100, startY, target));
+  dispatchTouch("touchmove", touchEvent("move", 100 + dx, startY + dy, target));
+  dispatchTouch("touchend", touchEvent("end", 100 + dx, startY + dy, target));
 }
 
 describe("useStaffMenuGesture", () => {
@@ -285,6 +300,43 @@ describe("useStaffMenuGesture", () => {
     swipe(navTarget, -60);
     expect(onClose).toHaveBeenCalledOnce();
     expect(mocks.suppressClick).toHaveBeenCalledOnce();
+  });
+
+  it("A-OK を持たない画面でも、上部の本文領域からの下スワイプで開く", () => {
+    const onOpen = vi.fn();
+    renderMenuGesture(false, onOpen, vi.fn());
+
+    swipe(new FakeTarget("content"), 40, 0, 100);
+
+    expect(onOpen).toHaveBeenCalledOnce();
+  });
+
+  it("本文領域は上端の帯より下から始めた場合は開かない", () => {
+    const onOpen = vi.fn();
+    renderMenuGesture(false, onOpen, vi.fn());
+
+    swipe(new FakeTarget("content"), 40, 0, 300);
+
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("本文領域の a / button 上から始めた場合は開かない", () => {
+    const onOpen = vi.fn();
+    renderMenuGesture(false, onOpen, vi.fn());
+
+    swipe(new FakeTarget("content", true), 40, 0, 100);
+
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(mocks.suppressClick).not.toHaveBeenCalled();
+  });
+
+  it("まだ上へスクロールできる本文領域では、開くよりスクロールを優先する", () => {
+    const onOpen = vi.fn();
+    renderMenuGesture(false, onOpen, vi.fn());
+
+    swipe(new FakeTarget("content", false, false, 120, 800, 400), 40, 0, 100);
+
+    expect(onOpen).not.toHaveBeenCalled();
   });
 
   it("touch listener は passive のまま登録する", () => {

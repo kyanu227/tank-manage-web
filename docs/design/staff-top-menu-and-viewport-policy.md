@@ -84,7 +84,6 @@ F1〜F11 が、この設計が解く問題のすべてである。
 │  │  │ 🏢 自社管理         │  │ │  50px 淡い塗り（線を持たない）
 │  │  └──────────────────┘  │ │
 │  ╰──────────────────────────╯ │
-│              ▬▬              │   grabber（箱の外。上スワイプの手がかり）
 └──────────────────────────────┘  ← 角丸 bottom 24 / 24
 ```
 
@@ -133,7 +132,6 @@ iOS Safari で無言で失効し blur ごと消える危険があるため採用
 - primary zone の沈んだ面 gradient（箱と競合するため）
 - 自社管理ボタンの `1px solid #E2E8F0`（箱の中で線を持たせない。`rgba(15,23,42,0.05)` の淡い塗りへ置換）
 
-grabber は箱の外、器の最下部に置く。
 `STAFF MENU` ラベルは `rgba(15,23,42,0.34)`。
 
 ### 2.2 各要素の出所
@@ -317,7 +315,7 @@ scroll chaining 規則の帰結:
 | 起点 | 上スワイプ |
 |---|---|
 | backdrop | 閉じる |
-| primary zone / account zone / grabber | 閉じる |
+| primary zone / account zone | 閉じる |
 | navigation の scroll 領域（スクロール余地あり） | **スクロールする。閉じない** |
 | navigation の scroll 領域（余地なし＝内容が収まっている） | 閉じる |
 
@@ -491,7 +489,6 @@ sheet width（250–330 の範囲）、backdrop opacity、fade strength、blur �
 | primary zone | `padding: 12px 14px 6px` / `linear-gradient(180deg, rgba(15,23,42,0.015), rgba(15,23,42,0.05))` |
 | primary 塗り | h56 / 基準幅 196（折り返さない範囲で内容ぶん拡張）/ radius 14 / `#6366F1` / icon 19 / label 15px 600 / count chip h21 `padding 0 7px` radius 999 `rgba(255,255,255,0.24)` 11.5px 800 |
 | primary 輪郭 | h50 / `margin-top: 8px` / radius 14 / `#fff` + `1px solid #E2E8F0` / `#334155` 14.5px 600 / icon 18 `#64748B`。active は `#EEF2FF` + `1px solid #C7CBF7` + `#4F46E5` 700 |
-| grabber | w36 h4 radius 2 `rgba(15,23,42,0.14)` / `margin: 10px auto 8px` |
 
 ### 7.6 Motion
 

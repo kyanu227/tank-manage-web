@@ -21,8 +21,16 @@ export type StaffSwipeSurface =
   | "header"
   | "tabs"
   | "confirm"
+  | "content"
   | "menu-backdrop"
   | "menu";
+
+/**
+ * A-OK 確定ブロックを持たない画面（dashboard / mypage / 発注系）でも
+ * 上部から下スワイプできるようにするための帯。viewport 上端からの高さ。
+ * これ以外の surface と重なった場合は、より内側の surface が優先される。
+ */
+export const STAFF_CONTENT_SWIPE_ZONE_PX = 140;
 
 export interface StaffSwipeStartTarget {
   readonly surface: StaffSwipeSurface;
@@ -51,6 +59,7 @@ function isStaffSwipeSurface(value: string | null): value is StaffSwipeSurface {
   return value === "header"
     || value === "tabs"
     || value === "confirm"
+    || value === "content"
     || value === "menu-backdrop"
     || value === "menu";
 }
@@ -95,6 +104,26 @@ export function isStaffSectionSwipeEdgeGuarded(
 export function canScrollStaffMenuForward(element: HTMLElement | null) {
   if (!element) return false;
   return element.scrollTop < element.scrollHeight - element.clientHeight;
+}
+
+/**
+ * 起点からみて「上へ戻す余地」が残っているか。
+ *
+ * 下スワイプは内容を下へ戻す＝ scrollTop を減らす向きなので、
+ * scrollTop > 0 の領域が祖先にあるなら、それはスクロール操作であって
+ * menu open ではない。document 自体のスクロールも同じ規則で扱う。
+ */
+export function canScrollStaffContentBackward(target: Element | null) {
+  if (!target) return false;
+
+  let node: Element | null = target;
+  while (node) {
+    if (node.scrollTop > 0 && node.scrollHeight > node.clientHeight) return true;
+    node = node.parentElement;
+  }
+
+  if (typeof window === "undefined") return false;
+  return (window.scrollY || document.documentElement.scrollTop || 0) > 0;
 }
 
 /**
