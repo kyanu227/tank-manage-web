@@ -144,7 +144,23 @@ describe("core staff operation screens", () => {
     expect(html).toContain("Run Fill for 1 tank");
     expect(html).toContain('aria-label="Tank number"');
     expect(html).toContain('aria-busy="false"');
+    expect(html).toContain('data-staff-swipe-surface="confirm"');
     expectNoJapaneseChrome(html);
+  });
+
+  it("keeps the manual return back action outside the confirm swipe contract", () => {
+    const html = renderToStaticMarkup(createElement(ManualOperationPanel, {
+      mode: "return",
+      config: MODE_CONFIG.return,
+      operationLabel: "Return",
+      locale: "en",
+      prefixes: ["A"],
+      manual: createManualResult({ activePrefix: "A" }),
+      onBack: vi.fn(),
+    }));
+
+    expect(html).toContain('data-staff-swipe-surface="confirm"');
+    expect(html).toMatch(/<button[^>]*data-swipe-ignore="true"[^>]*aria-label="Back"/u);
   });
 
   it("renders operation data loading and failure states in English", () => {
@@ -268,6 +284,8 @@ describe("core staff operation screens", () => {
     expect(html).toContain("Scan 1 more tank");
     expect(html).toContain('aria-label="Back"');
     expect(html).toContain('aria-label="Tank number"');
+    expect(html).toContain('data-staff-swipe-surface="confirm"');
+    expect(html).toMatch(/<button[^>]*data-swipe-ignore="true"[^>]*aria-label="Back"/u);
     expectNoJapaneseChrome(html);
   });
 

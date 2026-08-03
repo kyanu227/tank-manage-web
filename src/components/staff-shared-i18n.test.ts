@@ -22,6 +22,7 @@ describe("shared staff locale UI", () => {
     }));
     expect(quickJa).toContain("選択してください");
     expect(quickEn).toContain("Select an option");
+    expect(quickJa).toContain('data-swipe-ignore="true"');
 
     const prefixEn = renderToStaticMarkup(createElement(PrefixNumberPicker, {
       tankIds: ["A-01"], value: null, onChange: noop, locale: "en",
@@ -41,6 +42,7 @@ describe("shared staff locale UI", () => {
     }));
     expect(tankInputEn).toContain("Enter OK");
     expect(tankInputEn).toContain('aria-label="Tank number"');
+    expect(tankInputEn).toContain('data-staff-swipe-surface="confirm"');
   });
 
   it("renders return tag labels without changing tag values", () => {

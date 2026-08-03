@@ -41,6 +41,7 @@ const mocks = vi.hoisted(() => {
     handlers: new Map<string, Set<EventListener>>(),
     dispatchSwipeEnd: vi.fn(),
     dispatchSwipeProgress: vi.fn(),
+    suppressSwipeClick: vi.fn(),
     beginRender() {
       refCursor = 0;
       effectCursor = 0;
@@ -104,14 +105,28 @@ vi.mock("@/components/staff-section-tabs-events", async (importOriginal) => {
     ...actual,
     dispatchStaffSectionSwipeEnd: mocks.dispatchSwipeEnd,
     dispatchStaffSectionSwipeProgress: mocks.dispatchSwipeProgress,
+    suppressNextStaffSwipeClick: mocks.suppressSwipeClick,
   };
 });
 
 class SwipeTargetElement {
-  constructor(private readonly ignored: boolean) {}
+  constructor(
+    readonly ignored: boolean,
+    readonly surface: string | null = null,
+    readonly tagName = "div",
+  ) {}
 
-  closest(): SwipeTargetElement | null {
-    return this.ignored ? this : null;
+  closest(selector: string): SwipeTargetElement | null {
+    if (selector.includes("data-swipe-ignore")) return this.ignored ? this : null;
+    if (selector === "[data-staff-swipe-surface]") return this.surface ? this : null;
+    if (selector === "a, button:not([disabled])") {
+      return this.tagName === "a" || this.tagName === "button" ? this : null;
+    }
+    return null;
+  }
+
+  getAttribute(name: string): string | null {
+    return name === "data-staff-swipe-surface" ? this.surface : null;
   }
 }
 
@@ -161,6 +176,7 @@ describe("useOperationSwipe", () => {
     mocks.handlers.clear();
     mocks.dispatchSwipeEnd.mockReset();
     mocks.dispatchSwipeProgress.mockReset();
+    mocks.suppressSwipeClick.mockReset();
     mocks.resetRuntime();
 
     vi.stubGlobal("Element", SwipeTargetElement);
@@ -216,6 +232,37 @@ describe("useOperationSwipe", () => {
       key: "operations",
       committed: false,
     });
+    expect(mocks.suppressSwipeClick).not.toHaveBeenCalled();
+  });
+
+  it("tabs Link は 40px で遷移して click を抑止し、39px ではどちらもしない", () => {
+    renderOperationSwipe("lend");
+    const tabsLink = new SwipeTargetElement(false, "tabs", "a") as unknown as EventTarget;
+
+    dispatchTouch("touchstart", touchEvent("start", 300, 100, tabsLink));
+    dispatchTouch("touchmove", touchEvent("move", 261, 100, tabsLink));
+    dispatchTouch("touchend", touchEvent("end", 261, 100, tabsLink));
+
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(mocks.suppressSwipeClick).not.toHaveBeenCalled();
+
+    dispatchTouch("touchstart", touchEvent("start", 300, 100, tabsLink));
+    dispatchTouch("touchmove", touchEvent("move", 260, 100, tabsLink));
+    dispatchTouch("touchend", touchEvent("end", 260, 100, tabsLink));
+
+    expect(mocks.replace).toHaveBeenCalledWith("/staff/return");
+    expect(mocks.suppressSwipeClick).toHaveBeenCalledOnce();
+  });
+
+  it("tabs Link の短い tap では route 切替も click 抑止もしない", () => {
+    renderOperationSwipe("lend");
+    const tabsLink = new SwipeTargetElement(false, "tabs", "a") as unknown as EventTarget;
+
+    dispatchTouch("touchstart", touchEvent("start", 300, 100, tabsLink));
+    dispatchTouch("touchend", touchEvent("end", 302, 102, tabsLink));
+
+    expect(mocks.replace).not.toHaveBeenCalled();
+    expect(mocks.suppressSwipeClick).not.toHaveBeenCalled();
   });
 
   it("縦方向優先の gesture では遷移しない", () => {
@@ -226,10 +273,7 @@ describe("useOperationSwipe", () => {
 
     expect(mocks.replace).not.toHaveBeenCalled();
     expect(mocks.dispatchSwipeProgress).not.toHaveBeenCalled();
-    expect(mocks.dispatchSwipeEnd).toHaveBeenCalledWith({
-      key: "operations",
-      committed: false,
-    });
+    expect(mocks.dispatchSwipeEnd).not.toHaveBeenCalled();
   });
 
   it("右端 edge と DrumRoll 内から始まる gesture を無視する", () => {
