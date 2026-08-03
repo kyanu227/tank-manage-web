@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useRef, useEffect, useCallback, useId } from "react";
+import React, { useState, useRef, useEffect, useCallback, useId, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 
@@ -18,6 +18,16 @@ interface QuickSelectProps {
   placeholder?: string;
   locale?: Locale;
   ariaLabel?: string;
+  /**
+   * 見た目のバリアント。
+   * - default: 2px 枠を持つ独立したフォーム部品
+   * - context: 面の上に置く 1 行（高さは親が配る）。枠線は持たず inset のみ
+   */
+  variant?: "default" | "context";
+  /** context variant で値の前に置く小さなラベル */
+  label?: string;
+  /** context variant で先頭に置くアイコン */
+  icon?: ReactNode;
 }
 
 export default function QuickSelect({
@@ -29,7 +39,11 @@ export default function QuickSelect({
   placeholder,
   locale = DEFAULT_LOCALE,
   ariaLabel,
+  variant = "default",
+  label,
+  icon,
 }: QuickSelectProps) {
+  const isContext = variant === "context";
   const resolvedPlaceholder = placeholder ?? (locale === "ja" ? "選択してください" : "Select an option");
   const normalizedOptions = options.map((option) => (
     typeof option === "string" ? { value: option, label: option } : option
@@ -153,7 +167,13 @@ export default function QuickSelect({
     <div 
       ref={containerRef}
       data-swipe-ignore="true"
-      style={{ position: "relative", width: "100%", userSelect: "none", WebkitUserSelect: "none" }}
+      style={{
+        position: "relative",
+        width: "100%",
+        ...(isContext ? { height: "var(--ops-context, 38px)" } : {}),
+        userSelect: "none",
+        WebkitUserSelect: "none",
+      }}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}
       onTouchEnd={handleTouchEnd}
@@ -168,21 +188,44 @@ export default function QuickSelect({
         aria-expanded={isOpen}
         aria-controls={listboxId}
         onClick={toggleMenu}
-        style={{
-          width: "100%", padding: "6px 12px", borderRadius: 10,
-          background: "#fff", border: `2px solid ${value ? color : "#cbd5e1"}`,
-          color: value ? "#0f172a" : "#64748b",
-          fontSize: 13, fontWeight: 700, textAlign: "left",
-          display: "flex", justifyContent: "space-between", alignItems: "center",
-          transition: "all 0.1s", cursor: "pointer", outline: "none",
-          minHeight: 36,
-          boxShadow: isOpen ? `0 0 0 3px ${color}15` : "none"
-        }}
+        style={isContext
+          ? {
+              /* 面の上に置く 1 行。上に線は置かず、操作可能であることは inset だけで示す */
+              width: "100%", height: "100%", padding: "0 10px 0 12px", borderRadius: 11,
+              border: "none", background: "rgba(255,255,255,0.82)",
+              boxShadow: `inset 0 0 0 1px ${value ? `${color}42` : "rgba(15,23,42,0.09)"}`,
+              color: value ? "#0f172a" : "#a8b2c1",
+              fontFamily: "inherit", fontSize: 13, fontWeight: 700, textAlign: "left",
+              display: "flex", alignItems: "center", gap: 9,
+              cursor: "pointer", outline: "none",
+              WebkitTapHighlightColor: "transparent",
+            }
+          : {
+              width: "100%", padding: "6px 12px", borderRadius: 10,
+              background: "#fff", border: `2px solid ${value ? color : "#cbd5e1"}`,
+              color: value ? "#0f172a" : "#64748b",
+              fontSize: 13, fontWeight: 700, textAlign: "left",
+              display: "flex", justifyContent: "space-between", alignItems: "center",
+              transition: "all 0.1s", cursor: "pointer", outline: "none",
+              minHeight: 36,
+              boxShadow: isOpen ? `0 0 0 3px ${color}15` : "none",
+            }}
       >
-        <span style={{ whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+        {isContext && icon && (
+          <span aria-hidden="true" style={{ display: "inline-flex", flexShrink: 0, color: value ? color : "#a8b2c1" }}>
+            {icon}
+          </span>
+        )}
+        {/* 未選択のときは placeholder 自体が説明になるので、ラベルは畳む */}
+        {isContext && label && value && (
+          <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 800, letterSpacing: "0.1em", color: "#a3aebf" }}>
+            {label}
+          </span>
+        )}
+        <span style={{ flex: 1, minWidth: 0, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
           {selectedLabel || resolvedPlaceholder}
         </span>
-        <ChevronDown size={18} style={{ opacity: 0.6, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }} />
+        <ChevronDown size={isContext ? 16 : 18} style={{ opacity: 0.6, transform: isOpen ? "rotate(180deg)" : "none", transition: "transform 0.2s", flexShrink: 0 }} />
       </button>
 
       {/* Dropdown Menu */}

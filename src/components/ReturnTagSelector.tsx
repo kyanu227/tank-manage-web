@@ -1,7 +1,7 @@
 "use client";
 
 import { AlertCircle, Clock, Droplets, type LucideIcon } from "lucide-react";
-import { useRef } from "react";
+import { useRef, type CSSProperties } from "react";
 import { DEFAULT_LOCALE, type Locale } from "@/lib/locale";
 import { getReturnTagLabel as getLocalizedReturnTagLabel } from "@/lib/return-tag-labels";
 import type { ReturnTag } from "@/lib/return-tag-rules";
@@ -24,6 +24,12 @@ interface ReturnTagSelectorProps<T extends ReturnTagValue = ReturnTagValue> {
   stackedLabels?: boolean;
   locale?: Locale;
   ariaLabel?: string;
+  /**
+   * 見た目のバリアント。
+   * - chip: 枠を持つ独立したボタン列
+   * - context: 面の上に置く 1 行（高さは親が配る）。枠線は持たず inset のみ
+   */
+  variant?: "chip" | "context";
 }
 
 const TAG_STYLES: Record<Exclude<ReturnTagValue, "normal">, {
@@ -81,7 +87,9 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
   stackedLabels = false,
   locale = DEFAULT_LOCALE,
   ariaLabel,
+  variant = "chip",
 }: ReturnTagSelectorProps<T>) {
+  const isContext = variant === "context";
   const pointerStart = useRef<{ x: number; y: number } | null>(null);
   const suppressClickRef = useRef(false);
 
@@ -116,7 +124,9 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
       style={{
         display: "grid",
         gridTemplateColumns: `repeat(${options.length}, minmax(0, 1fr))`,
-        gap: compact ? 4 : 6,
+        /* context は 320px でも 3 連が文字切れしない密度にする */
+        gap: isContext ? 4 : compact ? 4 : 6,
+        ...(isContext ? { height: "var(--ops-context, 38px)" } : {}),
         touchAction: enableSwipe ? "pan-y" : "auto",
       }}
     >
@@ -139,27 +149,57 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
               selectValue(option.value);
             }}
             aria-pressed={active}
-            style={{
-              minWidth: 0,
-              padding: compact ? "6px 8px" : "10px 8px",
-              borderRadius: compact ? 8 : 12,
-              border: `${active ? 2 : 1.5}px solid ${active ? style.border : "#e2e8f0"}`,
-              background: active ? style.background : "#fff",
-              color: active ? style.color : "#94a3b8",
-              fontSize: compact ? 11 : 12,
-              fontWeight: 800,
-              cursor: "pointer",
-              display: "flex",
-              flexDirection: stackedLabels ? "column" : "row",
-              alignItems: "center",
-              justifyContent: "center",
-              gap: stackedLabels ? 2 : 5,
-              transition: "background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s",
-              boxShadow: active ? `0 2px 8px ${style.color}20` : "none",
-            }}
+            style={isContext
+              ? {
+                  minWidth: 0,
+                  height: "100%",
+                  padding: "0 5px",
+                  borderRadius: 11,
+                  border: "none",
+                  background: active ? style.background : "rgba(255,255,255,0.62)",
+                  boxShadow: active
+                    ? `inset 0 0 0 1.5px ${style.border}`
+                    : "inset 0 0 0 1px rgba(15,23,42,0.09)",
+                  color: active ? style.color : "#94a3b8",
+                  fontFamily: "inherit",
+                  fontSize: 11,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  display: "flex",
+                  /*
+                    狭い幅ではアイコンを上に逃がし、ラベルへ行幅を全部渡す。
+                    向きは親の CSS（media query）が決める。
+                  */
+                  flexDirection: "var(--ops-tag-dir, row)" as CSSProperties["flexDirection"],
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "var(--ops-tag-gap, 4px)",
+                  transition: "background 0.15s, color 0.15s, box-shadow 0.15s",
+                  WebkitTapHighlightColor: "transparent",
+                }
+              : {
+                  minWidth: 0,
+                  padding: compact ? "6px 8px" : "10px 8px",
+                  borderRadius: compact ? 8 : 12,
+                  border: `${active ? 2 : 1.5}px solid ${active ? style.border : "#e2e8f0"}`,
+                  background: active ? style.background : "#fff",
+                  color: active ? style.color : "#94a3b8",
+                  fontSize: compact ? 11 : 12,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  display: "flex",
+                  flexDirection: stackedLabels ? "column" : "row",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: stackedLabels ? 2 : 5,
+                  transition: "background 0.15s, border-color 0.15s, color 0.15s, box-shadow 0.15s",
+                  boxShadow: active ? `0 2px 8px ${style.color}20` : "none",
+                }}
           >
-            <Icon size={compact ? 13 : 14} />
-            <span style={stackedLabels ? { minWidth: 0, lineHeight: 1.1, textAlign: "center", whiteSpace: "normal", overflowWrap: "anywhere" } : undefined}>
+            <Icon size={isContext ? 12 : compact ? 13 : 14} style={{ flexShrink: 0 }} />
+            <span style={stackedLabels && !isContext
+              ? { minWidth: 0, lineHeight: 1.1, textAlign: "center", whiteSpace: "normal", overflowWrap: "anywhere" }
+              : { minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
               {getReturnTagLabel(option.value, locale)}
             </span>
           </button>

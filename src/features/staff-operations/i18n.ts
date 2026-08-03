@@ -19,6 +19,15 @@ export const STAFF_OPERATION_TEXT = {
     en: "The data required for this operation could not be loaded.",
   },
   queue: { ja: "送信リスト", en: "Submission list" },
+  /* 件数は monospace accent、単位は muted で別要素に置くため、数と単位を分ける */
+  queueUnitOne: { ja: "件", en: "tank" },
+  queueUnitMany: { ja: "件", en: "tanks" },
+  clearQueue: { ja: "全削除", en: "Clear all" },
+  clearQueueArmed: { ja: "全削除する？", en: "Clear all?" },
+  clearQueueAria: {
+    ja: "送信リストを全削除（もう一度タップで確定）",
+    en: "Clear the submission list (tap again to confirm)",
+  },
   scannedList: { ja: "スキャンリスト", en: "Scanned tanks" },
   choosePrefix: {
     ja: "右側のリストからアルファベットを選び、",
@@ -32,6 +41,15 @@ export const STAFF_OPERATION_TEXT = {
   recoveryRequired: {
     ja: "自動補完確認が必要",
     en: "Physical verification required",
+  },
+  /* 行内チップ。長い説明文は同じ行の状態テキストが引き続き担う */
+  recoveryChip: { ja: "要復旧", en: "Verify" },
+  blockedChip: { ja: "送信対象外", en: "Excluded" },
+  prefixNotSelected: { ja: "プレフィックスを選択", en: "Select a prefix" },
+  destinationLabel: { ja: "貸出先", en: "Destination" },
+  selectDestination: {
+    ja: "貸出先を選択してください",
+    en: "Please select a destination",
   },
   selectCustomerAndRun: {
     ja: "貸出先を選択して実行...",
@@ -117,6 +135,15 @@ export const STAFF_OPERATION_TEXT = {
   scanRemainingOne: { ja: "あと {count} 本スキャンしてください", en: "Scan {count} more tank" },
   scanRemainingMany: { ja: "あと {count} 本スキャンしてください", en: "Scan {count} more tanks" },
   pendingReturnTags: { ja: "返却タグ処理待ち", en: "Return tags awaiting processing" },
+  manualReturnDialHint: { ja: "ダイヤル入力", en: "Dial input" },
+  returnBoardEmptyTitle: {
+    ja: "返却待ちのタンクはありません",
+    en: "No tanks are waiting to be returned",
+  },
+  returnBoardEmptyHelp: {
+    ja: "個別に返す場合は上の「手動返却」から",
+    en: "Use Manual return above to return tanks individually",
+  },
   loadingReturnRequests: { ja: "返却申請を読み込み中", en: "Loading return requests" },
   returnRequestsLoadFailure: {
     ja: "返却申請を読み込めませんでした。",

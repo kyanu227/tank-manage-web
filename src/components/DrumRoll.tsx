@@ -9,6 +9,36 @@ const MIN_GAP = 16;
 const CYCLE_COUNT = 3;
 const MIDDLE_CYCLE = 1;
 
+/** soft variant: 選択から離れるほど淡くして奥行きを作る */
+const SOFT_INACTIVE_RAMP = ["#a8b2c1", "#b3bcc9", "#bfc7d3", "#cbd2dc"] as const;
+
+function parseHexColor(hex: string): [number, number, number] | null {
+  const value = hex.trim().replace("#", "");
+  const full = value.length === 3
+    ? value.split("").map((c) => c + c).join("")
+    : value;
+  if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+  return [
+    parseInt(full.slice(0, 2), 16),
+    parseInt(full.slice(2, 4), 16),
+    parseInt(full.slice(4, 6), 16),
+  ];
+}
+
+function withAlpha(hex: string, alpha: number): string {
+  const rgb = parseHexColor(hex);
+  if (!rgb) return hex;
+  return `rgba(${rgb[0]}, ${rgb[1]}, ${rgb[2]}, ${alpha})`;
+}
+
+/** 選択中の文字だけは accent より一段深くして、屋外でも数字が沈まないようにする */
+function deepen(hex: string, ratio = 0.26): string {
+  const rgb = parseHexColor(hex);
+  if (!rgb) return hex;
+  const [r, g, b] = rgb.map((channel) => Math.round(channel * (1 - ratio)));
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
 type Metrics = {
   spacerHeight: number;
   gap: number;
@@ -49,8 +79,14 @@ export type DrumRollProps<T extends string> = {
   accentColor?: string;
   /** 非アクティブ項目の文字色。デフォルト #94a3b8 */
   inactiveColor?: string;
-  /** コンテナ幅（px）。デフォルト 70 */
-  width?: number;
+  /** コンテナ幅。数値は px、文字列は CSS 値（`var(--ops-drum-w)` など）。デフォルト 70 */
+  width?: number | string;
+  /**
+   * 見た目のバリアント。
+   * - framed: 縦線＋選択枠（既存の維持系画面）
+   * - soft: 縦線と選択枠を持たず、内側影と輪郭のないにじみで示す（操作系画面の視覚正本）
+   */
+  variant?: "framed" | "soft";
   /** アクセシビリティラベル */
   ariaLabel?: string;
   locale?: Locale;
@@ -65,9 +101,11 @@ export default function DrumRoll<T extends string>({
   accentColor = "#3b82f6",
   inactiveColor = "#94a3b8",
   width = 70,
+  variant = "framed",
   ariaLabel,
   locale = DEFAULT_LOCALE,
 }: DrumRollProps<T>) {
+  const isSoft = variant === "soft";
   const containerRef = useRef<HTMLDivElement>(null);
   const optionIdPrefix = useId();
   const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -298,6 +336,21 @@ export default function DrumRoll<T extends string>({
     }, 0);
   };
 
+  /*
+    soft variant の選択表現。
+    輪郭を持たない楕円のにじみだけで示し、枠線も枠線周囲の gradient も置かない。
+    未選択のときは accent ではなく中立色でにじませる。
+  */
+  const bloomHeight = Math.round(itemHeight * 1.9);
+  const bloomTint = value == null
+    ? ["rgba(15, 23, 42, 0.10)", "rgba(15, 23, 42, 0.06)", "rgba(15, 23, 42, 0.02)", "rgba(15, 23, 42, 0)"]
+    : [
+        withAlpha(accentColor, 0.26),
+        withAlpha(accentColor, 0.13),
+        withAlpha(accentColor, 0.04),
+        withAlpha(accentColor, 0),
+      ];
+
   return (
     <div
       data-swipe-ignore="true"
@@ -305,30 +358,66 @@ export default function DrumRoll<T extends string>({
         width,
         height: "100%",
         minHeight: 0,
-        background: "#fff",
-        borderLeft: "1px solid #e2e8f0",
+        background: isSoft ? "rgba(255, 255, 255, 0.42)" : "#fff",
+        ...(isSoft
+          /* 縦線ではなく内側の淡い影だけで奥行きを作る */
+          ? { boxShadow: "inset 14px 0 20px -16px rgba(15, 23, 42, 0.30)" }
+          : { borderLeft: "1px solid #e2e8f0" }),
         display: "flex",
         flexDirection: "column",
         position: "relative",
+        overflow: isSoft ? "hidden" : undefined,
       }}
     >
       {items.length > 0 && (
         <>
-          {/* 選択枠（下段にオーバーレイ） */}
-          <div
-            style={{
-              position: "absolute",
-              bottom: BOTTOM_INSET,
-              left: SIDE_INSET,
-              right: SIDE_INSET,
-              height: itemHeight,
-              border: `3px solid ${accentColor}`,
-              borderRadius: 8,
-              pointerEvents: "none",
-              zIndex: 10,
-              background: `${accentColor}0A`,
-            }}
-          />
+          {isSoft ? (
+            <>
+              {/* 上端 fade。面へ溶けることで「まだ続く＝回せる」を線なしで示す */}
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  left: 0,
+                  right: 0,
+                  top: 0,
+                  height: 36,
+                  zIndex: 2,
+                  pointerEvents: "none",
+                  background: "linear-gradient(180deg, rgba(244,246,250,0.94), rgba(244,246,250,0))",
+                }}
+              />
+              <div
+                aria-hidden="true"
+                style={{
+                  position: "absolute",
+                  left: -10,
+                  right: -10,
+                  bottom: BOTTOM_INSET + itemHeight / 2 - bloomHeight / 2,
+                  height: bloomHeight,
+                  pointerEvents: "none",
+                  background: `radial-gradient(56% 50% at 50% 50%, ${bloomTint[0]} 0%, ${bloomTint[1]} 40%, ${bloomTint[2]} 70%, ${bloomTint[3]} 100%)`,
+                  transition: "background 160ms linear",
+                }}
+              />
+            </>
+          ) : (
+            /* 選択枠（下段にオーバーレイ） */
+            <div
+              style={{
+                position: "absolute",
+                bottom: BOTTOM_INSET,
+                left: SIDE_INSET,
+                right: SIDE_INSET,
+                height: itemHeight,
+                border: `3px solid ${accentColor}`,
+                borderRadius: 8,
+                pointerEvents: "none",
+                zIndex: 10,
+                background: `${accentColor}0A`,
+              }}
+            />
+          )}
           <div
             ref={containerRef}
             className="no-scrollbar"
@@ -368,6 +457,15 @@ export default function DrumRoll<T extends string>({
               {repeatedItems.map(({ item, itemIndex, globalIndex }) => {
                 const isActive = value === item;
                 const isAccessibleCycle = Math.floor(globalIndex / items.length) === MIDDLE_CYCLE;
+                const distance = value == null
+                  ? 1
+                  : Math.min(
+                      normalizeIndex(itemIndex - selectedIndex, items.length),
+                      normalizeIndex(selectedIndex - itemIndex, items.length),
+                    );
+                const softColor = isActive
+                  ? deepen(accentColor)
+                  : SOFT_INACTIVE_RAMP[Math.min(Math.max(distance - 1, 0), SOFT_INACTIVE_RAMP.length - 1)];
                 return (
                   <div
                     key={`${item}-${globalIndex}`}
@@ -404,13 +502,16 @@ export default function DrumRoll<T extends string>({
                         borderRadius: 8,
                         border: "none",
                         background: "transparent",
-                        color: isActive ? accentColor : inactiveColor,
-                        fontSize: 22,
-                        fontWeight: 900,
+                        color: isSoft ? softColor : (isActive ? accentColor : inactiveColor),
+                        /* soft: 優先順位は文字サイズと色階調だけが担う（回転中のにじみを避けるため scale は使わない） */
+                        fontSize: isSoft ? (isActive ? 27 : 21) : 22,
+                        fontWeight: isSoft ? (isActive ? 800 : 700) : 900,
                         fontFamily: "monospace",
-                        transition: "color 0.15s ease, transform 0.15s ease",
+                        transition: isSoft
+                          ? "color 0.15s ease, font-size 0.15s ease"
+                          : "color 0.15s ease, transform 0.15s ease",
                         cursor: "pointer",
-                        transform: isActive ? "scale(1.3)" : "scale(1)",
+                        transform: isSoft || !isActive ? "scale(1)" : "scale(1.3)",
                         WebkitTapHighlightColor: "transparent",
                       }}
                     >
