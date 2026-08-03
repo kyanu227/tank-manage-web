@@ -54,6 +54,7 @@ export interface UseManualTankOperationResult {
   handleInputChange: (e: ChangeEvent<HTMLInputElement>) => void;
   handleManualOkTrigger: () => void;
   removeFromQueue: (uid: string) => void;
+  clearQueue: () => void;
   handleSubmit: (skipConfirm?: boolean, customerOverride?: CustomerSnapshot | null) => Promise<void>;
   reset: () => void;
 }
@@ -256,6 +257,17 @@ export function useManualTankOperation({
     setOpQueue((prev) => prev.filter((q) => q.uid !== uid));
   }, []);
 
+  /**
+   * 送信リストを空にするだけの操作。
+   * prefix / 貸出先 / 返却タグの選択は入力側の状態なので触らない。
+   * 直前追加の表示はキュー由来なので一緒に消す。
+   */
+  const clearQueue = useCallback(() => {
+    setOpQueue([]);
+    if (successTimeoutRef.current) clearTimeout(successTimeoutRef.current);
+    setLastAdded(null);
+  }, []);
+
   const handleSubmit = useCallback(async (
     skipConfirm = false,
     customerOverride?: CustomerSnapshot | null
@@ -346,6 +358,7 @@ export function useManualTankOperation({
     handleInputChange,
     handleManualOkTrigger,
     removeFromQueue,
+    clearQueue,
     handleSubmit,
     reset,
   };

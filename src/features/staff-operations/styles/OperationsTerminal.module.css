@@ -1,0 +1,791 @@
+/*
+  staff 操作画面（貸出 / 返却 / 充填 / 返却一覧）の視覚正本。
+  値の出典は Claude Design プロジェクト "Staff Operations Visual Spec"
+  （docs/design/staff-operations-visual-implementation.md）。
+
+  方針は「一枚の面の上に、優先順位だけを置く」。
+  区切りは線ではなく、余白・面のわずかな沈み・文字サイズが担う。
+  ここに書かれた寸法（Commit 66 / Context 38 / 送信 48 / 行 46 / Drum 68）は
+  正本の固定値であり、behavior 実装の都合で書き換えない。
+*/
+
+/* ============================================================
+   寸法トークン。320 / 390(基準) / 430 で密度を再配分する。
+   panel と board の両方に置くのは、どちらも単体で描画されるため。
+   ============================================================ */
+
+.workspace,
+.returnBoard {
+  --ops-gutter: 16px;
+  --ops-drum-w: 68px;
+  --ops-id: 34px;
+  --ops-row: 46px;
+  --ops-context: 38px;
+  --ops-submit: 48px;
+
+  /*
+    基底面はごく淡いトーン、その上に置くものが白。
+    白同士を重ねないので、行・Context・DrumRoll は塗らずに「浮いて」読める。
+    送信リストの内側は基底面のまま（枠の中だけ色を変えない）。
+  */
+  --ops-plane: #f7f8fb;
+  --ops-queue-fill: transparent;
+  --ops-row-fill: #ffffff;
+  --ops-context-fill: #ffffff;
+  --ops-drum-fill: #ffffff;
+  --ops-outline: rgba(15, 23, 42, 0.085);
+
+  /* 文字 */
+  --ops-text: #0f172a;
+  --ops-text-body: #475569;
+  --ops-text-sub: #8494ab;
+  --ops-text-muted: #a8b2c1;
+
+  /* 状態色 */
+  --ops-warn: #f0a93b;
+  --ops-warn-deep: #b45309;
+  --ops-bad: #ef6b6b;
+  --ops-bad-deep: #b91c1c;
+}
+
+@media (max-width: 359px) {
+  .workspace,
+  .returnBoard {
+    --ops-gutter: 12px;
+    --ops-drum-w: 60px;
+    --ops-id: 30px;
+    --ops-row: 42px;
+    --ops-context: 36px;
+    --ops-submit: 44px;
+  }
+}
+
+@media (min-width: 430px) {
+  .workspace,
+  .returnBoard {
+    --ops-gutter: 20px;
+    --ops-drum-w: 76px;
+    --ops-id: 36px;
+    --ops-context: 40px;
+  }
+}
+
+/* accent は既存 MODE_CONFIG の色をそのまま使う（貸出 #3b82f6 / 返却 #10b981 / 充填 #f59e0b）。
+   面のトーンは accent の alpha 合成で作るので、rgb 値も持たせる。 */
+.workspace[data-mode="lend"],
+.returnBoard[data-mode="lend"] {
+  --ops-accent: #3b82f6;
+  --ops-accent-rgb: 59, 130, 246;
+  --ops-accent-mid: #2563eb;
+  --ops-accent-deep: #1d4ed8;
+}
+
+.workspace[data-mode="return"],
+.returnBoard[data-mode="return"] {
+  --ops-accent: #10b981;
+  --ops-accent-rgb: 16, 185, 129;
+  --ops-accent-mid: #059669;
+  --ops-accent-deep: #047857;
+}
+
+.workspace[data-mode="fill"],
+.returnBoard[data-mode="fill"] {
+  --ops-accent: #f59e0b;
+  --ops-accent-rgb: 245, 158, 11;
+  --ops-accent-mid: #d97706;
+  --ops-accent-deep: #b45309;
+}
+
+/* ============================================================
+   Input Workspace — 親が領域を配る。
+   子は相手の寸法も存在も知らない。
+   ============================================================ */
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  position: relative;
+  /*
+    面は 1 枚の白。下端に沈みを置くと footer 帯として読めてしまうので置かない。
+    階層は Queue の内側と DrumRoll の沈みだけが持つ。
+  */
+}
+
+.commandPane {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  flex-direction: column;
+  padding-left: var(--ops-gutter);
+}
+
+/* 隠し数字入力。position:absolute の祖先になるよう Command Pane 内に置く */
+.hiddenInput {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+  caret-color: transparent;
+}
+
+/* ── loading / error は面の上に薄く載せる。カード枠は持たない ── */
+
+.notice {
+  flex-shrink: 0;
+  margin: 8px 12px 0 0;
+  padding: 8px 12px;
+  border-radius: 11px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.noticeLoading {
+  background: rgba(var(--ops-accent-rgb), 0.1);
+  color: var(--ops-accent-deep);
+}
+
+.noticeError {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: rgba(239, 107, 107, 0.12);
+  color: var(--ops-bad-deep);
+}
+
+.noticeRetry {
+  flex-shrink: 0;
+  border: none;
+  border-radius: 8px;
+  padding: 6px 10px;
+  background: var(--ops-bad-deep);
+  color: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+/* ============================================================
+   Commit Display（A-OK）— 表示と確定を兼ねる 66px。
+   6 状態すべてで寸法と ID の位置は不変。変わるのは面のトーンだけ。
+   ============================================================ */
+
+.commitRow {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 12px 0 0;
+}
+
+.backButton {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  border: none;
+  border-radius: 13px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1);
+  color: var(--ops-text-body);
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.commit {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: center;
+  justify-content: center;
+  height: 66px;
+  padding: 0;
+  border: none;
+  border-radius: 16px;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+  transition: background 180ms linear, box-shadow 180ms linear;
+}
+
+/* 1 — prefix 未選択 */
+.commit[data-state="idle"] {
+  background: linear-gradient(168deg, #ffffff 0%, #f0f3f9 100%);
+  cursor: not-allowed;
+}
+
+/* 2 — prefix 選択済み（OK 補完で確定できる） */
+.commit[data-state="ready"] {
+  background: linear-gradient(
+    168deg,
+    #ffffff 0%,
+    rgba(var(--ops-accent-rgb), 0.07) 58%,
+    rgba(var(--ops-accent-rgb), 0.16) 100%
+  );
+}
+
+/* 3 — 番号入力中。glow ではなく inset を 1.5px へ上げるだけ */
+.commit[data-state="typing"] {
+  background: linear-gradient(
+    168deg,
+    #ffffff 0%,
+    rgba(var(--ops-accent-rgb), 0.11) 52%,
+    rgba(var(--ops-accent-rgb), 0.24) 100%
+  );
+  box-shadow: inset 0 0 0 1.5px rgba(var(--ops-accent-rgb), 0.34);
+}
+
+/* 4 — 確定可能 */
+.commit[data-state="armed"] {
+  background: linear-gradient(
+    168deg,
+    #ffffff 0%,
+    rgba(var(--ops-accent-rgb), 0.09) 58%,
+    rgba(var(--ops-accent-rgb), 0.2) 100%
+  );
+  box-shadow: 0 12px 22px -20px rgba(var(--ops-accent-rgb), 0.55);
+}
+
+/* 5 — リスト追加直後（寸法と位置は不変） */
+.commit[data-state="added"] {
+  background: linear-gradient(168deg, #ffffff 0%, #e6f7ef 52%, #cdeedf 100%);
+}
+
+/* 6 — disabled（マスタ取得中 / 送信中） */
+.commit[data-state="disabled"] {
+  background: linear-gradient(168deg, #f4f6fa 0%, #eaeef5 100%);
+  cursor: progress;
+}
+
+.commitId {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  color: var(--ops-text);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -0.015em;
+}
+
+.commit[data-state="added"] .commitId {
+  color: #065f46;
+}
+
+/* prefix と番号は同じ色。mode の accent は面のトーンだけが持つ */
+.commitPrefix {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--ops-id);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.commitSeparator {
+  font-size: calc(var(--ops-id) * 0.79);
+  font-weight: 500;
+  line-height: 1;
+  opacity: 0.3;
+}
+
+/* 番号を最も濃くする。屋外の反射下で数字が沈まないようにするため */
+.commitNumber {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--ops-id);
+  font-weight: 800;
+  line-height: 1;
+}
+
+.commitCaret {
+  opacity: 0.3;
+}
+
+.commitPlaceholder {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--ops-text-sub);
+}
+
+.commitCheck {
+  display: inline-flex;
+  color: #065f46;
+}
+
+/* ============================================================
+   Operation Queue（送信リスト）— まとまりは 1px アウトラインと legend。
+   重い白カードにはしない。送信ボタンはこの枠の内側に浮く。
+   ============================================================ */
+
+.queue {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  margin: 16px 12px 0 0;
+  border: 1px solid var(--ops-outline);
+  border-radius: 16px;
+  background: var(--ops-queue-fill);
+}
+
+/* legend は枠の上辺に載せ、面と同色で枠を切り欠く */
+.queueLegend {
+  position: absolute;
+  top: -8px;
+  left: 11px;
+  right: 9px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.queueTitle {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 0 8px;
+  background: var(--ops-plane);
+  white-space: nowrap;
+}
+
+.queueTitleText {
+  font-size: 11.5px;
+  font-weight: 800;
+  color: var(--ops-text-body);
+}
+
+.queueCount {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  font-weight: 800;
+  color: var(--ops-accent-deep);
+}
+
+.queueCountUnit {
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ops-text-muted);
+}
+
+@media (max-width: 359px) {
+  /* 320 では単位を省いてタイトル・件数・全削除を共存させる */
+  .queueCountUnit {
+    display: none;
+  }
+}
+
+/* 全削除は赤い大ボタンにしない。破壊性はアイコンと 2 段階の確認が担う */
+.queueClear {
+  display: flex;
+  align-items: center;
+  margin-left: auto;
+  /* 11px 表示でも 44px 相当の hit を確保する。塗りは内側の帯だけが持つ */
+  padding: 14px 0;
+  margin-top: -14px;
+  margin-bottom: -14px;
+  border: none;
+  background: transparent;
+  font-family: inherit;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* タイトルと同じく、面と同色で枠を切り欠く帯 */
+.queueClearBody {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  background: var(--ops-plane);
+  color: var(--ops-text-muted);
+  font-size: 11px;
+  font-weight: 700;
+  line-height: 16px;
+  white-space: nowrap;
+}
+
+.queueClear[data-armed="true"] .queueClearBody {
+  color: var(--ops-bad-deep);
+}
+
+.queueClear:disabled {
+  cursor: not-allowed;
+}
+
+.queueClear:disabled .queueClearBody {
+  opacity: 0.4;
+}
+
+.queueScroll {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  flex-direction: column;
+  gap: 3px;
+  padding: 16px 7px 70px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* 0 件では実行ボタンごと存在しないので、その分の下端余白も要らない */
+.queue[data-empty="true"] .queueScroll {
+  padding-bottom: 16px;
+}
+
+.queueEmpty {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 0 16px 40px;
+  text-align: center;
+}
+
+.queueEmptyLine {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--ops-text-muted);
+}
+
+/* ── 行 ── */
+
+.queueItem {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: 11px;
+  min-height: var(--ops-row);
+  padding: 9px 6px 9px 9px;
+  border-radius: 11px;
+  background: var(--ops-row-fill);
+}
+
+/* 右端（削除）まで色を残す。途中で白へ抜けると行の区分が読めなくなる */
+.queueItem[data-tone="warn"] {
+  background: linear-gradient(90deg, #fdf1da 0%, #fefaf0 100%);
+}
+
+.queueItem[data-tone="bad"] {
+  background: linear-gradient(90deg, #fde7e7 0%, #fef6f6 100%);
+}
+
+/* 区分は 5×26px の色ピルだけで示す（枠・影を持たない） */
+.queuePill {
+  flex-shrink: 0;
+  width: 5px;
+  height: 26px;
+  border-radius: 999px;
+  background: var(--ops-accent);
+}
+
+.queueItem[data-tone="warn"] .queuePill {
+  background: var(--ops-warn);
+}
+
+.queueItem[data-tone="bad"] .queuePill {
+  background: var(--ops-bad);
+}
+
+.queueItemBody {
+  flex: 1;
+  min-width: 0;
+}
+
+.queueItemHead {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.queueItemId {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 17px;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  line-height: 1.15;
+  color: var(--ops-text);
+}
+
+.queueItem[data-tone="bad"] .queueItemId {
+  color: #7e8798;
+  text-decoration: line-through;
+  text-decoration-color: rgba(126, 135, 152, 0.5);
+}
+
+.queueChip {
+  flex-shrink: 0;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 9.5px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.queueChipTag {
+  background: rgba(15, 23, 42, 0.06);
+  color: var(--ops-text-body);
+}
+
+.queueChipWarn {
+  background: rgba(240, 169, 59, 0.18);
+  color: var(--ops-warn-deep);
+}
+
+.queueChipBad {
+  background: rgba(239, 107, 107, 0.16);
+  color: var(--ops-bad-deep);
+}
+
+.queueItemStatus {
+  margin-top: 2px;
+  overflow: hidden;
+  font-size: 10.5px;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--ops-text-sub);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.queueItem[data-tone="warn"] .queueItemStatus {
+  color: #b0803a;
+}
+
+.queueItem[data-tone="bad"] .queueItemStatus {
+  color: #c15252;
+}
+
+/* 削除は 30px 表示で、内側 padding により 44px 相当の hit を持つ */
+.queueRemove {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 30px;
+  margin: -7px -7px -7px 0;
+  padding: 7px;
+  box-sizing: content-box;
+  border: none;
+  background: none;
+  color: #c3ccd9;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 430 では横幅が余るので 1 行組みにする（ID・タグ・状態を同じ baseline へ） */
+@media (min-width: 430px) {
+  .queueItemBody {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+  }
+
+  .queueItemStatus {
+    flex: 1;
+    min-width: 0;
+    margin-top: 0;
+    text-align: right;
+  }
+}
+
+/* ── 送信（枠の内側下辺に浮く） ── */
+
+.queueSubmitDock {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  bottom: 1px;
+  padding: 22px 8px 8px;
+  border-radius: 0 0 15px 15px;
+  pointer-events: none;
+  /* 溶ける先は枠の内側＝基底面。行が下を通り抜けても最後の行が隠れない */
+  background: linear-gradient(
+    180deg,
+    rgba(247, 248, 251, 0) 0%,
+    rgba(247, 248, 251, 0.86) 38%,
+    var(--ops-plane) 100%
+  );
+}
+
+/*
+  A-OK ディスプレイと同じ言語の面。ベタ塗りにはせず、
+  accent の淡いトーンと文字色で「押せる」ことを示す。
+*/
+.queueSubmit {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  width: 100%;
+  height: var(--ops-submit);
+  border: none;
+  border-radius: 16px;
+  background: linear-gradient(
+    168deg,
+    #ffffff 0%,
+    rgba(var(--ops-accent-rgb), 0.11) 52%,
+    rgba(var(--ops-accent-rgb), 0.26) 100%
+  );
+  color: var(--ops-accent-deep);
+  font-family: inherit;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  pointer-events: auto;
+  cursor: pointer;
+  box-shadow: 0 12px 22px -20px rgba(var(--ops-accent-rgb), 0.9);
+}
+
+.queueSubmit:disabled {
+  background: linear-gradient(168deg, #ffffff 0%, #eef1f6 100%);
+  color: var(--ops-text-muted);
+  box-shadow: none;
+  cursor: not-allowed;
+}
+
+/* ============================================================
+   Operation Context — 38px の 1 行。上に線は置かない。
+   optional。無い variant（充填）では領域ごと存在しない。
+   ============================================================ */
+
+.context {
+  flex-shrink: 0;
+  padding: 12px 12px 0 0;
+}
+
+/* 320 では返却タグのアイコンを上へ逃がし、ラベルに行幅を全部渡す（英語でも切れない） */
+@media (max-width: 359px) {
+  .context {
+    --ops-tag-dir: column;
+    --ops-tag-gap: 1px;
+  }
+}
+
+.contextRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: var(--ops-context);
+  padding: 0 10px 0 12px;
+  border-radius: 11px;
+  background: var(--ops-context-fill);
+  box-shadow: inset 0 0 0 1px rgba(var(--ops-accent-rgb), 0.26);
+}
+
+/* 未選択はエラー色を使わず muted に留める */
+.contextRow[data-empty="true"] {
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.09);
+}
+
+.contextEmptyNote {
+  display: flex;
+  align-items: center;
+  height: var(--ops-context);
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--ops-text-muted);
+}
+
+/* 下端は同じ面のまま終わる。ホームインジケーター帯も塗り分けない */
+.bottomInset {
+  flex-shrink: 0;
+  height: 12px;
+}
+
+/* ============================================================
+   返却一覧 — Terminal Workspace とは別レイアウト。
+   横並び 3 ボタンは持たず、区分は見出しだけで表す。
+   ============================================================ */
+
+.returnBoard {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.returnScroll {
+  height: 100%;
+  /* タブ帯とは 12px 空ける。詰めすぎるとタブに貼り付いて見える */
+  padding: 12px var(--ops-gutter) 24px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* タブ帯の直下 2px から始める。3 ボタンを消した跡の空白帯は作らない */
+.manualReturnRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  height: 42px;
+  margin: 0 0 14px;
+  padding: 0 12px;
+  border: none;
+  border-radius: 12px;
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(var(--ops-accent-rgb), 0.26);
+  color: var(--ops-accent-deep);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.manualReturnHint {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--ops-text-muted);
+}
+
+/* 全区分が対象ゼロのときだけ出る。エラー色は使わない */
+.returnEmpty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 56px 24px;
+  text-align: center;
+}
+
+.returnEmptyMark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--ops-text-muted);
+}
+
+.returnEmptyTitle {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 800;
+  color: var(--ops-text-body);
+}
+
+.returnEmptyHelp {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 600;
+  line-height: 1.6;
+  color: var(--ops-text-muted);
+}

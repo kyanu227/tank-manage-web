@@ -8,14 +8,20 @@
 
 .shell {
   /* ── surface ── */
-  --staff-base: #f4f6fa;
+  /*
+    基底面は白。上下 safe-area・overscroll・Safari の上下UIの裏まで
+    同じ白で続ける（globals.css の html/body と theme-color を合わせてある）。
+    階層は白の重ねではなく、わずかな沈み（グレー）で作る。
+  */
+  --staff-base: #f7f8fb;
   --staff-chrome: rgba(252, 253, 255, 0.78);
   --staff-chrome-solid: #fafbfd;
   /*
     器はできるだけ薄く。ここを薄くすることで背面に情報が残り、
     箱の中で重ねがけした blur の拡散差が実際に見えるようになる。
+    ただし背面が白のベールになったぶん、器としては読める濃さまで上げる。
   */
-  --staff-sheet: rgba(255, 255, 255, 0.3);
+  --staff-sheet: rgba(255, 255, 255, 0.62);
   --staff-sheet-solid: #f4f6fa;
   /*
     箱は塗りで分離しない（中と外で透過を変えない）。
@@ -38,7 +44,12 @@
     0 12px 24px -12px rgba(15, 23, 42, 0.3),
     0 2px 6px -3px rgba(15, 23, 42, 0.12);
   --staff-card-radius: 18px;
-  --staff-backdrop: #0f172a;
+  /*
+    暗幕は使わない。fixed の暗い面が viewport 全面を覆うと、
+    Safari がアドレスバーの色をそこから拾って上下が黒く沈む。
+    白のベールと弱い blur で「奥に退いた」ことだけを示す。
+  */
+  --staff-backdrop: #ffffff;
 
   /* ── text ── */
   --staff-text: #0f172a;
@@ -283,13 +294,15 @@
   border: none;
   padding: 0;
   background: var(--staff-backdrop);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
   opacity: 0;
   pointer-events: none;
   transition: opacity 200ms linear;
 }
 
 .backdrop[data-open="true"] {
-  opacity: 0.32;
+  opacity: 0.66;
   pointer-events: auto;
 }
 

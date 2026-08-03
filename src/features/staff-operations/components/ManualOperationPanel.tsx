@@ -1,6 +1,7 @@
 "use client";
 
-import { ArrowLeft, Loader2, Send, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Building2, Check, Loader2, Send, Trash2, X } from "lucide-react";
 import DrumRoll from "@/components/DrumRoll";
 import QuickSelect from "@/components/QuickSelect";
 import type { QuickSelectOption } from "@/components/QuickSelect";
@@ -12,7 +13,8 @@ import type { CustomerSnapshot } from "@/lib/operation-context";
 import { formatStaffCount } from "@/lib/staff-display";
 import type { UseManualTankOperationResult } from "../hooks/useManualTankOperation";
 import { getStaffOperationText } from "../i18n";
-import type { ModeConfigItem, OpMode, TagType } from "../types";
+import styles from "../styles/OperationsTerminal.module.css";
+import type { ModeConfigItem, OpMode, QueueItem, TagType } from "../types";
 
 interface ManualOperationPanelProps {
   mode: OpMode;
@@ -29,6 +31,9 @@ interface ManualOperationPanelProps {
   dataLoadFailed?: boolean;
   retryData?: () => void | Promise<void>;
 }
+
+/** 全削除は 2 段階。armed のまま放置された場合は自動で解除する */
+const CLEAR_ARM_TIMEOUT_MS = 4000;
 
 export default function ManualOperationPanel({
   mode,
@@ -60,11 +65,11 @@ export default function ManualOperationPanel({
     handleInputChange,
     handleManualOkTrigger,
     removeFromQueue,
+    clearQueue,
     handleSubmit,
   } = manual;
   const isLend = mode === "lend";
   const isReturn = mode === "return";
-  const isFill = mode === "fill";
 
   const formatStatusLabel = (status?: string): string => {
     const code = coerceTankStatusCode(status);
@@ -87,9 +92,12 @@ export default function ManualOperationPanel({
     void handleSubmit(true, customer);
   };
 
+  const showDestination = isLend && Boolean(setSelectedCustomerId);
+  const hasContext = showDestination || isReturn;
+
   return (
-    <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden", position: "relative" }}>
+    <div className={styles.workspace} data-mode={mode}>
+      <div className={styles.commandPane}>
         {/* 隠し数字入力（フォーカス用）: position:absolute の祖先になるよう左カラムに配置 */}
         <input
           ref={inputRef}
@@ -99,159 +107,90 @@ export default function ManualOperationPanel({
           value={inputValue}
           onChange={handleInputChange}
           aria-label={getStaffOperationText("tankNumberInput", locale)}
-          style={{ position: "absolute", opacity: 0, width: 1, height: 1, overflow: "hidden", pointerEvents: "none", caretColor: "transparent" }}
+          className={styles.hiddenInput}
         />
-        {dataLoading && (
-          <div role="status" aria-label={getStaffOperationText("operationDataLoading", locale)} style={{ margin: "8px 16px 0", padding: "8px 12px", borderRadius: 10, background: "#eff6ff", color: "#1d4ed8", fontSize: 12, fontWeight: 800 }}>
-            {getStaffOperationText("operationDataLoading", locale)}
-          </div>
-        )}
+
+        {/* 読み込み中は帯を足さず、A-OK 自体が disabled ディスプレイになる（面を増やさない） */}
         {!dataLoading && dataLoadFailed && (
-          <div role="alert" style={{ margin: "8px 16px 0", padding: "10px 12px", borderRadius: 10, background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+          <div role="alert" className={`${styles.notice} ${styles.noticeError}`}>
             <span>{getStaffOperationText("operationDataLoadFailure", locale)}</span>
             {retryData && (
-              <button type="button" data-swipe-ignore="true" onClick={() => void retryData()} style={{ flexShrink: 0, border: "none", borderRadius: 8, padding: "6px 10px", background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+              <button type="button" data-swipe-ignore="true" onClick={() => void retryData()} className={styles.noticeRetry}>
                 {getStaffOperationText("retry", locale)}
               </button>
             )}
           </div>
         )}
-        {/* Top OK Button Area */}
-        <div
-          data-staff-swipe-surface="confirm"
-          style={{ padding: "16px 16px 0", flexShrink: 0 }}
-        >
-          {isReturn && onBack ? (
-            <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
-              <button
-                type="button"
-                data-swipe-ignore="true"
-                aria-label={getStaffOperationText("back", locale)}
-                onClick={onBack}
-                style={{
-                  width: 36, height: 36, borderRadius: 8, border: "none",
-                  background: "#f1f5f9", cursor: "pointer", color: "#64748b",
-                  display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0,
-                }}
-              >
-                <ArrowLeft size={16} />
-              </button>
-              <OkButton
-                activePrefix={activePrefix}
-                inputValue={inputValue}
-                lastAdded={lastAdded}
+
+        {/* Commit Display: 表示と確定を兼ねる。下スワイプの起点でもある */}
+        <div data-staff-swipe-surface="confirm" className={styles.commitRow}>
+          {isReturn && onBack && (
+            <button
+              type="button"
+              data-swipe-ignore="true"
+              aria-label={getStaffOperationText("back", locale)}
+              onClick={onBack}
+              className={styles.backButton}
+            >
+              <ArrowLeft size={18} />
+            </button>
+          )}
+          <CommitDisplay
+            activePrefix={activePrefix}
+            inputValue={inputValue}
+            lastAdded={lastAdded}
+            dataLoading={dataLoading}
+            submitting={submitting}
+            locale={locale}
+            onClick={handleManualOkTrigger}
+          />
+        </div>
+
+        {/* Operation Queue: 送信ボタンを内側に含む唯一のスクロール領域 */}
+        <OperationQueue
+          opQueue={opQueue}
+          showTagChip={isReturn}
+          locale={locale}
+          submitting={submitting}
+          validCount={validCount}
+          operationLabel={operationLabel}
+          formatStatusLabel={formatStatusLabel}
+          onRemove={removeFromQueue}
+          onClear={clearQueue}
+          onSubmit={() => handleSubmit(!isReturn)}
+        />
+
+        {/* Operation Context: 貸出＝貸出先 / 返却＝返却タグ / 充填＝なし */}
+        {showDestination && (
+          customerOptions.length > 0 ? (
+            <div className={styles.context}>
+              <QuickSelect
+                variant="context"
+                options={customerOptions}
+                value={selectedCustomerId}
+                onChange={setSelectedCustomerId!}
+                onConfirm={handleCustomerConfirm}
                 color={config.color}
-                onClick={handleManualOkTrigger}
                 locale={locale}
-                compact
+                label={getStaffOperationText("destinationLabel", locale)}
+                icon={<Building2 size={14} />}
+                placeholder={getStaffOperationText("selectDestination", locale)}
+                ariaLabel={getStaffOperationText("selectCustomerAndRun", locale)}
               />
             </div>
-          ) : (
-            <OkButton
-              activePrefix={activePrefix}
-              inputValue={inputValue}
-              lastAdded={lastAdded}
-              color={config.color}
-              onClick={handleManualOkTrigger}
-              locale={locale}
-            />
-          )}
-        </div>
-
-        {/* Queue List */}
-        <div style={{ flex: 1, overflowY: "auto", padding: 16 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-            <span style={{ fontSize: 13, fontWeight: 800, color: "#475569" }}>{getStaffOperationText("queue", locale)}</span>
-            {opQueue.length > 0 && (
-              <span style={{ background: config.color, color: "#fff", padding: "2px 8px", borderRadius: 12, fontSize: 12, fontWeight: 800 }}>
-                {opQueue.length}
-              </span>
-            )}
-          </div>
-
-          {opQueue.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "40px 20px", color: "#cbd5e1", marginTop: 20 }}>
-              <p style={{ margin: 0, fontSize: 14, fontWeight: 600 }}>{getStaffOperationText("choosePrefix", locale)}</p>
-              <p style={{ margin: "4px 0", fontSize: 14, fontWeight: 600 }}>{getStaffOperationText("enterTankNumber", locale)}</p>
+          ) : !dataLoading && !dataLoadFailed ? (
+            <div className={styles.context}>
+              <div role="status" className={styles.contextEmptyNote}>
+                {getStaffOperationText("noActiveCustomers", locale)}
+              </div>
             </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-              {opQueue.map((item) => (
-                <div key={item.uid} className={!isReturn ? "queue-anim" : undefined} style={{
-                  background: "#fff", padding: "12px 16px", borderRadius: 12,
-                  borderLeft: `5px solid ${item.valid
-                    ? item.recoveryCandidate ? "#f59e0b" : config.color
-                    : "#ef4444"}`,
-                  boxShadow: "0 2px 6px rgba(0,0,0,0.04)",
-                  display: "flex", alignItems: "center", justifyContent: "space-between",
-                  ...(!isReturn ? { animation: "slideInLeft 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275)" } : {}),
-                }}>
-                  <div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                      <span style={{ fontSize: 18, fontWeight: 900, fontFamily: "monospace", letterSpacing: "0.05em", color: "#0f172a" }}>
-                        {item.tankId}
-                      </span>
-                      {!isFill && item.tag !== "normal" && (
-                        <span
-                          style={{
-                            fontSize: 10,
-                            fontWeight: 800,
-                            padding: "2px 6px",
-                            borderRadius: 4,
-                            background: getReturnTagStyle(item.tag).background,
-                            color: getReturnTagStyle(item.tag).color,
-                          }}
-                        >
-                          {getReturnTagLabel(item.tag, locale)}
-                        </span>
-                      )}
-                    </div>
-                    <div style={{ fontSize: 11, color: item.recoveryCandidate ? "#b45309" : item.valid ? "#64748b" : "#ef4444", fontWeight: 600, marginTop: 4 }}>
-                      {item.recoveryCandidate
-                        ? `${getStaffOperationText("currentStatus", locale, { status: formatStatusLabel(item.status) })}${locale === "ja" ? " ・" : " · "}${getStaffOperationText("recoveryRequired", locale)}`
-                        : item.valid
-                          ? getStaffOperationText("currentStatus", locale, { status: formatStatusLabel(item.status) })
-                          : item.error}
-                    </div>
-                  </div>
-                  <button type="button" data-swipe-ignore="true" aria-label={getStaffOperationText("removeTank", locale, { tankId: item.tankId })} onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer", marginRight: isReturn ? undefined : -8 }}>
-                    <X size={18} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {isLend && setSelectedCustomerId && !dataLoading && !dataLoadFailed && customerOptions.length === 0 && (
-          <div role="status" style={{ padding: "10px 16px", background: "#fff", borderTop: "1px solid #e2e8f0", color: "#64748b", fontSize: 12, fontWeight: 800, textAlign: "center", flexShrink: 0 }}>
-            {getStaffOperationText("noActiveCustomers", locale)}
-          </div>
-        )}
-
-        {isLend && setSelectedCustomerId && customerOptions.length > 0 && (
-          <div style={{
-            padding: "8px 16px", background: "#fff", borderTop: "1px solid #e2e8f0",
-            flexShrink: 0, zIndex: 20,
-          }}>
-            <QuickSelect
-              options={customerOptions}
-              value={selectedCustomerId}
-              onChange={setSelectedCustomerId}
-              onConfirm={handleCustomerConfirm}
-              color={config.color}
-              locale={locale}
-              placeholder={getStaffOperationText("selectCustomerAndRun", locale)}
-            />
-          </div>
+          ) : null
         )}
 
         {isReturn && (
-          <div style={{
-            padding: "8px 16px", background: "#fff", borderTop: "1px solid #e2e8f0",
-            flexShrink: 0, zIndex: 20,
-          }}>
+          <div className={styles.context}>
             <ReturnTagSelector<TagType>
+              variant="context"
               value={returnTag}
               onChange={setReturnTag}
               options={[
@@ -260,25 +199,15 @@ export default function ManualOperationPanel({
                 { value: "keep", label: getReturnTagLabel("keep", locale) },
               ]}
               locale={locale}
-              compact
             />
           </div>
         )}
 
-        {opQueue.length > 0 && (
-          <FloatingSubmitButton
-            mode={mode}
-            config={config}
-            operationLabel={operationLabel}
-            validCount={validCount}
-            submitting={submitting}
-            locale={locale}
-            onClick={() => handleSubmit(!isReturn)}
-          />
-        )}
+        {/* optional が無い variant では Queue が下端まで伸びる。空白帯は残さない */}
+        {hasContext && <div className={styles.bottomInset} />}
       </div>
 
-      {/* Right Column: Prefix Drum Roll（共通コンポーネント化） */}
+      {/* Input Method Pane: 位置と操作方法は変えない */}
       <DrumRoll
         items={prefixes}
         value={activePrefix}
@@ -286,100 +215,259 @@ export default function ManualOperationPanel({
         onSelect={(p) => focusInput(p)}
         accentColor={config.color}
         locale={locale}
+        variant="soft"
+        width="var(--ops-drum-w, 68px)"
       />
     </div>
   );
 }
 
-interface OkButtonProps {
+/* ============================================================
+   Commit Display（A-OK）
+   ============================================================ */
+
+type CommitState = "idle" | "ready" | "typing" | "armed" | "added" | "disabled";
+
+interface CommitDisplayProps {
   activePrefix: string | null;
   inputValue: string;
   lastAdded: string | null;
-  color: string;
-  onClick: () => void;
-  compact?: boolean;
+  dataLoading: boolean;
+  submitting: boolean;
   locale: Locale;
+  onClick: () => void;
 }
 
-function OkButton({ activePrefix, inputValue, lastAdded, color, onClick, compact = false, locale }: OkButtonProps) {
+function resolveCommitState(
+  activePrefix: string | null,
+  inputValue: string,
+  lastAdded: string | null,
+  busy: boolean,
+): CommitState {
+  if (busy) return "disabled";
+  if (lastAdded) return "added";
+  if (!activePrefix) return "idle";
+  if (inputValue.length === 0) return "ready";
+  return inputValue.length < 2 ? "typing" : "armed";
+}
+
+function CommitDisplay({ activePrefix, inputValue, lastAdded, dataLoading, submitting, locale, onClick }: CommitDisplayProps) {
+  const state = resolveCommitState(activePrefix, inputValue, lastAdded, dataLoading || submitting);
+  const addedParts = lastAdded ? lastAdded.split("-") : null;
+  const prefix = state === "added" && addedParts ? addedParts[0] : activePrefix ?? "";
+  /* 番号が空のときは OK 補完で確定できることを面の上で示す */
+  const number = state === "added" && addedParts
+    ? addedParts.slice(1).join("-")
+    : inputValue || "OK";
+
   return (
     <button
       type="button"
       onClick={onClick}
-      disabled={!activePrefix}
-      style={{
-        width: compact ? undefined : "100%", flex: compact ? 1 : undefined,
-        padding: compact ? "8px" : "14px", borderRadius: 12, border: "none",
-        background: lastAdded ? "#10b981" : (activePrefix ? color : "#e2e8f0"),
-        color: (activePrefix || lastAdded) ? "#fff" : "#94a3b8",
-        fontSize: 20, fontWeight: 900,
-        boxShadow: (activePrefix || lastAdded) ? `0 4px 12px ${lastAdded ? "#10b981" : color}40` : "none",
-        cursor: activePrefix ? "pointer" : "not-allowed",
-        transition: "background 0.2s, box-shadow 0.2s",
-      }}
+      disabled={state === "idle" || state === "disabled"}
+      data-state={state}
+      className={styles.commit}
     >
-      {lastAdded
-        ? lastAdded
-        : (!activePrefix ? getStaffOperationText("okInput", locale) : inputValue ? `${activePrefix} - ${inputValue}` : `${activePrefix} - OK`)}
+      {state === "disabled" && (dataLoading || !activePrefix) ? (
+        /* マスタ取得中だけが文言を持つ。送信中は面のトーンだけを落として ID を残す */
+        <span
+          className={styles.commitPlaceholder}
+          {...(dataLoading ? { role: "status" as const } : {})}
+        >
+          {getStaffOperationText(dataLoading ? "operationDataLoading" : "prefixNotSelected", locale)}
+        </span>
+      ) : state === "idle" ? (
+        <span className={styles.commitPlaceholder}>
+          {getStaffOperationText("prefixNotSelected", locale)}
+        </span>
+      ) : (
+        <span className={styles.commitId}>
+          <span className={styles.commitPrefix}>{prefix}</span>
+          <span className={styles.commitSeparator}>–</span>
+          <span className={styles.commitNumber}>
+            {number}
+            {state === "typing" && <span className={styles.commitCaret}>_</span>}
+          </span>
+          {state === "added" && (
+            <span className={styles.commitCheck} aria-hidden="true">
+              <Check size={20} strokeWidth={3} />
+            </span>
+          )}
+        </span>
+      )}
     </button>
   );
 }
 
-interface FloatingSubmitButtonProps {
-  mode: OpMode;
-  config: ModeConfigItem;
-  operationLabel: string;
-  validCount: number;
-  submitting: boolean;
-  onClick: () => void;
+/* ============================================================
+   Operation Queue（送信リスト）
+   ============================================================ */
+
+interface OperationQueueProps {
+  opQueue: QueueItem[];
+  /** 返却では「タグなし（通常）」も明示し、意味を色だけに負わせない */
+  showTagChip: boolean;
   locale: Locale;
+  submitting: boolean;
+  validCount: number;
+  operationLabel: string;
+  formatStatusLabel: (status?: string) => string;
+  onRemove: (uid: string) => void;
+  onClear: () => void;
+  onSubmit: () => void;
 }
 
-function FloatingSubmitButton({ mode, config, operationLabel, validCount, submitting, onClick, locale }: FloatingSubmitButtonProps) {
-  const isLend = mode === "lend";
-  const isReturn = mode === "return";
-  const wrapperStyle = isLend
-    ? {
-        position: "absolute" as const, bottom: 56, left: 0, right: 0,
-        padding: "0 16px 8px", zIndex: 21, pointerEvents: "none" as const,
-      }
-    : isReturn
-      ? {
-          position: "absolute" as const, bottom: 52, left: 0, right: 0,
-          padding: "0 16px 8px", zIndex: 21, pointerEvents: "none" as const,
-        }
-      : {
-          position: "absolute" as const, bottom: 0, left: 0, right: 0,
-          padding: "12px 16px max(12px, env(safe-area-inset-bottom, 12px))",
-          background: "linear-gradient(transparent, rgba(248,250,252,0.95) 20%)",
-          zIndex: 20, pointerEvents: "none" as const,
-        };
+function OperationQueue({
+  opQueue,
+  showTagChip,
+  locale,
+  submitting,
+  validCount,
+  operationLabel,
+  formatStatusLabel,
+  onRemove,
+  onClear,
+  onSubmit,
+}: OperationQueueProps) {
+  /* 何件のリストに対して確認したかを持つ。件数が変われば確認は自動的に無効になる */
+  const [armedForLength, setArmedForLength] = useState<number | null>(null);
+  const armTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const queueLength = opQueue.length;
+  const clearArmed = armedForLength === queueLength;
+
+  useEffect(() => {
+    return () => {
+      if (armTimerRef.current) clearTimeout(armTimerRef.current);
+    };
+  }, []);
+
+  const handleClearClick = () => {
+    if (armTimerRef.current) clearTimeout(armTimerRef.current);
+    if (clearArmed) {
+      setArmedForLength(null);
+      onClear();
+      return;
+    }
+    setArmedForLength(queueLength);
+    armTimerRef.current = setTimeout(() => setArmedForLength(null), CLEAR_ARM_TIMEOUT_MS);
+  };
+
+  const countUnit = getStaffOperationText(
+    queueLength === 1 ? "queueUnitOne" : "queueUnitMany",
+    locale,
+  );
 
   return (
-    <div style={wrapperStyle}>
-      <button
-        type="button"
-        aria-busy={submitting}
-        onClick={onClick}
-        disabled={submitting}
-        style={{
-          width: "100%", padding: mode === "fill" ? "14px" : "12px", borderRadius: 12, border: "none",
-          background: config.color, color: "#fff",
-          fontSize: mode === "fill" ? 16 : 15, fontWeight: 900,
-          display: "flex", justifyContent: "center", alignItems: "center", gap: 8,
-          cursor: submitting ? "not-allowed" : "pointer",
-          pointerEvents: "auto",
-          boxShadow: isLend || isReturn ? "0 4px 16px rgba(0,0,0,0.2)" : "0 4px 12px rgba(0,0,0,0.15)",
-        }}
-      >
-        {submitting ? <Loader2 size={16} style={{ animation: "spin 1s linear infinite" }} /> : <Send size={16} />}
-        <span>{getStaffOperationText("executeOperation", locale, {
-          countLabel: formatStaffCount(validCount, locale, {
-            ja: "件", enSingular: "tank", enPlural: "tanks",
-          }),
-          operation: operationLabel,
-        })}</span>
-      </button>
+    <div className={styles.queue} data-empty={queueLength === 0}>
+      <div className={styles.queueLegend}>
+        <span className={styles.queueTitle}>
+          <span className={styles.queueTitleText}>{getStaffOperationText("queue", locale)}</span>
+          <span className={styles.queueCount}>{queueLength}</span>
+          <span className={styles.queueCountUnit}>{countUnit}</span>
+        </span>
+        {queueLength > 0 && (
+          <button
+            type="button"
+            data-swipe-ignore="true"
+            data-armed={clearArmed}
+            disabled={submitting}
+            aria-label={getStaffOperationText("clearQueueAria", locale)}
+            onClick={handleClearClick}
+            className={styles.queueClear}
+          >
+            <span className={styles.queueClearBody}>
+              <Trash2 size={12} aria-hidden="true" />
+              {getStaffOperationText(clearArmed ? "clearQueueArmed" : "clearQueue", locale)}
+            </span>
+          </button>
+        )}
+      </div>
+
+      <div className={styles.queueScroll}>
+        {queueLength === 0 ? (
+          <div className={styles.queueEmpty}>
+            <p className={styles.queueEmptyLine}>{getStaffOperationText("choosePrefix", locale)}</p>
+            <p className={styles.queueEmptyLine}>{getStaffOperationText("enterTankNumber", locale)}</p>
+          </div>
+        ) : (
+          opQueue.map((item) => {
+            const tone = !item.valid ? "bad" : item.recoveryCandidate ? "warn" : "normal";
+            return (
+              <div key={item.uid} className={styles.queueItem} data-tone={tone}>
+                <span className={styles.queuePill} aria-hidden="true" />
+                <div className={styles.queueItemBody}>
+                  <div className={styles.queueItemHead}>
+                    <span className={styles.queueItemId}>{item.tankId}</span>
+                    {showTagChip && (
+                      <span
+                        className={`${styles.queueChip} ${styles.queueChipTag}`}
+                        style={item.tag === "normal" ? undefined : {
+                          background: getReturnTagStyle(item.tag).background,
+                          color: getReturnTagStyle(item.tag).color,
+                        }}
+                      >
+                        {getReturnTagLabel(item.tag, locale)}
+                      </span>
+                    )}
+                    {tone === "warn" && (
+                      <span className={`${styles.queueChip} ${styles.queueChipWarn}`}>
+                        {getStaffOperationText("recoveryChip", locale)}
+                      </span>
+                    )}
+                    {tone === "bad" && (
+                      <span className={`${styles.queueChip} ${styles.queueChipBad}`}>
+                        {getStaffOperationText("blockedChip", locale)}
+                      </span>
+                    )}
+                  </div>
+                  <div className={styles.queueItemStatus}>
+                    {item.recoveryCandidate
+                      ? `${getStaffOperationText("currentStatus", locale, { status: formatStatusLabel(item.status) })}${locale === "ja" ? " ・" : " · "}${getStaffOperationText("recoveryRequired", locale)}`
+                      : item.valid
+                        ? getStaffOperationText("currentStatus", locale, { status: formatStatusLabel(item.status) })
+                        : item.error}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  data-swipe-ignore="true"
+                  aria-label={getStaffOperationText("removeTank", locale, { tankId: item.tankId })}
+                  onClick={() => onRemove(item.uid)}
+                  className={styles.queueRemove}
+                >
+                  <X size={15} strokeWidth={2.2} />
+                </button>
+              </div>
+            );
+          })
+        )}
+      </div>
+
+      {/* リストが空のうちは実行ボタンごと存在しない */}
+      {queueLength > 0 && (
+        <div className={styles.queueSubmitDock}>
+          <button
+            type="button"
+            data-swipe-ignore="true"
+            aria-busy={submitting}
+            onClick={onSubmit}
+            disabled={submitting || validCount === 0}
+            className={styles.queueSubmit}
+          >
+            {submitting
+              ? <Loader2 size={17} style={{ animation: "spin 1s linear infinite" }} />
+              : <Send size={17} strokeWidth={2.2} />}
+            <span>
+              {getStaffOperationText("executeOperation", locale, {
+                countLabel: formatStaffCount(validCount, locale, {
+                  ja: "件", enSingular: "tank", enPlural: "tanks",
+                }),
+                operation: operationLabel,
+              })}
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

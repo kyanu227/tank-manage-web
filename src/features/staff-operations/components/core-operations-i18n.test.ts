@@ -48,6 +48,7 @@ function createManualResult(
     handleInputChange: vi.fn(),
     handleManualOkTrigger: vi.fn(),
     removeFromQueue: vi.fn(),
+    clearQueue: vi.fn(),
     handleSubmit: vi.fn(async () => undefined),
     reset: vi.fn(),
     ...overrides,
@@ -161,6 +162,124 @@ describe("core staff operation screens", () => {
 
     expect(html).toContain('data-staff-swipe-surface="confirm"');
     expect(html).toMatch(/<button[^>]*data-swipe-ignore="true"[^>]*aria-label="Back"/u);
+  });
+
+  it("shows the clear-all action only while the submission list has items", () => {
+    const emptyHtml = renderToStaticMarkup(createElement(ManualOperationPanel, {
+      mode: "fill",
+      config: MODE_CONFIG.fill,
+      operationLabel: "Fill",
+      locale: "en",
+      prefixes: ["A"],
+      manual: createManualResult({ activePrefix: "A" }),
+    }));
+    const filledHtml = renderToStaticMarkup(createElement(ManualOperationPanel, {
+      mode: "fill",
+      config: MODE_CONFIG.fill,
+      operationLabel: "Fill",
+      locale: "en",
+      prefixes: ["A"],
+      manual: createManualResult({
+        opQueue: [{ uid: "queue-1", tankId: "A-01", status: "stored", valid: true, tag: "normal" }],
+        activePrefix: "A",
+        validCount: 1,
+      }),
+    }));
+    const submittingHtml = renderToStaticMarkup(createElement(ManualOperationPanel, {
+      mode: "fill",
+      config: MODE_CONFIG.fill,
+      operationLabel: "Fill",
+      locale: "en",
+      prefixes: ["A"],
+      manual: createManualResult({
+        opQueue: [{ uid: "queue-1", tankId: "A-01", status: "stored", valid: true, tag: "normal" }],
+        activePrefix: "A",
+        validCount: 1,
+        submitting: true,
+      }),
+    }));
+
+    expect(emptyHtml).not.toContain("Clear all");
+    // 0 件では実行ボタンごと存在しない。枠と legend は維持する
+    expect(emptyHtml).toContain("Submission list");
+    expect(emptyHtml).not.toContain("Run Fill for");
+    expect(filledHtml).toContain("Run Fill for 1 tank");
+    expect(filledHtml).toContain("Clear all");
+    expect(filledHtml).toContain('aria-label="Clear the submission list (tap again to confirm)"');
+    // 送信中は全削除も送信も実行できない
+    expect(submittingHtml).toMatch(/<button[^>]*disabled=""[^>]*aria-label="Clear the submission list \(tap again to confirm\)"/u);
+    expect(submittingHtml).toContain('aria-busy="true"');
+    expectNoJapaneseChrome(emptyHtml);
+    expectNoJapaneseChrome(filledHtml);
+  });
+
+  it("keeps the destination prompt muted and localized when no customer is selected", () => {
+    const jaHtml = renderToStaticMarkup(createElement(ManualOperationPanel, {
+      mode: "lend",
+      config: MODE_CONFIG.lend,
+      operationLabel: "貸出",
+      locale: "ja",
+      prefixes: ["A"],
+      customerOptions: [{ value: "customer-1", label: "Ocean Shop" }],
+      selectedCustomerId: "",
+      setSelectedCustomerId: vi.fn(),
+      manual: createManualResult({ activePrefix: "A" }),
+    }));
+    const enHtml = renderToStaticMarkup(createElement(ManualOperationPanel, {
+      mode: "lend",
+      config: MODE_CONFIG.lend,
+      operationLabel: "Lend",
+      locale: "en",
+      prefixes: ["A"],
+      customerOptions: [{ value: "customer-1", label: "Ocean Shop" }],
+      selectedCustomerId: "",
+      setSelectedCustomerId: vi.fn(),
+      manual: createManualResult({ activePrefix: "A" }),
+    }));
+
+    const selectedHtml = renderToStaticMarkup(createElement(ManualOperationPanel, {
+      mode: "lend",
+      config: MODE_CONFIG.lend,
+      operationLabel: "Lend",
+      locale: "en",
+      prefixes: ["A"],
+      customerOptions: [{ value: "customer-1", label: "Ocean Shop" }],
+      selectedCustomerId: "customer-1",
+      setSelectedCustomerId: vi.fn(),
+      manual: createManualResult({ activePrefix: "A" }),
+    }));
+
+    expect(jaHtml).toContain("貸出先を選択してください");
+    expect(enHtml).toContain("Please select a destination");
+    // 未選択のときはラベルを畳み、選択後にだけ出す
+    expect(enHtml).not.toContain(">Destination<");
+    expect(selectedHtml).toContain(">Destination<");
+    expect(selectedHtml).toContain("Ocean Shop");
+    expectNoJapaneseChrome(enHtml);
+    expectNoJapaneseChrome(selectedHtml);
+  });
+
+  it("labels every manual return queue row with its tag, including untagged rows", () => {
+    const html = renderToStaticMarkup(createElement(ManualOperationPanel, {
+      mode: "return",
+      config: MODE_CONFIG.return,
+      operationLabel: "返却",
+      locale: "ja",
+      prefixes: ["A"],
+      manual: createManualResult({
+        opQueue: [
+          { uid: "queue-1", tankId: "A-01", status: "lent", valid: true, tag: "normal" },
+          { uid: "queue-2", tankId: "A-02", status: "lent", valid: true, tag: "keep" },
+        ],
+        activePrefix: "A",
+        validCount: 2,
+      }),
+    }));
+
+    expect(html).toContain("通常");
+    // 用語の正本は「持ち越し」。「預かり」は使わない
+    expect(html).toContain("持ち越し");
+    expect(html).not.toContain("預かり");
   });
 
   it("renders operation data loading and failure states in English", () => {

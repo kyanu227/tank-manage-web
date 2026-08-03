@@ -27,12 +27,9 @@ export function useCustomerOptions() {
       const customers = await listActiveCustomerSnapshots();
       setCustomerOptions(customers);
       const customerIds = customers.map((customer) => customer.customerId);
-      // 現在の選択先が削除された／まだ未選択な場合のみ先頭にリセット。
-      // 既に有効な選択先が入っていればユーザーの選択を維持する。
-      setSelectedCustomerId((prev) => {
-        if (prev && customerIds.includes(prev)) return prev;
-        return customerIds[0] ?? "";
-      });
+      // 初期状態は未選択のまま置く（先頭の貸出先を勝手に選ばない）。
+      // 選択済みの貸出先が削除された場合だけ未選択へ戻す。
+      setSelectedCustomerId((prev) => (prev && customerIds.includes(prev) ? prev : ""));
     } catch (e) {
       console.error(e);
       setLoadFailed(true);
