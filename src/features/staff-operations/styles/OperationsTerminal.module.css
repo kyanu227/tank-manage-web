@@ -24,11 +24,12 @@
   --ops-submit: 48px;
 
   /*
-    基底面は白。面の塗り分けはしない（送信リストの内側も DrumRoll も白のまま）。
-    まとまりは細いアウトラインと legend、境界はごく弱い内側影だけが示す。
+    基底面はごく淡いトーン、その上に置くものが白。
+    白同士を重ねないので、行・Context・DrumRoll は塗らずに「浮いて」読める。
+    送信リストの内側は基底面のまま（枠の中だけ色を変えない）。
   */
-  --ops-plane: #ffffff;
-  --ops-queue-fill: #ffffff;
+  --ops-plane: #f7f8fb;
+  --ops-queue-fill: transparent;
   --ops-row-fill: #ffffff;
   --ops-context-fill: #ffffff;
   --ops-drum-fill: #ffffff;
@@ -469,12 +470,13 @@
   background: var(--ops-row-fill);
 }
 
+/* 右端（削除）まで色を残す。途中で白へ抜けると行の区分が読めなくなる */
 .queueItem[data-tone="warn"] {
-  background: linear-gradient(90deg, #fef7e8, #ffffff 70%);
+  background: linear-gradient(90deg, #fdf1da 0%, #fefaf0 100%);
 }
 
 .queueItem[data-tone="bad"] {
-  background: linear-gradient(90deg, #feeeee, #ffffff 70%);
+  background: linear-gradient(90deg, #fde7e7 0%, #fef6f6 100%);
 }
 
 /* 区分は 5×26px の色ピルだけで示す（枠・影を持たない） */
@@ -608,11 +610,12 @@
   padding: 22px 8px 8px;
   border-radius: 0 0 15px 15px;
   pointer-events: none;
+  /* 溶ける先は枠の内側＝基底面。行が下を通り抜けても最後の行が隠れない */
   background: linear-gradient(
     180deg,
-    rgba(255, 255, 255, 0) 0%,
-    rgba(255, 255, 255, 0.82) 38%,
-    #ffffff 100%
+    rgba(247, 248, 251, 0) 0%,
+    rgba(247, 248, 251, 0.86) 38%,
+    var(--ops-plane) 100%
   );
 }
 

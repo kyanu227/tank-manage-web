@@ -343,7 +343,8 @@ export default function DrumRoll<T extends string>({
   */
   const bloomHeight = Math.round(itemHeight * 1.9);
   const bloomTint = value == null
-    ? ["rgba(15, 23, 42, 0.10)", "rgba(15, 23, 42, 0.06)", "rgba(15, 23, 42, 0.02)", "rgba(15, 23, 42, 0)"]
+    /* 未選択のにじみは位置合図に留める。白地でグレーの塊として読めない濃さまで落とす */
+    ? ["rgba(15, 23, 42, 0.035)", "rgba(15, 23, 42, 0.022)", "rgba(15, 23, 42, 0.008)", "rgba(15, 23, 42, 0)"]
     : [
         withAlpha(accentColor, 0.26),
         withAlpha(accentColor, 0.13),
@@ -387,7 +388,8 @@ export default function DrumRoll<T extends string>({
                   height: 36,
                   zIndex: 2,
                   pointerEvents: "none",
-                  background: "linear-gradient(180deg, var(--ops-plane, #fff) 0%, transparent 100%)",
+                  /* 溶ける先は pane 自身の面（＝白）。基底面の色を使うと上端が濁る */
+                  background: "linear-gradient(180deg, var(--ops-drum-fill, #fff) 0%, transparent 100%)",
                 }}
               />
               <div

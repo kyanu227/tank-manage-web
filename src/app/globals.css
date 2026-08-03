@@ -87,7 +87,7 @@ body {
 */
 html:has([data-staff-shell]),
 body:has([data-staff-shell]) {
-  background-color: #ffffff;
+  background-color: #f7f8fb;
 }
 
 .page-wrapper {
