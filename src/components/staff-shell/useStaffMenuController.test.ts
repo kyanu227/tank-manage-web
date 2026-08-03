@@ -124,25 +124,22 @@ describe("useStaffMenuController", () => {
     });
   });
 
-  it("明示 open は既に開いていても閉じず、focus trap・Escape・focus return を維持する", () => {
-    const trigger = {
-      focus: vi.fn(() => {
-        (document as unknown as { activeElement: Element | null }).activeElement = trigger as unknown as Element;
-      }),
+  function buildRefs() {
+    const setActive = (element: unknown) => {
+      (document as unknown as { activeElement: Element | null }).activeElement = element as Element;
     };
-    const first = {
-      focus: vi.fn(() => {
-        (document as unknown as { activeElement: Element | null }).activeElement = first as unknown as Element;
-      }),
-    };
-    const last = {
-      focus: vi.fn(() => {
-        (document as unknown as { activeElement: Element | null }).activeElement = last as unknown as Element;
-      }),
-    };
+    const trigger = { focus: vi.fn(() => setActive(trigger)) };
+    const first = { focus: vi.fn(() => setActive(first)) };
+    const last = { focus: vi.fn(() => setActive(last)) };
     const sheet = {
+      focus: vi.fn(() => setActive(sheet)),
       querySelectorAll: () => [first, last],
     };
+    return { trigger, first, last, sheet };
+  }
+
+  it("明示 open は既に開いていても閉じず、focus trap・Escape・focus return を維持する", () => {
+    const { trigger, first, last, sheet } = buildRefs();
 
     let controller = renderController();
     controller.triggerRef.current = trigger as unknown as HTMLButtonElement;
@@ -151,32 +148,53 @@ describe("useStaffMenuController", () => {
     controller.openMenu();
     controller = renderController();
     expect(controller.open).toBe(true);
-    expect(first.focus).toHaveBeenCalledOnce();
+    // 開いた直後は sheet 自体を受け皿にする（操作要素へ移すとリングが出る）
+    expect(sheet.focus).toHaveBeenCalledOnce();
+    expect(first.focus).not.toHaveBeenCalled();
 
     controller.openMenu();
     controller = renderController();
     expect(controller.open).toBe(true);
 
+    // sheet にフォーカスがある初期状態からの Tab は先頭要素へ入る
+    const tabFromSheet = { key: "Tab", shiftKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent;
+    (document as unknown as { dispatchKey: (event: KeyboardEvent) => void }).dispatchKey(tabFromSheet);
+    expect(tabFromSheet.preventDefault).toHaveBeenCalledOnce();
+    expect(first.focus).toHaveBeenCalledOnce();
+
+    // 末尾からの Tab は先頭へ巻き戻る
     (document as unknown as { activeElement: Element | null }).activeElement = last as unknown as Element;
-    const tab = {
-      key: "Tab",
-      shiftKey: false,
-      preventDefault: vi.fn(),
-    } as unknown as KeyboardEvent;
-    (document as unknown as { dispatchKey: (event: KeyboardEvent) => void }).dispatchKey(tab);
-    expect(tab.preventDefault).toHaveBeenCalledOnce();
+    const tabFromLast = { key: "Tab", shiftKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent;
+    (document as unknown as { dispatchKey: (event: KeyboardEvent) => void }).dispatchKey(tabFromLast);
+    expect(tabFromLast.preventDefault).toHaveBeenCalledOnce();
     expect(first.focus).toHaveBeenCalledTimes(2);
 
-    const escape = {
-      key: "Escape",
-      shiftKey: false,
-      preventDefault: vi.fn(),
-    } as unknown as KeyboardEvent;
+    const escape = { key: "Escape", shiftKey: false, preventDefault: vi.fn() } as unknown as KeyboardEvent;
     (document as unknown as { dispatchKey: (event: KeyboardEvent) => void }).dispatchKey(escape);
     expect(escape.preventDefault).toHaveBeenCalledOnce();
 
     controller = renderController();
     expect(controller.open).toBe(false);
+    // Escape で閉じたときだけ Chevron へ戻す
     expect(trigger.focus).toHaveBeenCalledOnce();
+  });
+
+  it("ポインター操作で閉じたときは Chevron へ focus を戻さない", () => {
+    const { trigger, sheet } = buildRefs();
+
+    let controller = renderController();
+    controller.triggerRef.current = trigger as unknown as HTMLButtonElement;
+    controller.sheetRef.current = sheet as unknown as HTMLDivElement;
+
+    controller.openMenu();
+    controller = renderController();
+    expect(controller.open).toBe(true);
+
+    // backdrop タップ / ジェスチャー / ナビゲーション選択に相当
+    controller.close();
+    controller = renderController();
+    expect(controller.open).toBe(false);
+    // プログラム的 focus() は :focus-visible を立ててリングを出すため戻さない
+    expect(trigger.focus).not.toHaveBeenCalled();
   });
 });

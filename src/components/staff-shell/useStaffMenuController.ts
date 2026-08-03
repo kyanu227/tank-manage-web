@@ -34,6 +34,11 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
   const scrollRegionRef = useRef<HTMLElement | null>(null);
   const shouldRestoreFocusRef = useRef(false);
 
+  // Escape で閉じたときだけ Chevron へフォーカスを返す。
+  // ポインター・ジェスチャーで閉じたときに返すと、プログラム的な focus() が
+  // :focus-visible を立てて Chevron にリングが出てしまう。
+  const restoreFocusOnCloseRef = useRef(false);
+
   const close = useCallback(() => setOpen(false), []);
   const openMenu = useCallback(() => setOpen(true), []);
   const toggle = useCallback(() => setOpen((value) => !value), []);
@@ -48,11 +53,13 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
 
   useEffect(() => {
     if (!open) {
-      // 開いていた時だけ Chevron へ戻す。初回マウントでは何もしない
-      if (shouldRestoreFocusRef.current) {
-        shouldRestoreFocusRef.current = false;
+      // Escape で閉じた場合だけ Chevron へ戻す（キーボード利用者の文脈を保つ）。
+      // ポインター操作では focus を動かさず、リングを出さない
+      if (shouldRestoreFocusRef.current && restoreFocusOnCloseRef.current) {
         triggerRef.current?.focus();
       }
+      shouldRestoreFocusRef.current = false;
+      restoreFocusOnCloseRef.current = false;
       return;
     }
 
@@ -61,11 +68,14 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
     const focusable = () => Array.from(
       sheet?.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR) ?? [],
     );
-    focusable()[0]?.focus();
+    // 最初の操作要素ではなく sheet 自体へ移す。tabindex="-1" + outline:none なので
+    // リングが出ず、Tab を押した時点で通常どおり内部要素へ入る
+    sheet?.focus({ preventScroll: true });
 
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.preventDefault();
+        restoreFocusOnCloseRef.current = true;
         setOpen(false);
         return;
       }
@@ -75,6 +85,12 @@ export function useStaffMenuController(pathname: string | null): StaffMenuContro
       if (items.length === 0) return;
       const first = items[0];
       const last = items[items.length - 1];
+      // sheet 自体にフォーカスがある初期状態からは、先頭要素へ入れる
+      if (document.activeElement === sheet) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+        return;
+      }
       if (event.shiftKey && document.activeElement === first) {
         event.preventDefault();
         last.focus();

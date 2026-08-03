@@ -61,6 +61,8 @@ export default function StaffMenuSheet({
         aria-label={getStaffShellText("menu", locale)}
         aria-hidden={!open}
         inert={!open}
+        /* 開いた直後のフォーカス受け皿。リングは出さない（CSS で outline:none） */
+        tabIndex={-1}
       >
         <div className={styles.sheetTop}>
           <div className={styles.sheetTopRow}>

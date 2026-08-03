@@ -106,13 +106,26 @@ F1〜F11 が、この設計が解く問題のすべてである。
 初版は sheet 1 枚の面に account / navigation / primary を直接載せていたが、
 名前・言語・ナビが同じ平面で競合して読みにくいという判断により、器 + 箱2つへ改訂した。
 
-**囲いは線ではなく影で示す。** この UI は線をできるだけ減らす方針のため、
-箱は border も divider も持たず、器の透過はそのまま維持する。
+**箱は塗りで分離しない。** 中と外で透過を変えず、分離は**光学**だけで作る（Liquid Glass 方向）:
+
+1. 箱の中でだけ `backdrop-filter` を重ねがけし、奥をより拡散させる（屈折の代替）
+2. 縁のスペキュラ = ガラスの厚みが光を拾った表現
+3. 落ち影 = 器から浮いていること
+
+border も divider も引かない。器の透過は初版のまま維持する。
 
 | 層 | 役割 | 値 |
 |---|---|---|
-| 器（sheet） | 背面をぼかすだけ。情報を直接載せない | `rgba(255,255,255,0.80)` + `blur(32px) saturate(180%)` / 非対応時 `#FBFCFE`（初版から不変） |
-| 箱（account / menu） | 情報のまとまり。**面はごく僅かに持ち上げ、囲いは影が担う** | `rgba(255,255,255,0.50)` / radius 18 / `0 6px 16px -6px rgba(15,23,42,0.16), 0 2px 5px -2px rgba(15,23,42,0.08)` / border なし |
+| 器（sheet） | 背面をぼかすだけ。情報を直接載せない | `rgba(255,255,255,0.30)` + `blur(32px) saturate(180%)` / 非対応時 `#F4F6FA` |
+| 箱（account / menu） | 情報のまとまり。**塗りを持たず、光学だけで囲いを示す** | `background-color` なし（sheen `rgba(255,255,255,0.22)→0.08 38%→0.12` のみ）/ `blur(10px) saturate(150%)` の重ねがけ / radius 18 / border なし |
+| 箱の縁と影 | 囲いの正体 | `inset 0 1px 0 rgba(255,255,255,0.85)`（上端スペキュラ）, `inset 0 0 0 1px rgba(255,255,255,0.30)`（ガラスの厚み）, `inset 0 -1px 0 rgba(15,23,42,0.07)`, `0 12px 24px -12px rgba(15,23,42,0.30)`, `0 2px 6px -3px rgba(15,23,42,0.12)` |
+
+**制約（実測に基づく）**: 器が `rgba(255,255,255,0.80)` の時点で背面の情報量が少ないため、
+重ねがけした blur による拡散差は肉眼ではほぼ判別できない。実際に分離を担っているのは
+**縁のスペキュラと落ち影**である。真の屈折（`feDisplacementMap` を `backdrop-filter: url()` へ流す方法）は
+iOS Safari で無言で失効し blur ごと消える危険があるため採用しない。
+拡散差を見せたい場合は器の透過を下げる必要があり、それは「透過を維持する」方針との
+トレードオフになる。
 
 改訂に伴う削除:
 
@@ -435,10 +448,11 @@ sheet width（250–330 の範囲）、backdrop opacity、fade strength、blur �
 | app base | `#F4F6FA` | html / body / shell / 上下 safe-area / overscroll / manifest `background_color` |
 | chrome surface | `rgba(252,253,255,0.78)` + `blur(20px) saturate(180%)` | header / StaffSectionTabs（同一面） |
 | chrome fallback | `#FAFBFD` | blur 非対応時 / `theme-color` |
-| sheet surface（器） | `rgba(255,255,255,0.80)` + `blur(32px) saturate(180%)` | menu sheet |
-| sheet fallback | `#FBFCFE` | blur 非対応時 |
-| 箱 surface | `rgba(255,255,255,0.50)` / radius 18 / border なし | 箱A（account）/ 箱B（menu）。§2.5 |
-| 箱 shadow | `0 6px 16px -6px rgba(15,23,42,0.16), 0 2px 5px -2px rgba(15,23,42,0.08)` | 囲いはこの影だけが担う |
+| sheet surface（器） | `rgba(255,255,255,0.30)` + `blur(32px) saturate(180%)` | menu sheet。薄くして背面を残す |
+| sheet fallback | `#F4F6FA` | blur 非対応時 |
+| 箱 surface | `background-color` なし + sheen `rgba(255,255,255,0.22)→0.08 38%→0.12` / `blur(10px) saturate(150%)` 重ねがけ / radius 18 / border なし | 箱A（account）/ 箱B（menu）。§2.5 |
+| 箱 edge | `inset 0 1px 0 rgba(255,255,255,0.85)` + `inset 0 0 0 1px rgba(255,255,255,0.30)` + `inset 0 -1px 0 rgba(15,23,42,0.07)` | ガラスの縁。囲いの主役 |
+| 箱 shadow | `0 12px 24px -12px rgba(15,23,42,0.30), 0 2px 6px -3px rgba(15,23,42,0.12)` | 器から浮かせる |
 | backdrop | `#0F172A` @ **0.32** / fade 200ms linear / **blur なし** | menu backdrop |
 | text | primary `#0F172A` / body `#475569` / sub `#64748B` / muted `#94A3B8` / icon idle `#9AA5B5` | |
 | accent | `#4F46E5`（文字）/ `#6366F1`（塗り）/ `#EEF2FF`（淡塗り）/ `#C7CBF7`（枠） | |
@@ -510,14 +524,27 @@ StaffSectionTabs 既存の reduced 分岐はそのまま維持する。
 | sheet | `role="dialog"` / `aria-modal` / `aria-label` |
 | 閉時 | `aria-hidden` + `inert` |
 | Escape | 閉じる |
-| focus | 開いたら sheet 内へ移動、trap、閉じたら **header の Chevron へ返す** |
+| focus | 開いたら sheet 自体（`tabindex=-1` / `outline:none`）へ移動して trap する。閉じたときは **Escape のときだけ** Chevron へ返す（§8.1） |
 | active | `aria-current="page"` |
 | header chip | `aria-pressed` + 切替先を述べる `aria-label`（受注件数を含める） |
 | キーボード | Tab / Shift+Tab / Enter / Space で全操作が可能 |
-| focus-visible | `outline: 2px solid #6366F1; outline-offset: 2px`（radius 12） |
+| focus-visible | `outline: 2px solid rgba(15,23,42,0.32); outline-offset: 2px`。menu 開閉に伴うプログラム的 focus ではリングを出さない（§8.1） |
 | hit area | 主要操作は 44px 以上 |
 | locale 保存状態 | `role="status"`、エラーは `role="alert"` |
 | reduced motion | §7.6 |
+
+### 8.1 フォーカスリングの出し方
+
+menu の開閉ではフォーカスを機械的に動かすため、そのままだと
+`element.focus()` が `:focus-visible` を立て、ポインター操作なのに Chevron へ
+リングが出てしまう。次の2点でこれを避けつつキーボード利用者の文脈は保つ。
+
+- 開いたときは最初の操作要素ではなく **sheet 自体**（`tabindex="-1"` / `outline:none`）へ移す。
+  Tab を押した時点で通常どおり内部の先頭要素へ入る
+- 閉じたときに Chevron へ戻すのは **Escape で閉じた場合だけ**。
+  backdrop タップ・ジェスチャー・ナビゲーション選択では focus を動かさない
+
+リング自体は残す（色は accent ではなく `rgba(15,23,42,0.32)`）。
 
 **スワイプを唯一の操作方法にしない。**
 

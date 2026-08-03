@@ -11,16 +11,32 @@
   --staff-base: #f4f6fa;
   --staff-chrome: rgba(252, 253, 255, 0.78);
   --staff-chrome-solid: #fafbfd;
-  --staff-sheet: rgba(255, 255, 255, 0.8);
-  --staff-sheet-solid: #fbfcfe;
   /*
-    カードは「塗り」ではなく「影」で囲いを示す。
-    線を増やさないため border は持たず、面もごく僅かに持ち上げるだけにする。
+    器はできるだけ薄く。ここを薄くすることで背面に情報が残り、
+    箱の中で重ねがけした blur の拡散差が実際に見えるようになる。
   */
-  --staff-card: rgba(255, 255, 255, 0.5);
+  --staff-sheet: rgba(255, 255, 255, 0.3);
+  --staff-sheet-solid: #f4f6fa;
+  /*
+    箱は塗りで分離しない（中と外で透過を変えない）。
+    分離は光学だけで作る:
+      1. 箱の中でだけ blur を重ねがけ → 奥がより拡散して見える（屈折の代替）
+      2. 縁のスペキュラ = ガラスの厚みが光を拾った表現
+      3. 落ち影 = 器から浮いていること
+    塗りは上端のごく淡い sheen のみで、面としては数えない。
+  */
+  --staff-card-sheen: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0.22),
+    rgba(255, 255, 255, 0.08) 38%,
+    rgba(255, 255, 255, 0.12)
+  );
   --staff-card-shadow:
-    0 6px 16px -6px rgba(15, 23, 42, 0.16),
-    0 2px 5px -2px rgba(15, 23, 42, 0.08);
+    inset 0 1px 0 rgba(255, 255, 255, 0.85),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.3),
+    inset 0 -1px 0 rgba(15, 23, 42, 0.07),
+    0 12px 24px -12px rgba(15, 23, 42, 0.3),
+    0 2px 6px -3px rgba(15, 23, 42, 0.12);
   --staff-card-radius: 18px;
   --staff-backdrop: #0f172a;
 
@@ -179,6 +195,11 @@
   transform: rotate(180deg);
 }
 
+/*
+  キーボード操作時のみ出る控えめなリング。
+  menu の開閉に伴うプログラム的 focus ではリングを出さないよう、
+  sheet を tabindex="-1" の受け皿にして outline を消してある（useStaffMenuController）。
+*/
 .menuTrigger:focus-visible,
 .headerChip:focus-visible,
 .sheetClose:focus-visible,
@@ -186,9 +207,13 @@
 .primaryStrong:focus-visible,
 .primarySoft:focus-visible,
 .localeSelect:focus-visible {
-  outline: 2px solid var(--staff-accent-bright);
+  outline: 2px solid rgba(15, 23, 42, 0.32);
   outline-offset: 2px;
-  border-radius: 12px;
+}
+
+.sheet:focus,
+.sheet:focus-visible {
+  outline: none;
 }
 
 /* ============================================================
@@ -363,7 +388,10 @@
   margin: 2px 12px 10px;
   padding: 14px 16px;
   border-radius: var(--staff-card-radius);
-  background: var(--staff-card);
+  background: var(--staff-card-sheen);
+  /* 器の blur に重ねがけして、箱の中だけ奥をより拡散させる */
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  backdrop-filter: blur(10px) saturate(150%);
   box-shadow: var(--staff-card-shadow);
 }
 
@@ -521,7 +549,10 @@
   margin: 0 12px;
   padding: 6px;
   border-radius: var(--staff-card-radius);
-  background: var(--staff-card);
+  background: var(--staff-card-sheen);
+  /* 器の blur に重ねがけして、箱の中だけ奥をより拡散させる */
+  -webkit-backdrop-filter: blur(10px) saturate(150%);
+  backdrop-filter: blur(10px) saturate(150%);
   box-shadow: var(--staff-card-shadow);
 }
 
