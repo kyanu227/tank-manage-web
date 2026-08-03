@@ -110,18 +110,22 @@ export default function ManualOperationPanel({
           <div role="alert" style={{ margin: "8px 16px 0", padding: "10px 12px", borderRadius: 10, background: "#fef2f2", color: "#b91c1c", fontSize: 12, fontWeight: 800, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <span>{getStaffOperationText("operationDataLoadFailure", locale)}</span>
             {retryData && (
-              <button type="button" onClick={() => void retryData()} style={{ flexShrink: 0, border: "none", borderRadius: 8, padding: "6px 10px", background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
+              <button type="button" data-swipe-ignore="true" onClick={() => void retryData()} style={{ flexShrink: 0, border: "none", borderRadius: 8, padding: "6px 10px", background: "#dc2626", color: "#fff", fontSize: 11, fontWeight: 800, cursor: "pointer" }}>
                 {getStaffOperationText("retry", locale)}
               </button>
             )}
           </div>
         )}
         {/* Top OK Button Area */}
-        <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
+        <div
+          data-staff-swipe-surface="confirm"
+          style={{ padding: "16px 16px 0", flexShrink: 0 }}
+        >
           {isReturn && onBack ? (
             <div style={{ display: "flex", gap: 8, marginBottom: 8 }}>
               <button
                 type="button"
+                data-swipe-ignore="true"
                 aria-label={getStaffOperationText("back", locale)}
                 onClick={onBack}
                 style={{
@@ -210,7 +214,7 @@ export default function ManualOperationPanel({
                           : item.error}
                     </div>
                   </div>
-                  <button type="button" aria-label={getStaffOperationText("removeTank", locale, { tankId: item.tankId })} onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer", marginRight: isReturn ? undefined : -8 }}>
+                  <button type="button" data-swipe-ignore="true" aria-label={getStaffOperationText("removeTank", locale, { tankId: item.tankId })} onClick={() => removeFromQueue(item.uid)} style={{ border: "none", background: "none", color: "#cbd5e1", padding: 8, cursor: "pointer", marginRight: isReturn ? undefined : -8 }}>
                     <X size={18} />
                   </button>
                 </div>

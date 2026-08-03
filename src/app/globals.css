@@ -2,7 +2,8 @@
 
 :root {
   /* Premium Light Theme Core Constants */
-  --bg-primary: #f0f4f8; /* Softer, richer light blue-grey */
+  /* アプリ基底面。html/body・shell・上下safe-area・overscroll・manifest がこの1色を共有する */
+  --bg-primary: #f4f6fa;
   --bg-secondary: #ffffff;
   --bg-tertiary: #f8fafc;
   
@@ -60,11 +61,11 @@
 
 html, body {
   min-height: 100%;
+  /*
+    基底色のみ。装飾gradientは .page-wrapper（アプリ内コンテンツ層）が持つ。
+    html/body に置くと overscroll 領域とブラウザーUI へ装飾が露出する。
+  */
   background-color: var(--bg-primary);
-  /* Added a subtle background texture/gradient for depth */
-  background-image: 
-    radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.05) 0%, transparent 50%),
-    radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
   color: var(--text-primary);
   font-family: 'Outfit', 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
@@ -80,6 +81,11 @@ body {
 
 .page-wrapper {
   min-height: 100dvh;
+  /* 装飾はここまで。画面端・overscroll・ブラウザーUI へは伸ばさない */
+  background-image:
+    radial-gradient(circle at 0% 0%, rgba(59, 130, 246, 0.05) 0%, transparent 50%),
+    radial-gradient(circle at 100% 100%, rgba(16, 185, 129, 0.05) 0%, transparent 50%);
+  background-attachment: scroll;
 }
 
 /* Base Styles */

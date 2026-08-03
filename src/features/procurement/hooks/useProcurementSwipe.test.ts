@@ -92,12 +92,14 @@ vi.mock("next/navigation", () => ({
   useRouter: () => mocks.router,
 }));
 
-vi.mock("@/components/staff-section-tabs-events", () => ({
-  STAFF_SECTION_SWIPE_COMMIT_DISTANCE_PX: 40,
-  dispatchStaffSectionSwipeEnd: mocks.dispatchSwipeEnd,
-  dispatchStaffSectionSwipeProgress: mocks.dispatchSwipeProgress,
-  shouldIgnoreSwipeStart: () => false,
-}));
+vi.mock("@/components/staff-section-tabs-events", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/components/staff-section-tabs-events")>();
+  return {
+    ...actual,
+    dispatchStaffSectionSwipeEnd: mocks.dispatchSwipeEnd,
+    dispatchStaffSectionSwipeProgress: mocks.dispatchSwipeProgress,
+  };
+});
 
 function ProcurementSwipeHarness({ mode }: { mode: ProcurementMode }) {
   useProcurementSwipe(mode);

@@ -198,23 +198,43 @@ export default function StaffSectionTabs({
   const renderedIndicatorPosition = activeIndex >= 0 && tabCount > 0 ? indicatorPosition : null;
 
   return (
+    /*
+      ヘッダーと同一面として扱う（境界線を持たない）。
+      z-index 20 は StaffShell の 10px fade（z-index 19）を覆うためのもの。
+      これでヘッダーとタブ帯の間に二重の境界表現が生まれない。
+    */
     <nav
       aria-label={ariaLabel}
+      data-staff-swipe-surface="tabs"
       style={{
-        padding: "12px 16px",
-        background: "rgba(255,255,255,0.8)",
-        backdropFilter: "blur(12px)",
-        borderBottom: "1px solid #e2e8f0",
-        zIndex: 10,
+        position: "relative",
+        padding: "10px 16px 12px",
+        background: "rgba(252,253,255,0.78)",
+        backdropFilter: "blur(20px) saturate(180%)",
+        WebkitBackdropFilter: "blur(20px) saturate(180%)",
+        zIndex: 20,
         flexShrink: 0,
       }}
     >
+      {/* 硬い1px線の代わりに短いgradient fadeで奥行きを出す。レイアウト高さは増やさない */}
+      <div
+        aria-hidden="true"
+        style={{
+          position: "absolute",
+          top: "100%",
+          left: 0,
+          right: 0,
+          height: 10,
+          pointerEvents: "none",
+          background: "linear-gradient(180deg, rgba(15,23,42,0.055), rgba(15,23,42,0))",
+        }}
+      />
         <div
         style={{
           display: "flex",
           position: "relative",
           gap: 6,
-          background: "#f1f5f9",
+          background: "rgba(15,23,42,0.043)",
           borderRadius: 12,
           padding: 4,
         }}
@@ -230,7 +250,7 @@ export default function StaffSectionTabs({
               width: `calc(${100 / tabCount}% - ${(6 * (tabCount - 1)) / tabCount}px)`,
               borderRadius: 10,
               background: "#fff",
-              boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
+              boxShadow: "0 1px 3px rgba(15,23,42,0.10)",
               transform: `translateX(calc(${renderedIndicatorPosition * 100}% + ${renderedIndicatorPosition * 6}px))`,
               transition: animateIndicator
                 ? "transform 220ms cubic-bezier(0.4, 0, 0.2, 1)"
@@ -271,7 +291,7 @@ export default function StaffSectionTabs({
                 textAlign: "center",
                 overflowWrap: "anywhere",
                 transition: "all 0.2s cubic-bezier(0.4, 0, 0.2, 1)",
-                boxShadow: showFallbackActive ? "0 2px 8px rgba(0,0,0,0.06)" : "none",
+                boxShadow: showFallbackActive ? "0 1px 3px rgba(15,23,42,0.10)" : "none",
               }}
             >
               <Icon size={iconSize} />

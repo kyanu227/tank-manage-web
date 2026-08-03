@@ -115,6 +115,41 @@ export function formatStaffJpy(
   }).format(value);
 }
 
+/**
+ * role code / 旧日本語 role 値の表示ラベル。
+ * staff shell（menu）と mypage が同じ表記を使うため、共有 display boundary に置く。
+ */
+export const STAFF_ROLE_LABELS = {
+  administrator: { ja: "管理者", en: "Administrator" },
+  assistantAdministrator: { ja: "準管理者", en: "Assistant administrator" },
+  staff: { ja: "一般", en: "Staff" },
+  unknown: { ja: "不明", en: "Unknown role" },
+} satisfies Record<string, LocalizedText>;
+
+export function getStaffRoleDisplayLabel(
+  value: string,
+  locale: Locale = DEFAULT_LOCALE,
+): string {
+  if (locale === "ja") return value;
+  if (value === "admin" || value === "管理者") return STAFF_ROLE_LABELS.administrator[locale];
+  if (value === "準管理者") return STAFF_ROLE_LABELS.assistantAdministrator[locale];
+  if (value === "worker" || value === "一般") return STAFF_ROLE_LABELS.staff[locale];
+  return STAFF_ROLE_LABELS.unknown[locale];
+}
+
+const LOCALE_OPTION_LABELS: Readonly<Record<Locale, LocalizedText>> = {
+  ja: { ja: "日本語", en: "Japanese" },
+  en: { ja: "English", en: "English" },
+};
+
+/** 言語プルダウンの選択肢ラベル。value = 対象locale、uiLocale = 表示中のlocale */
+export function getLocaleOptionLabel(
+  value: Locale,
+  uiLocale: Locale = DEFAULT_LOCALE,
+): string {
+  return LOCALE_OPTION_LABELS[value][uiLocale];
+}
+
 export function getStaffGenericErrorMessage(
   locale: Locale = DEFAULT_LOCALE,
 ): string {

@@ -9,8 +9,10 @@ export default function manifest(): MetadataRoute.Manifest {
     description: "ダイビングタンクのレンタル管理システム",
     start_url: "/staff",
     display: "standalone",
-    background_color: "#F8FBFF",
-    theme_color: "#28C7D9",
+    // background_color = アプリ基底面（--bg-primary）、theme_color = ヘッダー背面。
+    // 起動時に別色の flash が出ないようにするため
+    background_color: "#f4f6fa",
+    theme_color: "#fafbfd",
     icons: [
       {
         src: "/manifest-icon-192.png",

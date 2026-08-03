@@ -152,6 +152,7 @@ export default function QuickSelect({
   return (
     <div 
       ref={containerRef}
+      data-swipe-ignore="true"
       style={{ position: "relative", width: "100%", userSelect: "none", WebkitUserSelect: "none" }}
       onTouchStart={handleTouchStart}
       onTouchMove={handleTouchMove}

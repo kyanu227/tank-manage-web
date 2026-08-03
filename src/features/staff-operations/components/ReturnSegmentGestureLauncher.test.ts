@@ -50,6 +50,8 @@ describe("ReturnSegmentGestureLauncher static presentation", () => {
       }),
     );
 
+    expect(html).toContain('data-swipe-ignore="true"');
+
     expect(html).toContain("aria-hidden=\"true\"");
     expect(html).toContain("Normal returns: 1 customer / 1 tank");
     expect(html).toContain("Pending return tags: 2 customers / 3 tanks");

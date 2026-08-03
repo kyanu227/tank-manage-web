@@ -195,6 +195,7 @@ export default function ReturnSegmentGestureLauncher({
   return (
     <div
       ref={rootRef}
+      data-swipe-ignore="true"
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

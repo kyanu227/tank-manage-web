@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useRef } from "react";
 import { Send, CheckCircle2, Loader2, X } from "lucide-react";
 import { tryParseTankId } from "@/lib/tank-id";
 import TankIdInput from "@/components/TankIdInput";
@@ -38,16 +38,8 @@ export default function DamageReportPage() {
   const [result, setResult] = useState<{ success: boolean; message: string } | null>(null);
   const successTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
-  // DrumRoll 操作中にページ全体へスクロールが逃げないよう、操作画面中だけロックする。
-  useEffect(() => {
-    const prev = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
-    document.documentElement.style.overflow = "hidden";
-    return () => {
-      document.body.style.overflow = prev;
-      document.documentElement.style.overflow = "";
-    };
-  }, []);
+  // ページスクロールの禁止は staff shell の viewport policy が持つ
+  // （lib/staff-viewport-policy）。ここでは何もしない。
 
   const handleCommit = (rawTankId: string) => {
     const tankIdResult = tryParseTankId(rawTankId);

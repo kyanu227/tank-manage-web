@@ -99,7 +99,10 @@ export default function TankIdInput({
         {headerSlot}
 
         {/* OK入力ボタン（上部） */}
-        <div style={{ padding: "16px 16px 0", flexShrink: 0 }}>
+        <div
+          data-staff-swipe-surface="confirm"
+          style={{ padding: "16px 16px 0", flexShrink: 0 }}
+        >
           <button
             type="button"
             onClick={handleOkClick}

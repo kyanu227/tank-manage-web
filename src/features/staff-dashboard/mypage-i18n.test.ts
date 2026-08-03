@@ -7,8 +7,6 @@ import {
   formatRecentWorkTitle,
   formatStaffProfileName,
   formatStaffProfileRank,
-  getLocaleOptionLabel,
-  getStaffRoleDisplayLabel,
 } from "./mypage-i18n";
 
 const JAPANESE_TEXT = /[\u3040-\u30ff\u3400-\u9fff]/u;
@@ -20,20 +18,9 @@ describe("staff my-page i18n", () => {
     }
   });
 
-  it("uses the UI locale for language option labels", () => {
-    expect(getLocaleOptionLabel("ja", "ja")).toBe("日本語");
-    expect(getLocaleOptionLabel("ja", "en")).toBe("Japanese");
-    expect(getLocaleOptionLabel("en", "ja")).toBe("English");
-  });
-
-  it("maps canonical roles for English display and hides unknown system roles", () => {
-    expect(getStaffRoleDisplayLabel("管理者", "en")).toBe("Administrator");
-    expect(getStaffRoleDisplayLabel("準管理者", "en")).toBe("Assistant administrator");
-    expect(getStaffRoleDisplayLabel("worker", "en")).toBe("Staff");
-    expect(getStaffRoleDisplayLabel("未知権限", "en")).toBe("Unknown role");
-    expect(getStaffRoleDisplayLabel("admin", "ja")).toBe("admin");
-    expect(getStaffRoleDisplayLabel("worker", "ja")).toBe("worker");
+  it("builds the profile description from the shared role label", () => {
     expect(formatProfileDescription("admin", "Gold", "en")).toBe("Administrator / Rank: Gold");
+    expect(formatProfileDescription("", "", "en")).toBe("Role not set / Rank not set");
   });
 
   it("localizes only generated staff profile fallbacks", () => {

@@ -6,9 +6,11 @@ import {
   formatStaffJpy,
   formatStaffShortDateTime,
   formatStaffTankCount,
+  getLocaleOptionLabel,
   getLocalizedText,
   getStaffGenericErrorMessage,
   getStaffLocationLabel,
+  getStaffRoleDisplayLabel,
   getStaffTankUnit,
 } from "./staff-display";
 
@@ -72,6 +74,22 @@ describe("staff display mapping", () => {
   it("localizes JPY display without changing the amount", () => {
     expect(formatStaffJpy(1234, "ja")).toContain("1,234");
     expect(formatStaffJpy(1234, "en")).toContain("1,234");
+  });
+
+  it("uses the UI locale for language option labels", () => {
+    expect(getLocaleOptionLabel("ja", "ja")).toBe("日本語");
+    expect(getLocaleOptionLabel("ja", "en")).toBe("Japanese");
+    expect(getLocaleOptionLabel("en", "ja")).toBe("English");
+    expect(getLocaleOptionLabel("en", "en")).toBe("English");
+  });
+
+  it("maps canonical roles for English display and hides unknown system roles", () => {
+    expect(getStaffRoleDisplayLabel("管理者", "en")).toBe("Administrator");
+    expect(getStaffRoleDisplayLabel("準管理者", "en")).toBe("Assistant administrator");
+    expect(getStaffRoleDisplayLabel("worker", "en")).toBe("Staff");
+    expect(getStaffRoleDisplayLabel("未知権限", "en")).toBe("Unknown role");
+    expect(getStaffRoleDisplayLabel("admin", "ja")).toBe("admin");
+    expect(getStaffRoleDisplayLabel("worker", "ja")).toBe("worker");
   });
 
   it("uses a non-sensitive generic error in both locales", () => {
