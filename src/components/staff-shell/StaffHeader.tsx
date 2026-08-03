@@ -101,7 +101,13 @@ export default function StaffHeader({
         aria-expanded={menuOpen}
         aria-label={getStaffShellText(menuOpen ? "closeMenu" : "openMenu", locale)}
         onClick={onToggleMenu}
-        data-swipe-ignore="true"
+        /*
+          Chevron 自身も下スワイプの起点にする。
+          Safari では上部 safe-area が 0 になり、Chevron の上に残る帯は
+          padding の 6px しかないため、ここを ignore にすると
+          「Chevron のあたりから払う」操作が事実上できなくなる。
+          swipe が commit した場合の click は gesture 側が 1 回だけ抑止する。
+        */
       >
         <span className={`${styles.chevron}${menuOpen ? ` ${styles.chevronUp}` : ""}`}>
           <ChevronDown size={20} aria-hidden="true" />
