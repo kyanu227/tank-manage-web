@@ -358,7 +358,7 @@ function OperationQueue({
   );
 
   return (
-    <div className={styles.queue}>
+    <div className={styles.queue} data-empty={queueLength === 0}>
       <div className={styles.queueLegend}>
         <span className={styles.queueTitle}>
           <span className={styles.queueTitleText}>{getStaffOperationText("queue", locale)}</span>
@@ -443,28 +443,31 @@ function OperationQueue({
         )}
       </div>
 
-      <div className={styles.queueSubmitDock}>
-        <button
-          type="button"
-          data-swipe-ignore="true"
-          aria-busy={submitting}
-          onClick={onSubmit}
-          disabled={submitting || validCount === 0}
-          className={styles.queueSubmit}
-        >
-          {submitting
-            ? <Loader2 size={17} style={{ animation: "spin 1s linear infinite" }} />
-            : <Send size={17} strokeWidth={2.2} />}
-          <span>
-            {getStaffOperationText("executeOperation", locale, {
-              countLabel: formatStaffCount(validCount, locale, {
-                ja: "件", enSingular: "tank", enPlural: "tanks",
-              }),
-              operation: operationLabel,
-            })}
-          </span>
-        </button>
-      </div>
+      {/* リストが空のうちは実行ボタンごと存在しない */}
+      {queueLength > 0 && (
+        <div className={styles.queueSubmitDock}>
+          <button
+            type="button"
+            data-swipe-ignore="true"
+            aria-busy={submitting}
+            onClick={onSubmit}
+            disabled={submitting || validCount === 0}
+            className={styles.queueSubmit}
+          >
+            {submitting
+              ? <Loader2 size={17} style={{ animation: "spin 1s linear infinite" }} />
+              : <Send size={17} strokeWidth={2.2} />}
+            <span>
+              {getStaffOperationText("executeOperation", locale, {
+                countLabel: formatStaffCount(validCount, locale, {
+                  ja: "件", enSingular: "tank", enPlural: "tanks",
+                }),
+                operation: operationLabel,
+              })}
+            </span>
+          </button>
+        </div>
+      )}
     </div>
   );
 }

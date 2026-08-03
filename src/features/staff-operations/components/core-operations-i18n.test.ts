@@ -200,9 +200,10 @@ describe("core staff operation screens", () => {
     }));
 
     expect(emptyHtml).not.toContain("Clear all");
-    // 0 件でも枠・legend・送信位置は維持する
+    // 0 件では実行ボタンごと存在しない。枠と legend は維持する
     expect(emptyHtml).toContain("Submission list");
-    expect(emptyHtml).toContain("Run Fill for 0 tanks");
+    expect(emptyHtml).not.toContain("Run Fill for");
+    expect(filledHtml).toContain("Run Fill for 1 tank");
     expect(filledHtml).toContain("Clear all");
     expect(filledHtml).toContain('aria-label="Clear the submission list (tap again to confirm)"');
     // 送信中は全削除も送信も実行できない

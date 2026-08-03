@@ -24,16 +24,14 @@
   --ops-submit: 48px;
 
   /*
-    基底面は白。階層は「白を重ねる」のではなく
-    「わずかに沈ませる（グレー）／白のまま浮かせる」で作る。
-      沈み: Operation Queue の内側・DrumRoll
-      浮き: 行・Operation Context・Commit Display（＝白のまま）
+    基底面は白。面の塗り分けはしない（送信リストの内側も DrumRoll も白のまま）。
+    まとまりは細いアウトラインと legend、境界はごく弱い内側影だけが示す。
   */
   --ops-plane: #ffffff;
-  --ops-queue-fill: rgba(15, 23, 42, 0.022);
+  --ops-queue-fill: #ffffff;
   --ops-row-fill: #ffffff;
   --ops-context-fill: #ffffff;
-  --ops-drum-fill: rgba(15, 23, 42, 0.018);
+  --ops-drum-fill: #ffffff;
   --ops-outline: rgba(15, 23, 42, 0.085);
 
   /* 文字 */
@@ -434,6 +432,11 @@
   -webkit-overflow-scrolling: touch;
 }
 
+/* 0 件では実行ボタンごと存在しないので、その分の下端余白も要らない */
+.queue[data-empty="true"] .queueScroll {
+  padding-bottom: 16px;
+}
+
 .queueEmpty {
   display: flex;
   flex: 1;
@@ -613,7 +616,10 @@
   );
 }
 
-/* 塗りはこのボタンだけ */
+/*
+  A-OK ディスプレイと同じ言語の面。ベタ塗りにはせず、
+  accent の淡いトーンと文字色で「押せる」ことを示す。
+*/
 .queueSubmit {
   display: flex;
   align-items: center;
@@ -622,23 +628,26 @@
   width: 100%;
   height: var(--ops-submit);
   border: none;
-  border-radius: 13px;
-  background: linear-gradient(180deg, var(--ops-accent) 0%, var(--ops-accent-mid) 100%);
-  color: #fff;
+  border-radius: 16px;
+  background: linear-gradient(
+    168deg,
+    #ffffff 0%,
+    rgba(var(--ops-accent-rgb), 0.11) 52%,
+    rgba(var(--ops-accent-rgb), 0.26) 100%
+  );
+  color: var(--ops-accent-deep);
   font-family: inherit;
   font-size: 15px;
   font-weight: 800;
   letter-spacing: -0.01em;
   pointer-events: auto;
   cursor: pointer;
-  box-shadow:
-    0 12px 24px -12px rgba(var(--ops-accent-rgb), 0.95),
-    0 1px 2px rgba(15, 23, 42, 0.1);
+  box-shadow: 0 12px 22px -20px rgba(var(--ops-accent-rgb), 0.9);
 }
 
 .queueSubmit:disabled {
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.14) 0%, rgba(15, 23, 42, 0.11) 100%);
-  color: rgba(15, 23, 42, 0.38);
+  background: linear-gradient(168deg, #ffffff 0%, #eef1f6 100%);
+  color: var(--ops-text-muted);
   box-shadow: none;
   cursor: not-allowed;
 }
