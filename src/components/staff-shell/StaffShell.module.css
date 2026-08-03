@@ -13,6 +13,15 @@
   --staff-chrome-solid: #fafbfd;
   --staff-sheet: rgba(255, 255, 255, 0.8);
   --staff-sheet-solid: #fbfcfe;
+  /*
+    カードは「塗り」ではなく「影」で囲いを示す。
+    線を増やさないため border は持たず、面もごく僅かに持ち上げるだけにする。
+  */
+  --staff-card: rgba(255, 255, 255, 0.5);
+  --staff-card-shadow:
+    0 6px 16px -6px rgba(15, 23, 42, 0.16),
+    0 2px 5px -2px rgba(15, 23, 42, 0.08);
+  --staff-card-radius: 18px;
   --staff-backdrop: #0f172a;
 
   /* ── text ── */
@@ -322,13 +331,14 @@
   padding: 6px 4px 6px 16px;
 }
 
+/* 器が明るくなったぶん、ラベルは面ではなく文字側で沈める */
 .sheetTitle {
   flex: 1;
   min-width: 0;
   font-size: 10.5px;
   font-weight: 800;
   letter-spacing: 0.13em;
-  color: #c3cad6;
+  color: rgba(15, 23, 42, 0.34);
 }
 
 .sheetClose {
@@ -346,11 +356,15 @@
   -webkit-tap-highlight-color: transparent;
 }
 
-/* ── account: 枠もカードもアイコン枠も持たず、面に直接置く ── */
+/* ── account: 名前・言語設定を1枚のカードに束ねる ── */
 
 .account {
   flex-shrink: 0;
-  padding: 2px 16px 14px;
+  margin: 2px 12px 10px;
+  padding: 14px 16px;
+  border-radius: var(--staff-card-radius);
+  background: var(--staff-card);
+  box-shadow: var(--staff-card-shadow);
 }
 
 .accountRow {
@@ -488,18 +502,30 @@
   color: #dc2626;
 }
 
-/* 区切りは全幅の線ではなく、右へ消える hairline */
+/* カードで区切るようになったため hairline は使わない（DOM は残す） */
 .divider {
-  height: 1px;
-  margin: 0 16px;
-  flex-shrink: 0;
-  background: linear-gradient(90deg, rgba(15, 23, 42, 0.1), rgba(15, 23, 42, 0));
+  display: none;
 }
 
 /* ── navigation: 中間階層。行の塗り分けはしない ── */
 
+/*
+  遷移先と主要操作を1つの箱として束ねる。
+  account とは別の箱として読ませるが、囲いは影だけで示す。
+*/
+.menuCard {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  margin: 0 12px;
+  padding: 6px;
+  border-radius: var(--staff-card-radius);
+  background: var(--staff-card);
+  box-shadow: var(--staff-card-shadow);
+}
+
 .nav {
-  padding: 8px;
   min-height: 0;
   overflow-y: auto;
   overscroll-behavior: contain;
@@ -551,11 +577,10 @@
 
 /* ── primary actions: 親指ゾーン。僅かに沈んだ面に置く ── */
 
+/* 箱の中の下段。ここも線を持たず、塗りの重さと間隔だけで階層を作る */
 .primary {
-  margin-top: auto;
   flex-shrink: 0;
-  padding: 12px 14px 6px;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0.015), rgba(15, 23, 42, 0.05));
+  padding: 12px 8px 8px;
 }
 
 /*
@@ -613,8 +638,9 @@
   padding: 0 16px;
   white-space: nowrap;
   border-radius: 14px;
-  background: #fff;
-  border: 1px solid #e2e8f0;
+  /* 箱の中では border を持たない。淡い塗りだけで塗り潰しの下位を示す */
+  background: rgba(15, 23, 42, 0.05);
+  border: none;
   color: #334155;
   text-decoration: none;
   font-size: 14.5px;
@@ -629,7 +655,6 @@
 
 .primarySoft[aria-current="page"] {
   background: var(--staff-accent-bg);
-  border-color: var(--staff-accent-border);
   color: var(--staff-accent);
   font-weight: 700;
 }

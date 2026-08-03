@@ -91,21 +91,25 @@ export default function StaffMenuSheet({
           />
         </div>
 
-        <div className={styles.divider} aria-hidden="true" />
+        {/* 遷移先と主要操作を1つの箱として束ねる（線ではなく影で囲いを示す） */}
+        <div className={styles.menuCard}>
+          <StaffMenuNav
+            items={navItems}
+            locale={locale}
+            onNavigate={onNavigate}
+            navRef={scrollRegionRef}
+          />
 
-        <StaffMenuNav
-          items={navItems}
-          locale={locale}
-          onNavigate={onNavigate}
-          navRef={scrollRegionRef}
-        />
+          <StaffMenuPrimaryActions
+            locale={locale}
+            activePrimary={activePrimary}
+            pendingOrderCount={pendingOrderCount}
+            onNavigate={onNavigate}
+          />
+        </div>
 
-        <StaffMenuPrimaryActions
-          locale={locale}
-          activePrimary={activePrimary}
-          pendingOrderCount={pendingOrderCount}
-          onNavigate={onNavigate}
-        />
+        {/* 上スワイプで閉じられることの手がかり。箱の外に置く */}
+        <div className={styles.grabber} aria-hidden="true" />
       </div>
     </>
   );

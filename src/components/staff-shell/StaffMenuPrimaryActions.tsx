@@ -61,8 +61,6 @@ export default function StaffMenuPrimaryActions({
         </span>
         {STAFF_SECTION_LABELS.inhouse[locale]}
       </Link>
-
-      <div className={styles.grabber} aria-hidden="true" />
     </div>
   );
 }
