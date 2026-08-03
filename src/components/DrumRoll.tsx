@@ -358,10 +358,13 @@ export default function DrumRoll<T extends string>({
         width,
         height: "100%",
         minHeight: 0,
-        background: isSoft ? "rgba(255, 255, 255, 0.42)" : "#fff",
+        background: isSoft ? "var(--ops-drum-fill, rgba(255, 255, 255, 0.24))" : "#fff",
         ...(isSoft
-          /* 縦線ではなく内側の淡い影だけで奥行きを作る */
-          ? { boxShadow: "inset 14px 0 20px -16px rgba(15, 23, 42, 0.30)" }
+          /*
+            縦線ではなく内側の淡い影だけで奥行きを作る。
+            境界としてはっきり読めてしまわない濃さに留める。
+          */
+          ? { boxShadow: "inset 18px 0 28px -24px rgba(15, 23, 42, 0.16)" }
           : { borderLeft: "1px solid #e2e8f0" }),
         display: "flex",
         flexDirection: "column",

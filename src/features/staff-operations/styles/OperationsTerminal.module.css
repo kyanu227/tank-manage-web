@@ -28,6 +28,7 @@
   --ops-queue-fill: rgba(255, 255, 255, 0.36);
   --ops-row-fill: rgba(255, 255, 255, 0.72);
   --ops-context-fill: rgba(255, 255, 255, 0.82);
+  --ops-drum-fill: rgba(255, 255, 255, 0.24);
   --ops-outline: rgba(15, 23, 42, 0.085);
 
   /* 文字 */
@@ -273,12 +274,12 @@
   color: #065f46;
 }
 
+/* prefix と番号は同じ色。mode の accent は面のトーンだけが持つ */
 .commitPrefix {
   font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: var(--ops-id);
   font-weight: 800;
   line-height: 1;
-  color: var(--ops-accent-deep);
 }
 
 .commitSeparator {
@@ -703,7 +704,8 @@
 
 .returnScroll {
   height: 100%;
-  padding: 2px var(--ops-gutter) 24px;
+  /* タブ帯とは 12px 空ける。詰めすぎるとタブに貼り付いて見える */
+  padding: 12px var(--ops-gutter) 24px;
   overflow-y: auto;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;

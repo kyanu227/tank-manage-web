@@ -67,7 +67,7 @@ accent は既存 `MODE_CONFIG` の色をそのまま継承し、CSS 側では
 |---|---|
 | 面（base） | shell の `--staff-base: #f4f6fa` をそのまま使う。操作画面は独自の背景色を敷かない |
 | 沈み | Workspace 下部 `rgba(15,23,42,0) → .032`（縦 1 本のみ） |
-| 面（弱→強） | Queue 内 `rgba(255,255,255,.36)` / 行 `.72` / Context `.82` / Drum `.42` |
+| 面（弱→強） | Queue 内 `rgba(255,255,255,.36)` / 行 `.72` / Context `.82` / Drum `.24`（`--ops-drum-fill`） |
 | 状態色 | 注意 `#f0a93b` / `#b45309` ・ 無効 `#ef6b6b` / `#b91c1c` ・ 追加直後 `#e6f7ef → #cdeedf` |
 | 文字 | primary `#0f172a` / body `#475569` / sub `#8494ab` / muted `#a8b2c1` / faint `#cbd2dc` |
 | typography | ID・件数は monospace（ID 34 / 行 17 / 件数 12）。UI は既存フォント（見出し 11.5–13.5/800、本文 10.5–13/600–800） |
@@ -113,7 +113,8 @@ accent は既存 `MODE_CONFIG` の色をそのまま継承し、CSS 側では
 | `added` | リスト追加直後 | 緑面 ＋ ID の後ろにチェック |
 | `disabled` | マスタ取得中 / 送信中 | 灰面。取得中のみ文言を持つ（`role="status"`） |
 
-- 読み取り優先度は 番号 `#0f172a` ＞ prefix accent-deep ＞ 区切り `–`
+- prefix と番号は **同じ色**（`#0f172a`）。mode の accent は面のトーンだけが持つ
+  （正本は prefix を accent-deep にしていたが、2 色に割れて読みにくいため利用者判断で統一）
 - 既存の下スワイプ契約（`data-staff-swipe-surface="confirm"`）は wrapper に維持。
   戻るボタンは `data-swipe-ignore="true"` のままで、確定と競合しない
 
@@ -139,6 +140,7 @@ accent は既存 `MODE_CONFIG` の色をそのまま継承し、CSS 側では
 ### Operation Context
 
 - 貸出: `[building icon][貸出先][名称][chevron]` の 1 行。
+  **初期状態は未選択**（先頭の貸出先を自動で選ばない）。
   未選択は muted で「貸出先を選択してください」/ “Please select a destination”。
   **エラー色は使わない**。未選択時はラベルを畳み、文が切れないようにする
 - 返却: 同じ 38px に返却タグ 3 連。色＋アイコン＋文字の 3 重指定。
@@ -147,7 +149,8 @@ accent は既存 `MODE_CONFIG` の色をそのまま継承し、CSS 側では
 
 ### Input Method Pane（DrumRoll / `variant="soft"`）
 
-- 縦線を廃止し、面 `rgba(255,255,255,.42)` ＋ `inset 14px 0 20px -16px rgba(15,23,42,.30)` のみ
+- 縦線を廃止し、面 `rgba(255,255,255,.24)` ＋ `inset 18px 0 28px -24px rgba(15,23,42,.16)` のみ。
+  正本の `.42` / `.30` は境界としてはっきり読めてしまうため、利用者判断で一段弱めた
 - 選択枠を廃止。pane 外へ 10px はみ出す楕円 radial-gradient（accent 26% → 13% → 4% → 0%）
 - 未選択時は accent ではなく中立 `rgba(15,23,42,.07)` でにじませる
 - 文字は選択 27px/800（accent を一段深くした色）、非選択 21px/700。**scale 変形は使わない**
