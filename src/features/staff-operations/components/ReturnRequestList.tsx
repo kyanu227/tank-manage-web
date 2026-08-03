@@ -123,7 +123,7 @@ export default function ReturnRequestList({
                 key={group.customerId}
                 onClick={() => openReturnTagGroup(group)}
                 style={{
-                  background: "rgba(255,255,255,0.74)",
+                  background: "#ffffff",
                   border: "none",
                   borderRadius: 14,
                   padding: 0,

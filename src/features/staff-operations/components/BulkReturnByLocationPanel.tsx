@@ -422,7 +422,7 @@ export default function BulkReturnByLocationPanel({
                     const statusLabel = meta?.pool === "long_term" ? BULK_RETURN_TEXT.longTermStatus[staffLocale] : BULK_RETURN_TEXT.lentStatus[staffLocale];
 
                     return (
-                      <div key={groupKey} style={{ background: "rgba(255,255,255,0.74)", borderRadius: 14, overflow: "hidden", boxShadow: section.pool === "today_lent" ? `inset 0 0 0 1px ${section.color}33, 0 8px 22px -16px ${section.color}55` : "inset 0 0 0 1px rgba(15,23,42,0.07)" }}>
+                      <div key={groupKey} style={{ background: "#ffffff", borderRadius: 14, overflow: "hidden", boxShadow: section.pool === "today_lent" ? `inset 0 0 0 1px ${section.color}33, 0 8px 22px -16px ${section.color}55` : "inset 0 0 0 1px rgba(15,23,42,0.07)" }}>
                         <div
                           style={{
                             padding: "14px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12,

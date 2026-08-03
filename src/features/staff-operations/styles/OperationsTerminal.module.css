@@ -23,12 +23,17 @@
   --ops-context: 38px;
   --ops-submit: 48px;
 
-  /* 面（弱→強）。白カードに変換せず、透過の差だけで階層を作る */
-  --ops-plane: #f4f6fa;
-  --ops-queue-fill: rgba(255, 255, 255, 0.36);
-  --ops-row-fill: rgba(255, 255, 255, 0.72);
-  --ops-context-fill: rgba(255, 255, 255, 0.82);
-  --ops-drum-fill: rgba(255, 255, 255, 0.24);
+  /*
+    基底面は白。階層は「白を重ねる」のではなく
+    「わずかに沈ませる（グレー）／白のまま浮かせる」で作る。
+      沈み: Operation Queue の内側・DrumRoll
+      浮き: 行・Operation Context・Commit Display（＝白のまま）
+  */
+  --ops-plane: #ffffff;
+  --ops-queue-fill: rgba(15, 23, 42, 0.022);
+  --ops-row-fill: #ffffff;
+  --ops-context-fill: #ffffff;
+  --ops-drum-fill: rgba(15, 23, 42, 0.018);
   --ops-outline: rgba(15, 23, 42, 0.085);
 
   /* 文字 */
@@ -104,10 +109,9 @@
   overflow: hidden;
   position: relative;
   /*
-    面は 1 枚。上端は shell の base(#f4f6fa) と同値のままで、
-    下端だけをわずかに沈ませる。白帯・灰帯・パステルの塗り分けは作らない。
+    面は 1 枚の白。下端に沈みを置くと footer 帯として読めてしまうので置かない。
+    階層は Queue の内側と DrumRoll の沈みだけが持つ。
   */
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0) 58%, rgba(15, 23, 42, 0.032) 100%);
 }
 
 .commandPane {
@@ -189,8 +193,8 @@
   height: 44px;
   border: none;
   border-radius: 13px;
-  background: rgba(255, 255, 255, 0.62);
-  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(15, 23, 42, 0.1);
   color: var(--ops-text-body);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
@@ -463,11 +467,11 @@
 }
 
 .queueItem[data-tone="warn"] {
-  background: linear-gradient(90deg, rgba(254, 247, 232, 0.95), rgba(255, 255, 255, 0.72) 70%);
+  background: linear-gradient(90deg, #fef7e8, #ffffff 70%);
 }
 
 .queueItem[data-tone="bad"] {
-  background: linear-gradient(90deg, rgba(254, 238, 238, 0.95), rgba(255, 255, 255, 0.72) 70%);
+  background: linear-gradient(90deg, #feeeee, #ffffff 70%);
 }
 
 /* 区分は 5×26px の色ピルだけで示す（枠・影を持たない） */
@@ -603,9 +607,9 @@
   pointer-events: none;
   background: linear-gradient(
     180deg,
-    rgba(244, 246, 250, 0) 0%,
-    rgba(244, 246, 250, 0.72) 38%,
-    rgba(244, 246, 250, 0.94) 100%
+    rgba(255, 255, 255, 0) 0%,
+    rgba(255, 255, 255, 0.82) 38%,
+    #ffffff 100%
   );
 }
 
@@ -699,7 +703,6 @@
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  background: linear-gradient(180deg, rgba(15, 23, 42, 0) 58%, rgba(15, 23, 42, 0.032) 100%);
 }
 
 .returnScroll {
@@ -722,8 +725,8 @@
   padding: 0 12px;
   border: none;
   border-radius: 12px;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: inset 0 0 0 1px rgba(var(--ops-accent-rgb), 0.22);
+  background: #ffffff;
+  box-shadow: inset 0 0 0 1px rgba(var(--ops-accent-rgb), 0.26);
   color: var(--ops-accent-deep);
   font-family: inherit;
   font-size: 13px;

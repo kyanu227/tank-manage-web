@@ -387,7 +387,7 @@ export default function DrumRoll<T extends string>({
                   height: 36,
                   zIndex: 2,
                   pointerEvents: "none",
-                  background: "linear-gradient(180deg, rgba(244,246,250,0.94), rgba(244,246,250,0))",
+                  background: "linear-gradient(180deg, var(--ops-plane, #fff) 0%, transparent 100%)",
                 }}
               />
               <div

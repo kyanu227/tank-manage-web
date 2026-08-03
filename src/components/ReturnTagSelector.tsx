@@ -156,10 +156,10 @@ export default function ReturnTagSelector<T extends ReturnTagValue = ReturnTagVa
                   padding: "0 5px",
                   borderRadius: 11,
                   border: "none",
-                  background: active ? style.background : "rgba(255,255,255,0.62)",
+                  background: active ? style.background : "var(--ops-context-fill, #fff)",
                   boxShadow: active
                     ? `inset 0 0 0 1.5px ${style.border}`
-                    : "inset 0 0 0 1px rgba(15,23,42,0.09)",
+                    : "inset 0 0 0 1px rgba(15,23,42,0.11)",
                   color: active ? style.color : "#94a3b8",
                   fontFamily: "inherit",
                   fontSize: 11,

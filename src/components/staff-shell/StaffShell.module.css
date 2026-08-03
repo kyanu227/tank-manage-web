@@ -8,7 +8,12 @@
 
 .shell {
   /* ── surface ── */
-  --staff-base: #f4f6fa;
+  /*
+    基底面は白。上下 safe-area・overscroll・Safari の上下UIの裏まで
+    同じ白で続ける（globals.css の html/body と theme-color を合わせてある）。
+    階層は白の重ねではなく、わずかな沈み（グレー）で作る。
+  */
+  --staff-base: #ffffff;
   --staff-chrome: rgba(252, 253, 255, 0.78);
   --staff-chrome-solid: #fafbfd;
   /*

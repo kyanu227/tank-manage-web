@@ -30,7 +30,7 @@ export const viewport: Viewport = {
   viewportFit: "cover",
   // ヘッダー背面と一致する不透明色。透明色にすると
   // Safari の上下UIと safe-area の色が分断される
-  themeColor: "#fafbfd",
+  themeColor: "#ffffff",
 };
 
 export default function RootLayout({

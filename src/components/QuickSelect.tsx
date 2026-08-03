@@ -192,7 +192,7 @@ export default function QuickSelect({
           ? {
               /* 面の上に置く 1 行。上に線は置かず、操作可能であることは inset だけで示す */
               width: "100%", height: "100%", padding: "0 10px 0 12px", borderRadius: 11,
-              border: "none", background: "rgba(255,255,255,0.82)",
+              border: "none", background: "var(--ops-context-fill, #fff)",
               boxShadow: `inset 0 0 0 1px ${value ? `${color}42` : "rgba(15,23,42,0.09)"}`,
               color: value ? "#0f172a" : "#a8b2c1",
               fontFamily: "inherit", fontSize: 13, fontWeight: 700, textAlign: "left",

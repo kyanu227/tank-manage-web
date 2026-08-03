@@ -79,6 +79,17 @@ body {
   min-height: 100dvh;
 }
 
+/*
+  staff 画面だけ基底面を白にする。
+  ダイナミックアイランド／Safari の上下UIの裏・overscroll・safe-area まで
+  同じ白で続けるため、html と body の両方を合わせる（theme-color も #fff）。
+  admin / portal は従来の --bg-primary のまま。
+*/
+html:has([data-staff-shell]),
+body:has([data-staff-shell]) {
+  background-color: #ffffff;
+}
+
 .page-wrapper {
   min-height: 100dvh;
   /* 装飾はここまで。画面端・overscroll・ブラウザーUI へは伸ばさない */

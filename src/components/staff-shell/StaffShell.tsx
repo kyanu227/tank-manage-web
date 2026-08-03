@@ -27,7 +27,8 @@ export default function StaffShell({
   mainRef,
 }: StaffShellProps) {
   return (
-    <div lang={locale} className={styles.shell} data-viewport={viewportMode}>
+    /* data-staff-shell: html/body を staff の基底色（白）へ合わせるためのマーカー（globals.css） */
+    <div lang={locale} className={styles.shell} data-staff-shell="" data-viewport={viewportMode}>
       {header}
       <div className={styles.headerFade} data-scrolled={scrolled} aria-hidden="true" />
       {banner}
